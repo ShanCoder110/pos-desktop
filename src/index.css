@@ -1,0 +1,30 @@
+@import "tailwindcss";
+@import "./styles/pos-terminal.css";
+
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-urdu: "Noto Nastaliq Urdu", "Noto Naskh Arabic", serif;
+}
+
+#root {
+  height: 100%;
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+html,
+body {
+  font-family: "Inter", system-ui, sans-serif !important;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+.font-mono,
+.font-\[var\(--mono\)\] {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}

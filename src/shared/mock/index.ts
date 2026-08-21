@@ -1,0 +1,491 @@
+import type {
+  CreditSale,
+  Customer,
+  Employee,
+  Expense,
+  HeldBill,
+  Invoice,
+  Lot,
+  MoneyTxn,
+  Product,
+  ReorderLine,
+  RepairJob,
+  ReturnTicket,
+  Shop,
+  Supplier,
+} from "@/shared/types";
+
+export const shops: Shop[] = [
+  { id: "sh1", name: "Main counter", kind: "retail", city: "Lahore", isMain: true },
+  { id: "sh2", name: "Repair bench", kind: "repair", city: "Lahore", isMain: false },
+];
+
+export const employees: Employee[] = [
+  { id: "e1", name: "Usman", role: "Cashier", salary: 35000, paidThisMonth: 20000 },
+  { id: "e2", name: "Sana", role: "Counter", salary: 32000, paidThisMonth: 32000 },
+  { id: "e3", name: "Imran", role: "Repair", salary: 40000, paidThisMonth: 15000 },
+];
+
+export const customers: Customer[] = [
+  { id: "c0", name: "Walking", phone: "", balance: 0, isWalking: true },
+  { id: "c1", name: "Ahmed Khan", phone: "0300 1112233", balance: -6000, isWalking: false },
+  { id: "c2", name: "Fatima Bibi", phone: "0321 4455667", balance: 5000, isWalking: false },
+  { id: "c3", name: "Bilal Hardware", phone: "", balance: -500, isWalking: false },
+  { id: "c4", name: "Rashid Traders", phone: "0333 7788990", balance: 0, isWalking: false },
+];
+
+export const suppliers: Supplier[] = [
+  { id: "s1", name: "Ali Traders", phone: "042 1112223", payable: 18400 },
+  { id: "s2", name: "Bilal Cables", phone: "042 3344556", payable: 9200 },
+  { id: "s3", name: "Noor Lights", phone: "0301 5566778", payable: 0 },
+];
+
+export const products: Product[] = [
+  {
+    id: "p1",
+    sku: "W001",
+    name: "1.5mm copper wire",
+    unit: "m",
+    isLinear: true,
+    packQty: 90,
+    cost: 62,
+    min: 70,
+    wholesale: 74,
+    retail: 85,
+    warrantyDays: 0,
+    claims: 0,
+    damaged: 1,
+    stock: 42,
+  },
+  {
+    id: "p2",
+    sku: "W002",
+    name: "2.5mm copper wire",
+    unit: "m",
+    isLinear: true,
+    packQty: 90,
+    cost: 95,
+    min: 108,
+    wholesale: 115,
+    retail: 130,
+    warrantyDays: 0,
+    claims: 0,
+    damaged: 0,
+    stock: 18,
+  },
+  {
+    id: "p3",
+    sku: "F001",
+    name: "Ceiling fan 56\"",
+    unit: "pc",
+    isLinear: false,
+    packQty: null,
+    cost: 4200,
+    min: 4600,
+    wholesale: 4900,
+    retail: 5400,
+    warrantyDays: 365,
+    claims: 2,
+    damaged: 0,
+    stock: 7,
+  },
+  {
+    id: "p4",
+    sku: "L001",
+    name: "LED bulb 12W",
+    unit: "pc",
+    isLinear: false,
+    packQty: null,
+    cost: 180,
+    min: 210,
+    wholesale: 230,
+    retail: 280,
+    warrantyDays: 180,
+    claims: 4,
+    damaged: 1,
+    stock: 64,
+  },
+  {
+    id: "p5",
+    sku: "C001",
+    name: "Switch 10A",
+    unit: "pc",
+    isLinear: false,
+    packQty: null,
+    cost: 45,
+    min: 55,
+    wholesale: 62,
+    retail: 80,
+    warrantyDays: 90,
+    claims: 0,
+    damaged: 0,
+    stock: 120,
+  },
+  {
+    id: "p6",
+    sku: "C004",
+    name: "3-pin socket",
+    unit: "pc",
+    isLinear: false,
+    packQty: null,
+    cost: 70,
+    min: 85,
+    wholesale: 95,
+    retail: 120,
+    warrantyDays: 90,
+    claims: 0,
+    damaged: 0,
+    stock: 86,
+  },
+  {
+    id: "p7",
+    sku: "B001",
+    name: "Breaker 32A",
+    unit: "pc",
+    isLinear: false,
+    packQty: null,
+    cost: 780,
+    min: 890,
+    wholesale: 950,
+    retail: 1150,
+    warrantyDays: 365,
+    claims: 1,
+    damaged: 0,
+    stock: 11,
+  },
+];
+
+export const lots: Lot[] = [
+  {
+    id: "l1",
+    productId: "p1",
+    supplierId: "s1",
+    branchId: "sh1",
+    receivedOn: "2026-06-02",
+    qtyIn: 90,
+    qtyLeft: 2,
+    cost: 70,
+    min: 80,
+    wholesale: 86,
+    retail: 95,
+  },
+  {
+    id: "l2",
+    productId: "p1",
+    supplierId: "s2",
+    branchId: "sh1",
+    receivedOn: "2026-08-01",
+    qtyIn: 90,
+    qtyLeft: 40,
+    cost: 58,
+    min: 70,
+    wholesale: 74,
+    retail: 78,
+  },
+  {
+    id: "l3",
+    productId: "p3",
+    supplierId: "s3",
+    branchId: "sh1",
+    receivedOn: "2026-07-12",
+    qtyIn: 10,
+    qtyLeft: 7,
+    cost: 4200,
+    min: 4600,
+    wholesale: 4900,
+    retail: 5400,
+  },
+  {
+    id: "l4",
+    productId: "p4",
+    supplierId: "s3",
+    branchId: "sh1",
+    receivedOn: "2026-08-05",
+    qtyIn: 80,
+    qtyLeft: 64,
+    cost: 180,
+    min: 210,
+    wholesale: 230,
+    retail: 280,
+  },
+  {
+    id: "l5",
+    productId: "p5",
+    supplierId: "s1",
+    branchId: "sh1",
+    receivedOn: "2026-08-08",
+    qtyIn: 200,
+    qtyLeft: 120,
+    cost: 45,
+    min: 55,
+    wholesale: 62,
+    retail: 80,
+  },
+  {
+    id: "l6",
+    productId: "p7",
+    supplierId: "s1",
+    branchId: "sh1",
+    receivedOn: "2026-07-28",
+    qtyIn: 15,
+    qtyLeft: 11,
+    cost: 780,
+    min: 890,
+    wholesale: 950,
+    retail: 1150,
+  },
+  {
+    id: "l7",
+    productId: "p2",
+    supplierId: "s2",
+    branchId: "sh1",
+    receivedOn: "2026-08-01",
+    qtyIn: 90,
+    qtyLeft: 18,
+    cost: 95,
+    min: 108,
+    wholesale: 115,
+    retail: 130,
+  },
+  {
+    id: "l8",
+    productId: "p6",
+    supplierId: "s1",
+    branchId: "sh1",
+    receivedOn: "2026-08-08",
+    qtyIn: 100,
+    qtyLeft: 86,
+    cost: 70,
+    min: 85,
+    wholesale: 95,
+    retail: 120,
+  },
+];
+
+export const invoices: Invoice[] = [
+  {
+    id: "inv1",
+    no: "A-1042",
+    date: "2026-08-13",
+    time: "10:14",
+    customerId: "c1",
+    lines: [
+      {
+        id: "il1",
+        productId: "p3",
+        name: "Ceiling fan 56\"",
+        qty: 1,
+        unit: "pc",
+        price: 5400,
+        minFloor: 4600,
+        lotsNote: "Noor Lights",
+      },
+    ],
+    total: 5400,
+    paid: 4000,
+    balanceBefore: -4600,
+    balanceAfter: -6000,
+    status: "partial",
+  },
+  {
+    id: "inv2",
+    no: "A-1041",
+    date: "2026-08-13",
+    time: "09:40",
+    customerId: "c0",
+    lines: [
+      {
+        id: "il2",
+        productId: "p5",
+        name: "Switch 10A",
+        qty: 6,
+        unit: "pc",
+        price: 80,
+        minFloor: 55,
+        lotsNote: "Ali Traders",
+      },
+    ],
+    total: 480,
+    paid: 480,
+    balanceBefore: 0,
+    balanceAfter: 0,
+    status: "paid",
+  },
+  {
+    id: "inv3",
+    no: "A-1038",
+    date: "2026-08-12",
+    time: "18:22",
+    customerId: "c2",
+    lines: [
+      {
+        id: "il3",
+        productId: "p4",
+        name: "LED bulb 12W",
+        qty: 10,
+        unit: "pc",
+        price: 280,
+        minFloor: 210,
+        lotsNote: "Noor Lights",
+      },
+    ],
+    total: 2800,
+    paid: 0,
+    balanceBefore: 7800,
+    balanceAfter: 5000,
+    status: "paid",
+  },
+];
+
+export const heldBills: HeldBill[] = [
+  {
+    id: "h1",
+    label: "Walking · 2 items",
+    customerId: "c0",
+    at: "14:08",
+    lines: [
+      {
+        id: "hl1",
+        productId: "p6",
+        name: "3-pin socket",
+        qty: 4,
+        unit: "pc",
+        price: 120,
+        minFloor: 85,
+        lotsNote: "Ali Traders",
+      },
+      {
+        id: "hl2",
+        productId: "p5",
+        name: "Switch 10A",
+        qty: 4,
+        unit: "pc",
+        price: 80,
+        minFloor: 55,
+        lotsNote: "Ali Traders",
+      },
+    ],
+  },
+];
+
+export const creditSales: CreditSale[] = [
+  {
+    id: "cs1",
+    no: "CR-221",
+    date: "2026-08-11",
+    customerId: "c3",
+    lines: [
+      {
+        id: "cl1",
+        productId: "p1",
+        name: "1.5mm copper wire",
+        qty: 20,
+        unit: "m",
+        price: 95,
+        minFloor: 70,
+        lotsNote: "Ali then Bilal",
+      },
+    ],
+    total: 1900,
+  },
+];
+
+export const repairJobs: RepairJob[] = [
+  {
+    id: "r1",
+    no: "RP-88",
+    date: "2026-08-13",
+    customerId: "c4",
+    item: "Pedestal fan motor",
+    status: "open",
+    parts: [
+      {
+        id: "rp1",
+        productId: "p7",
+        name: "Breaker 32A",
+        qty: 1,
+        unit: "pc",
+        price: 1150,
+        minFloor: 890,
+        lotsNote: "Ali Traders",
+      },
+    ],
+    labour: 400,
+    employeeId: "e3",
+    commission: 80,
+  },
+  {
+    id: "r2",
+    no: "RP-86",
+    date: "2026-08-12",
+    customerId: "c1",
+    item: "Stabilizer rewind",
+    status: "done",
+    parts: [],
+    labour: 900,
+    employeeId: "e3",
+    commission: 180,
+  },
+];
+
+export const reorderLines: ReorderLine[] = [
+  { id: "ro1", productId: "p3", supplierId: "s3", qty: 10, cost: 4200, received: false },
+  { id: "ro2", productId: "p1", supplierId: "s1", qty: 90, cost: 62, received: false },
+];
+
+export const expenses: Expense[] = [
+  { id: "x1", date: "2026-08-13", title: "Shop rent", amount: 25000 },
+  { id: "x2", date: "2026-08-10", title: "Electricity", amount: 6400 },
+  { id: "x3", date: "2026-08-08", title: "Tea & packing", amount: 850 },
+];
+
+export const transactions: MoneyTxn[] = [
+  { id: "t1", date: "2026-08-13", kind: "sale", party: "Ahmed Khan", inflow: 4000, outflow: 0, note: "A-1042 partial" },
+  { id: "t2", date: "2026-08-13", kind: "sale", party: "Walking", inflow: 480, outflow: 0, note: "A-1041" },
+  { id: "t3", date: "2026-08-13", kind: "expense", party: "Shop", inflow: 0, outflow: 25000, note: "Rent" },
+  { id: "t4", date: "2026-08-13", kind: "repair", party: "Rashid Traders", inflow: 0, outflow: 0, note: "RP-88 open" },
+  { id: "t5", date: "2026-08-12", kind: "salary", party: "Usman", inflow: 0, outflow: 20000, note: "Partial pay" },
+  { id: "t6", date: "2026-08-11", kind: "credit", party: "Bilal Hardware", inflow: 0, outflow: 0, note: "CR-221" },
+  { id: "t7", date: "2026-08-10", kind: "purchase", party: "Ali Traders", inflow: 0, outflow: 0, note: "Wire lot" },
+  { id: "t8", date: "2026-08-09", kind: "return", party: "Ahmed Khan", inflow: 0, outflow: 5400, note: "Fan refund" },
+];
+
+export const returns: ReturnTicket[] = [
+  { id: "rt1", date: "2026-08-09", customerId: "c1", productId: "p3", qty: 1, kind: "refund", supplierId: "" },
+  { id: "rt2", date: "2026-08-07", customerId: "c0", productId: "p4", qty: 2, kind: "claim", supplierId: "s3" },
+];
+
+export function findById<T extends { id: string }>(rows: T[], id: string) {
+  return rows.find((row) => row.id === id);
+}
+
+export function productName(id: string) {
+  return findById(products, id)?.name ?? id;
+}
+
+export function customerName(id: string) {
+  return findById(customers, id)?.name ?? id;
+}
+
+export function supplierName(id: string) {
+  return findById(suppliers, id)?.name ?? id;
+}
+
+export function employeeName(id: string) {
+  return findById(employees, id)?.name ?? id;
+}
+
+export const movement = [
+  { productId: "p1", inQty: 180, outQty: 138, left: 42 },
+  { productId: "p4", inQty: 80, outQty: 16, left: 64 },
+  { productId: "p5", inQty: 200, outQty: 80, left: 120 },
+  { productId: "p3", inQty: 10, outQty: 3, left: 7 },
+  { productId: "p7", inQty: 15, outQty: 4, left: 11 },
+];
+
+export const topSelling = [
+  { productId: "p5", qty: 80, amount: 6400 },
+  { productId: "p1", qty: 138, amount: 11730 },
+  { productId: "p4", qty: 16, amount: 4480 },
+  { productId: "p3", qty: 3, amount: 16200 },
+];
