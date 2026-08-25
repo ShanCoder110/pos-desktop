@@ -3,7 +3,7 @@ import { cn } from "@/utils/format";
 
 export function Table({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-auto rounded-md border border-slate-200 bg-white">
+    <div className="page-table">
       <table className="w-full text-left">{children}</table>
     </div>
   );

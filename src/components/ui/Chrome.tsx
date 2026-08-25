@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/Button";
 import { cn } from "@/utils/format";
 
 export function PageHeader({
-  title,
   hint,
   actions,
 }: {
@@ -12,12 +11,10 @@ export function PageHeader({
   hint?: string;
   actions?: ReactNode;
 }) {
+  if (!hint && !actions) return null;
   return (
-    <div className="mb-3 flex items-end justify-between gap-3">
-      <div>
-        <h1 className="text-[16px] font-semibold tracking-tight">{title}</h1>
-        {hint ? <p className="mt-0.5 text-[12px] text-slate-500">{hint}</p> : null}
-      </div>
+    <div className="mgmt-page-toolbar">
+      {hint ? <p className="mgmt-page-hint">{hint}</p> : <span />}
       {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
     </div>
   );
