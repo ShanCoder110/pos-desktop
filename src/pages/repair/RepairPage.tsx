@@ -1,209 +1,175 @@
-import { useState } from "react";
-import { Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/Button";
-import { Badge, PageHeader, RowActions } from "@/components/ui/Chrome";
-import { Field, Input, Select } from "@/components/ui/Field";
-import { ConfirmDialog, Modal } from "@/components/ui/Modal";
-import { Table, THead, Th, Td } from "@/components/ui/Table";
-import { customerName, customers, employeeName, employees, products, repairJobs as seed } from "@/shared/mock";
-import { useSettings } from "@/shared/settings";
-import type { InvoiceLine, RepairJob, RepairStatus } from "@/shared/types";
+import { useMemo, useState } from "react";
+import { Eye } from "lucide-react";
+import {
+  Badge,
+  Button,
+  Drawer,
+  EmptyRow,
+  KpiCard,
+  PageHead,
+  Pagination,
+  SearchInput,
+  Table,
+  Tabs,
+  Td,
+  THead,
+  Th,
+} from "@/components/common";
+import { productions as seed, bom, branchName, lotNumber, productName, userName } from "@/shared/domain/mock";
+import type { ProductionRow, ProductionStatus } from "@/shared/domain/types";
 import { money } from "@/utils/format";
-import { consumeLots } from "@/utils/lots";
 
-const tones: Record<RepairStatus, "amber" | "teal" | "emerald"> = {
-  open: "amber",
-  done: "teal",
-  delivered: "emerald",
-};
+const PAGE = 10;
+
+function tone(s: ProductionStatus) {
+  if (s === "COMPLETED") return "ok" as const;
+  if (s === "IN_PROGRESS") return "warn" as const;
+  if (s === "PENDING") return "info" as const;
+  return "danger" as const;
+}
 
 export function RepairPage() {
-  const { settings } = useSettings();
-  const [rows, setRows] = useState(seed);
-  const [edit, setEdit] = useState<RepairJob | null>(null);
-  const [remove, setRemove] = useState<RepairJob | null>(null);
   const [q, setQ] = useState("");
-  const [qty, setQty] = useState("1");
+  const [tab, setTab] = useState("all");
+  const [page, setPage] = useState(1);
+  const [open, setOpen] = useState<ProductionRow | null>(null);
 
-  function addPart(job: RepairJob, productId: string) {
-    const product = products.find((p) => p.id === productId);
-    if (!product) return job;
-    const result = consumeLots(product, Number(qty) || 1, settings.stockPick);
-    if ("error" in result) return job;
-    const line: InvoiceLine = {
-      id: crypto.randomUUID(),
-      productId: product.id,
-      name: product.name,
-      qty: Number(qty) || 1,
-      unit: product.unit,
-      price: result.price,
-      minFloor: result.minFloor,
-      lotsNote: result.lotsNote,
-    };
-    return { ...job, parts: [...job.parts, line] };
-  }
+  const rows = useMemo(() => {
+    return seed.filter((r) => {
+      const text = `${r.productionNumber} ${productName(r.productId)}`.toLowerCase();
+      if (q && !text.includes(q.toLowerCase())) return false;
+      if (tab !== "all") return r.status === tab.toUpperCase();
+      return true;
+    });
+  }, [q, tab]);
+
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  const shown = rows.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div>
-      <PageHeader
-        title="Repair shop"
-        hint="Move stock onto a job like a credit sale. Labour and commission sit on the job."
-        actions={
-          <Button
-            variant="primary"
-            onClick={() =>
-              setEdit({
-                id: crypto.randomUUID(),
-                no: `RP-${90 + rows.length}`,
-                date: "2026-08-13",
-                customerId: customers[4].id,
-                item: "",
-                status: "open",
-                parts: [],
-                labour: 0,
-                employeeId: "e3",
-                commission: 0,
-              })
-            }
-          >
-            New job
-          </Button>
-        }
+    <div className="ui-stack">
+      <PageHead title="Production" />
+      <p className="ui-note">
+        A job consumes BOM components (PRODUCTION_USE, including damage) then outputs finished goods (PRODUCTION_OUTPUT). Technician commission is EmployeeCommission until paid as a Transaction OUT.
+      </p>
+      <div className="ui-kpi-row">
+        <KpiCard label="Open" value={seed.filter((p) => p.status === "PENDING" || p.status === "IN_PROGRESS").length} hint="Not finished" tone="warn" />
+        <KpiCard label="Completed" value={seed.filter((p) => p.status === "COMPLETED").length} hint="Stock in" tone="ok" />
+        <KpiCard label="Commission due" value={money(seed.reduce((s, p) => s + (p.status === "COMPLETED" ? p.commissionAmount : 0), 0))} hint="Pay staff" tone="stale" />
+      </div>
+      <Tabs
+        value={tab}
+        onChange={(id) => {
+          setTab(id);
+          setPage(1);
+        }}
+        items={[
+          { id: "all", label: "All" },
+          { id: "pending", label: "Pending" },
+          { id: "in_progress", label: "In progress" },
+          { id: "completed", label: "Completed" },
+        ]}
       />
-      <Table>
+      <Table
+        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Job no or product" />}
+        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
+      >
         <THead>
           <tr>
-            <Th>No</Th>
-            <Th>Customer</Th>
-            <Th>Item</Th>
-            <Th>Tech</Th>
-            <Th className="text-right">Parts</Th>
-            <Th className="text-right">Labour</Th>
+            <Th>Job</Th>
+            <Th>Product</Th>
+            <Th>Qty</Th>
+            <Th>Branch</Th>
+            <Th>Staff</Th>
             <Th>Status</Th>
+            <Th>Cost</Th>
             <Th />
           </tr>
         </THead>
         <tbody>
-          {rows.map((row) => (
+          {shown.length === 0 ? <EmptyRow cols={8} /> : null}
+          {shown.map((row) => (
             <tr key={row.id}>
-              <Td>{row.no}</Td>
-              <Td>{customerName(row.customerId)}</Td>
-              <Td>{row.item}</Td>
-              <Td>{employeeName(row.employeeId)}</Td>
-              <Td className="text-right tabular-nums">{money(row.parts.reduce((s, l) => s + l.qty * l.price, 0))}</Td>
-              <Td className="text-right tabular-nums">{money(row.labour)}</Td>
+              <Td>{row.productionNumber}</Td>
+              <Td>{productName(row.productId)}</Td>
+              <Td numeric>{row.outputQuantity}</Td>
+              <Td>{branchName(row.branchId)}</Td>
+              <Td>{userName(row.employeeId)}</Td>
               <Td>
-                <Badge tone={tones[row.status]}>{row.status}</Badge>
+                <Badge tone={tone(row.status)}>{row.status.replace("_", " ")}</Badge>
               </Td>
+              <Td numeric>{row.totalCost ? money(row.totalCost) : "—"}</Td>
               <Td>
-                <RowActions onEdit={() => setEdit(row)} onDelete={() => setRemove(row)} />
+                <Button size="icon" variant="ghost" onClick={() => setOpen(row)} aria-label="View">
+                  <Eye size={15} />
+                </Button>
               </Td>
             </tr>
           ))}
         </tbody>
       </Table>
-      <Modal
-        open={Boolean(edit)}
-        title={edit?.no ?? "Job"}
-        wide
-        onClose={() => setEdit(null)}
-        footer={
-          <>
-            <Button onClick={() => setEdit(null)}>Cancel</Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                if (!edit?.item) return;
-                setRows((p) => (p.some((r) => r.id === edit.id) ? p.map((r) => (r.id === edit.id ? edit : r)) : [edit, ...p]));
-                setEdit(null);
-              }}
-            >
-              Save
-            </Button>
-          </>
-        }
-      >
-        {edit ? (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Customer">
-              <Select value={edit.customerId} onChange={(e) => setEdit({ ...edit, customerId: e.target.value })}>
-                {customers.filter((c) => !c.isWalking).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
+
+      <Drawer open={Boolean(open)} title={open?.productionNumber ?? "Job"} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
+        {open ? (
+          <div className="ui-stack">
+            <dl className="ui-kv">
+              <dt>Material</dt>
+              <dd>{money(open.materialCost)}</dd>
+              <dt>Damage</dt>
+              <dd>{money(open.damageCost)}</dd>
+              <dt>Commission</dt>
+              <dd>{money(open.commissionAmount)}</dd>
+              <dt>Total</dt>
+              <dd>{money(open.totalCost)}</dd>
+            </dl>
+            <p className="ui-page-title" style={{ fontSize: 14 }}>
+              Recipe (BOM)
+            </p>
+            <Table>
+              <THead>
+                <tr>
+                  <Th>Component</Th>
+                  <Th>Qty</Th>
+                  <Th>Unit</Th>
+                </tr>
+              </THead>
+              <tbody>
+                {bom.filter((b) => b.productId === open.productId).map((row) => (
+                  <tr key={row.id}>
+                    <Td>{productName(row.componentProductId)}</Td>
+                    <Td numeric>{row.quantity}</Td>
+                    <Td>{row.unit}</Td>
+                  </tr>
                 ))}
-              </Select>
-            </Field>
-            <Field label="Status">
-              <Select value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value as RepairStatus })}>
-                <option value="open">Open</option>
-                <option value="done">Done</option>
-                <option value="delivered">Delivered</option>
-              </Select>
-            </Field>
-            <Field label="What came in" className="col-span-2">
-              <Input value={edit.item} onChange={(e) => setEdit({ ...edit, item: e.target.value })} />
-            </Field>
-            <Field label="Tech">
-              <Select value={edit.employeeId} onChange={(e) => setEdit({ ...edit, employeeId: e.target.value })}>
-                {employees.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.name}
-                  </option>
+              </tbody>
+            </Table>
+            <p className="ui-page-title" style={{ fontSize: 14 }}>
+              Consumed this job
+            </p>
+            <Table>
+              <THead>
+                <tr>
+                  <Th>Product</Th>
+                  <Th>Lot</Th>
+                  <Th>Used</Th>
+                  <Th>Damaged</Th>
+                </tr>
+              </THead>
+              <tbody>
+                {open.items.length === 0 ? <EmptyRow cols={4} text="Not started" /> : null}
+                {open.items.map((item, i) => (
+                  <tr key={i}>
+                    <Td>{productName(item.productId)}</Td>
+                    <Td>{lotNumber(item.lotId)}</Td>
+                    <Td numeric>{item.quantityUsed}</Td>
+                    <Td numeric>{item.quantityDamaged}</Td>
+                  </tr>
                 ))}
-              </Select>
-            </Field>
-            <Field label="Labour">
-              <Input value={String(edit.labour)} onChange={(e) => setEdit({ ...edit, labour: Number(e.target.value) || 0 })} />
-            </Field>
-            <Field label="Commission">
-              <Input value={String(edit.commission)} onChange={(e) => setEdit({ ...edit, commission: Number(e.target.value) || 0 })} />
-            </Field>
-            <div className="col-span-2 flex gap-2">
-              <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    const p = products.find((x) => x.name.toLowerCase().includes(q.toLowerCase()));
-                    if (p) {
-                      setEdit(addPart(edit, p.id));
-                      setQ("");
-                    }
-                  }
-                }}
-                placeholder="Add part · search, Enter"
-              />
-              <Input className="w-20" value={qty} onChange={(e) => setQty(e.target.value)} />
-            </div>
-            <div className="col-span-2 grid gap-1">
-              {edit.parts.map((line) => (
-                <div key={line.id} className="flex justify-between text-[13px]">
-                  <span>
-                    {line.qty} {line.unit} {line.name}
-                  </span>
-                  <span className="flex items-center gap-2">
-                    {money(line.qty * line.price)}
-                    <button onClick={() => setEdit({ ...edit, parts: edit.parts.filter((l) => l.id !== line.id) })}>
-                      <Trash2 size={13} className="text-rose-600" />
-                    </button>
-                  </span>
-                </div>
-              ))}
-            </div>
+              </tbody>
+            </Table>
           </div>
         ) : null}
-      </Modal>
-      <ConfirmDialog
-        open={Boolean(remove)}
-        title="Delete job?"
-        body="Parts already taken from stock stay in history unless you restock them."
-        onCancel={() => setRemove(null)}
-        onConfirm={() => {
-          if (remove) setRows((p) => p.filter((r) => r.id !== remove.id));
-          setRemove(null);
-        }}
-      />
+      </Drawer>
     </div>
   );
 }

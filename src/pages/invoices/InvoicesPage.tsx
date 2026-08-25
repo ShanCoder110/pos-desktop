@@ -1,163 +1,176 @@
 import { useMemo, useState } from "react";
-import { Copy, Pencil, Printer, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/Button";
-import { Badge, DateFilter, PageHeader, SearchBox } from "@/components/ui/Chrome";
-import { Field, Input, Select } from "@/components/ui/Field";
-import { ConfirmDialog, Modal } from "@/components/ui/Modal";
-import { Table, THead, Th, Td } from "@/components/ui/Table";
-import { PrintPreview } from "@/components/print/PrintPreview";
-import { customerName, customers, invoices as seed } from "@/shared/mock";
-import type { Invoice } from "@/shared/types";
+import { Eye } from "lucide-react";
+import {
+  Badge,
+  Button,
+  Drawer,
+  EmptyRow,
+  KpiCard,
+  PageHead,
+  Pagination,
+  SearchInput,
+  Table,
+  Tabs,
+  Td,
+  THead,
+  Th,
+} from "@/components/common";
+import { invoices as seed, branchName, customerName, productName, userName } from "@/shared/domain/mock";
+import type { InvoiceRow, PaymentStatus } from "@/shared/domain/types";
 import { money } from "@/utils/format";
 
-const statusTone = {
-  paid: "emerald",
-  partial: "amber",
-  credit: "rose",
-  held: "slate",
-} as const;
+const PAGE = 10;
+
+function payTone(s: PaymentStatus) {
+  if (s === "PAID") return "ok" as const;
+  if (s === "PARTIAL") return "warn" as const;
+  return "danger" as const;
+}
 
 export function InvoicesPage() {
-  const [rows, setRows] = useState(seed);
   const [q, setQ] = useState("");
-  const [range, setRange] = useState({ from: "2026-08-01", to: "2026-08-13" });
-  const [edit, setEdit] = useState<Invoice | null>(null);
-  const [remove, setRemove] = useState<Invoice | null>(null);
-  const [print, setPrint] = useState<Invoice | null>(null);
-  const [dup, setDup] = useState(false);
+  const [tab, setTab] = useState("all");
+  const [page, setPage] = useState(1);
+  const [open, setOpen] = useState<InvoiceRow | null>(null);
 
-  const shown = useMemo(
-    () =>
-      rows.filter(
-        (r) =>
-          r.date >= range.from &&
-          r.date <= range.to &&
-          (`${r.no} ${customerName(r.customerId)}`.toLowerCase().includes(q.toLowerCase())),
-      ),
-    [rows, q, range],
-  );
+  const rows = useMemo(() => {
+    return seed.filter((r) => {
+      const text = `${r.invoiceNumber} ${customerName(r.customerId)}`.toLowerCase();
+      if (q && !text.includes(q.toLowerCase())) return false;
+      if (tab === "paid") return r.paymentStatus === "PAID" && r.status === "COMPLETED";
+      if (tab === "partial") return r.paymentStatus === "PARTIAL";
+      if (tab === "credit") return r.paymentStatus === "CREDIT";
+      if (tab === "cancelled") return r.status === "CANCELLED";
+      return true;
+    });
+  }, [q, tab]);
+
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  const shown = rows.slice((page - 1) * PAGE, page * PAGE);
+  const completed = seed.filter((r) => r.status === "COMPLETED");
 
   return (
-    <div>
-      <PageHeader
-        title="Invoices"
-        hint="Before/after khata is stored on each bill. Reprint marks a copy. No extra phone box."
-        actions={
-          <>
-            <DateFilter from={range.from} to={range.to} onChange={setRange} />
-            <SearchBox value={q} onChange={setQ} placeholder="No or customer" />
-          </>
-        }
+    <div className="ui-stack">
+      <PageHead title="Invoices" />
+      <p className="ui-note">
+        Created at POS. Walk-in has no customer. Credit amount posts to CustomerLedger. FIFO lots consumed are on Stock movements.
+      </p>
+      <div className="ui-kpi-row">
+        <KpiCard label="Bills" value={completed.length} hint="Completed" tone="ok" />
+        <KpiCard label="Collected" value={money(completed.reduce((s, r) => s + r.paidAmount, 0))} hint="Paid amount" tone="ok" />
+        <KpiCard label="On khata" value={money(completed.reduce((s, r) => s + r.creditAmount, 0))} hint="Credit amount" tone="warn" />
+        <KpiCard label="Cancelled" value={seed.filter((r) => r.status === "CANCELLED").length} hint="No stock change" tone="danger" />
+      </div>
+      <Tabs
+        value={tab}
+        onChange={(id) => {
+          setTab(id);
+          setPage(1);
+        }}
+        items={[
+          { id: "all", label: "All" },
+          { id: "paid", label: "Paid" },
+          { id: "partial", label: "Partial" },
+          { id: "credit", label: "Credit" },
+          { id: "cancelled", label: "Cancelled" },
+        ]}
       />
-      <Table>
+      <Table
+        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Search number or customer" />}
+        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
+      >
         <THead>
           <tr>
-            <Th>No</Th>
+            <Th>Number</Th>
             <Th>When</Th>
+            <Th>Branch</Th>
             <Th>Customer</Th>
-            <Th className="text-right">Total</Th>
-            <Th className="text-right">Paid</Th>
-            <Th>Khata</Th>
+            <Th>Total</Th>
+            <Th>Paid</Th>
+            <Th>Credit</Th>
+            <Th>Payment</Th>
             <Th>Status</Th>
             <Th />
           </tr>
         </THead>
         <tbody>
+          {shown.length === 0 ? <EmptyRow cols={10} /> : null}
           {shown.map((row) => (
             <tr key={row.id}>
-              <Td className="font-medium">{row.no}</Td>
-              <Td>
-                {row.date} {row.time}
-              </Td>
+              <Td>{row.invoiceNumber}</Td>
+              <Td>{row.createdAt}</Td>
+              <Td>{branchName(row.branchId)}</Td>
               <Td>{customerName(row.customerId)}</Td>
-              <Td className="text-right tabular-nums">{money(row.total)}</Td>
-              <Td className="text-right tabular-nums">{money(row.paid)}</Td>
-              <Td className="text-[12px] text-slate-500">
-                {row.balanceBefore} → {row.balanceAfter}
+              <Td numeric>{money(row.total)}</Td>
+              <Td numeric>{money(row.paidAmount)}</Td>
+              <Td numeric>{money(row.creditAmount)}</Td>
+              <Td>
+                <Badge tone={payTone(row.paymentStatus)}>{row.paymentStatus}</Badge>
               </Td>
               <Td>
-                <Badge tone={statusTone[row.status]}>{row.status}</Badge>
+                <Badge tone={row.status === "COMPLETED" ? "ok" : "danger"}>{row.status}</Badge>
               </Td>
               <Td>
-                <div className="flex justify-end gap-1">
-                  <Button size="icon" variant="ghost" onClick={() => { setPrint(row); setDup(false); }} aria-label="Print">
-                    <Printer size={14} />
-                  </Button>
-                  <Button size="icon" variant="ghost" onClick={() => { setPrint(row); setDup(true); }} aria-label="Duplicate">
-                    <Copy size={14} />
-                  </Button>
-                  <Button size="icon" variant="ghost" onClick={() => setEdit(row)} aria-label="Edit">
-                    <Pencil size={14} />
-                  </Button>
-                  <Button size="icon" variant="ghost" onClick={() => setRemove(row)} aria-label="Delete">
-                    <Trash2 size={14} className="text-rose-600" />
-                  </Button>
-                </div>
+                <Button size="icon" variant="ghost" onClick={() => setOpen(row)} aria-label="View">
+                  <Eye size={15} />
+                </Button>
               </Td>
             </tr>
           ))}
         </tbody>
       </Table>
-      <Modal
-        open={Boolean(edit)}
-        title={`Update ${edit?.no ?? ""}`}
-        onClose={() => setEdit(null)}
-        footer={
-          <>
-            <Button onClick={() => setEdit(null)}>Cancel</Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                if (!edit) return;
-                setRows((p) => p.map((r) => (r.id === edit.id ? edit : r)));
-                setEdit(null);
-              }}
-            >
-              Save
-            </Button>
-          </>
-        }
+
+      <Drawer
+        open={Boolean(open)}
+        title={open?.invoiceNumber ?? "Invoice"}
+        onClose={() => setOpen(null)}
+        footer={<Button onClick={() => setOpen(null)}>Close</Button>}
       >
-        {edit ? (
-          <div className="grid gap-3">
-            <Field label="Customer">
-              <Select value={edit.customerId} onChange={(e) => setEdit({ ...edit, customerId: e.target.value })}>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
+        {open ? (
+          <div className="ui-stack">
+            <p className="ui-note">
+              Cashier {userName(open.createdBy)} · Discount {money(open.discount)}. Cancelled bills do not reverse stock in this demo.
+            </p>
+            <dl className="ui-kv">
+              <dt>Customer</dt>
+              <dd>{customerName(open.customerId)}</dd>
+              <dt>Payment</dt>
+              <dd>{open.paymentStatus}</dd>
+              <dt>Total</dt>
+              <dd>{money(open.total)}</dd>
+              <dt>Paid</dt>
+              <dd>{money(open.paidAmount)}</dd>
+              <dt>Credit</dt>
+              <dd>{money(open.creditAmount)}</dd>
+            </dl>
+            <Table>
+              <THead>
+                <tr>
+                  <Th>Product</Th>
+                  <Th>Unit</Th>
+                  <Th>Qty</Th>
+                  <Th>Base qty</Th>
+                  <Th>Price</Th>
+                  <Th>Total</Th>
+                </tr>
+              </THead>
+              <tbody>
+                {open.items.map((item) => (
+                  <tr key={item.id}>
+                    <Td>{productName(item.productId)}</Td>
+                    <Td>{item.unitName}</Td>
+                    <Td numeric>{item.quantity}</Td>
+                    <Td numeric>{item.baseQuantity}</Td>
+                    <Td numeric>{money(item.unitPrice)}</Td>
+                    <Td numeric>{money(item.total)}</Td>
+                  </tr>
                 ))}
-              </Select>
-            </Field>
-            <Field label="Paid">
-              <Input value={String(edit.paid)} onChange={(e) => setEdit({ ...edit, paid: Number(e.target.value) || 0 })} />
-            </Field>
+              </tbody>
+            </Table>
+            <p className="ui-note">Example: 1 × 90m Roll stores quantity 1 and base_quantity 90. Lot consumption is a StockMovement SALE.</p>
           </div>
         ) : null}
-      </Modal>
-      <ConfirmDialog
-        open={Boolean(remove)}
-        title="Delete invoice?"
-        body="History and khata snapshots go with it. Use only if this bill was a mistake."
-        onCancel={() => setRemove(null)}
-        onConfirm={() => {
-          if (remove) setRows((p) => p.filter((r) => r.id !== remove.id));
-          setRemove(null);
-        }}
-      />
-      {print ? (
-        <PrintPreview
-          open
-          onClose={() => setPrint(null)}
-          customer={customers.find((c) => c.id === print.customerId) ?? customers[0]}
-          lines={print.lines}
-          total={print.total}
-          paid={print.paid}
-          balanceBefore={print.balanceBefore}
-          balanceAfter={print.balanceAfter}
-          duplicate={dup}
-        />
-      ) : null}
+      </Drawer>
     </div>
   );
 }

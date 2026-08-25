@@ -1,64 +1,114 @@
-import { useState } from "react";
-import { Button } from "@/components/ui/Button";
-import { PageHeader, RowActions } from "@/components/ui/Chrome";
-import { Field, Input } from "@/components/ui/Field";
-import { ConfirmDialog, Modal } from "@/components/ui/Modal";
-import { Table, THead, Th, Td } from "@/components/ui/Table";
-import { expenses as seed } from "@/shared/mock";
-import type { Expense } from "@/shared/types";
+import { useMemo, useState } from "react";
+import { Plus } from "lucide-react";
+import {
+  Badge,
+  Button,
+  Drawer,
+  EmptyRow,
+  Field,
+  KpiCard,
+  PageHead,
+  Pagination,
+  SearchInput,
+  SelectInput,
+  Table,
+  Tabs,
+  Td,
+  TextInput,
+  THead,
+  Th,
+} from "@/components/common";
+import { expenses as seed, expenseCategories, branchName, categoryName, userName, branches } from "@/shared/domain/mock";
+import type { ExpenseRow } from "@/shared/domain/types";
 import { money } from "@/utils/format";
+
+const PAGE = 10;
+const blank: ExpenseRow = {
+  id: "",
+  branchId: "b1",
+  categoryId: "ec1",
+  amount: 0,
+  paymentMethod: "CASH",
+  description: "",
+  expenseDate: "2026-08-25",
+  createdBy: "u1",
+};
 
 export function ExpensesPage() {
   const [rows, setRows] = useState(seed);
-  const [edit, setEdit] = useState<Expense | null>(null);
-  const [remove, setRemove] = useState<Expense | null>(null);
-  const total = rows.reduce((s, r) => s + r.amount, 0);
+  const [q, setQ] = useState("");
+  const [tab, setTab] = useState("all");
+  const [page, setPage] = useState(1);
+  const [edit, setEdit] = useState<ExpenseRow | null>(null);
+
+  const filtered = useMemo(() => {
+    return rows.filter((r) => {
+      if (q && !`${r.description} ${categoryName(r.categoryId)}`.toLowerCase().includes(q.toLowerCase())) return false;
+      if (tab !== "all") return r.categoryId === tab;
+      return true;
+    });
+  }, [rows, q, tab]);
+
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
+  const shown = filtered.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div>
-      <PageHeader
-        title="Expenses"
-        hint="Overheads only. These reduce profit on the dashboard."
-        actions={
-          <Button
-            variant="primary"
-            onClick={() => setEdit({ id: crypto.randomUUID(), date: "2026-08-13", title: "", amount: 0 })}
-          >
-            Add
-          </Button>
-        }
+    <div className="ui-stack">
+      <PageHead title="Expenses">
+        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}>
+          Add expense
+        </Button>
+      </PageHead>
+      <p className="ui-note">Saving writes Expense and a Transaction EXPENSE with direction OUT. Categories are ExpenseCategory.</p>
+      <div className="ui-kpi-row">
+        <KpiCard label="This month" value={money(rows.reduce((s, r) => s + r.amount, 0))} hint="All branches" tone="danger" />
+        <KpiCard label="Cash" value={money(rows.filter((r) => r.paymentMethod === "CASH").reduce((s, r) => s + r.amount, 0))} hint="OUT cash" tone="warn" />
+        <KpiCard label="Bank" value={money(rows.filter((r) => r.paymentMethod === "BANK").reduce((s, r) => s + r.amount, 0))} hint="OUT bank" tone="stale" />
+      </div>
+      <Tabs
+        value={tab}
+        onChange={(id) => {
+          setTab(id);
+          setPage(1);
+        }}
+        items={[{ id: "all", label: "All" }, ...expenseCategories.map((c) => ({ id: c.id, label: c.name }))]}
       />
-      <Table>
+      <Table
+        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Description or category" />}
+        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={filtered.length} onChange={setPage} />}
+      >
         <THead>
           <tr>
             <Th>Date</Th>
-            <Th>Title</Th>
-            <Th className="text-right">Amount</Th>
-            <Th />
+            <Th>Category</Th>
+            <Th>Description</Th>
+            <Th>Branch</Th>
+            <Th>Method</Th>
+            <Th>Amount</Th>
+            <Th>By</Th>
           </tr>
         </THead>
         <tbody>
-          {rows.map((row) => (
+          {shown.length === 0 ? <EmptyRow cols={7} /> : null}
+          {shown.map((row) => (
             <tr key={row.id}>
-              <Td>{row.date}</Td>
-              <Td>{row.title}</Td>
-              <Td className="text-right tabular-nums">{money(row.amount)}</Td>
+              <Td>{row.expenseDate}</Td>
+              <Td>{categoryName(row.categoryId)}</Td>
+              <Td>{row.description}</Td>
+              <Td>{branchName(row.branchId)}</Td>
               <Td>
-                <RowActions onEdit={() => setEdit(row)} onDelete={() => setRemove(row)} />
+                <Badge>{row.paymentMethod}</Badge>
               </Td>
+              <Td numeric>{money(row.amount)}</Td>
+              <Td>{userName(row.createdBy)}</Td>
             </tr>
           ))}
-          <tr>
-            <Td />
-            <Td className="font-medium">Total</Td>
-            <Td className="text-right font-semibold tabular-nums">{money(total)}</Td>
-            <Td />
-          </tr>
         </tbody>
       </Table>
-      <Modal
+
+      <Drawer
         open={Boolean(edit)}
-        title="Expense"
+        title="Add expense"
         onClose={() => setEdit(null)}
         footer={
           <>
@@ -66,8 +116,8 @@ export function ExpensesPage() {
             <Button
               variant="primary"
               onClick={() => {
-                if (!edit?.title) return;
-                setRows((p) => (p.some((r) => r.id === edit.id) ? p.map((r) => (r.id === edit.id ? edit : r)) : [edit, ...p]));
+                if (!edit?.description || !edit.amount) return;
+                setRows((p) => [...p, edit]);
                 setEdit(null);
               }}
             >
@@ -77,29 +127,42 @@ export function ExpensesPage() {
         }
       >
         {edit ? (
-          <div className="grid gap-3">
-            <Field label="Title">
-              <Input value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} />
+          <div className="ui-stack">
+            <Field label="Category">
+              <SelectInput value={edit.categoryId} onChange={(e) => setEdit({ ...edit, categoryId: e.target.value })}>
+                {expenseCategories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </SelectInput>
+            </Field>
+            <Field label="Branch">
+              <SelectInput value={edit.branchId} onChange={(e) => setEdit({ ...edit, branchId: e.target.value })}>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </SelectInput>
             </Field>
             <Field label="Amount">
-              <Input value={String(edit.amount)} onChange={(e) => setEdit({ ...edit, amount: Number(e.target.value) || 0 })} />
+              <TextInput value={String(edit.amount)} onChange={(e) => setEdit({ ...edit, amount: Number(e.target.value) || 0 })} />
             </Field>
-            <Field label="Date">
-              <Input type="date" value={edit.date} onChange={(e) => setEdit({ ...edit, date: e.target.value })} />
+            <Field label="Method">
+              <SelectInput value={edit.paymentMethod} onChange={(e) => setEdit({ ...edit, paymentMethod: e.target.value as ExpenseRow["paymentMethod"] })}>
+                <option>CASH</option>
+                <option>CARD</option>
+                <option>BANK</option>
+                <option>OTHER</option>
+              </SelectInput>
+            </Field>
+            <Field label="Description">
+              <TextInput value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} />
             </Field>
           </div>
         ) : null}
-      </Modal>
-      <ConfirmDialog
-        open={Boolean(remove)}
-        title="Delete expense?"
-        body={`${remove?.title} will be removed.`}
-        onCancel={() => setRemove(null)}
-        onConfirm={() => {
-          if (remove) setRows((p) => p.filter((r) => r.id !== remove.id));
-          setRemove(null);
-        }}
-      />
+      </Drawer>
     </div>
   );
 }

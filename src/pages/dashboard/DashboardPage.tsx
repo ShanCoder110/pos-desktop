@@ -1,115 +1,158 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { DateFilter, PageHeader, StatCard } from "@/components/ui/Chrome";
-import { Table, THead, Th, Td } from "@/components/ui/Table";
-import { invoices, products, transactions, customers } from "@/shared/mock";
+import { AlertTriangle, ChevronRight, Factory, PackageMinus, RotateCcw, Wallet } from "lucide-react";
+import { Badge } from "@/components/common";
+import { routes } from "@/shared/constants/routes";
+import { catalog, invoices, productions, transfers, domainCustomers } from "@/shared/domain/mock";
 import { money } from "@/utils/format";
+
+const salesToday = invoices.filter((i) => i.createdAt.startsWith("2026-08-13") && i.status === "COMPLETED");
+const cashToday = salesToday.reduce((s, i) => s + i.paidAmount, 0);
+const creditOpen = domainCustomers.filter((c) => c.currentBalance > 0).reduce((s, c) => s + c.currentBalance, 0);
+const low = catalog.filter((p) => p.onHand > 0 && p.onHand < p.minimumStock).length;
+
+const chart = [
+  { label: "Mon", value: 62000 },
+  { label: "Tue", value: 71000 },
+  { label: "Wed", value: 54000 },
+  { label: "Thu", value: 88000 },
+  { label: "Fri", value: 96000 },
+  { label: "Sat", value: 102000 },
+  { label: "Today", value: cashToday + 18500 },
+];
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const [range, setRange] = useState({ from: "2026-08-01", to: "2026-08-13" });
-  const sales = 5880;
-  const owe = customers.filter((c) => c.balance < 0).reduce((s, c) => s + -c.balance, 0);
-  const adv = customers.filter((c) => c.balance > 0).reduce((s, c) => s + c.balance, 0);
-  const low = products.filter((p) => p.stock < 20);
+  const max = Math.max(...chart.map((p) => p.value), 1);
+  const pendingJobs = productions.filter((p) => p.status !== "COMPLETED" && p.status !== "CANCELLED").length;
+  const pendingTransfers = transfers.filter((t) => t.status === "PENDING").length;
+  const pendingReturns = 1;
 
   return (
     <div>
-      <PageHeader
-        title="Today at a glance"
-        hint="Same date filter as invoices, money, and analytics."
-        actions={<DateFilter from={range.from} to={range.to} onChange={setRange} />}
-      />
-      <div className="grid grid-cols-4 gap-2">
-        <StatCard label="Sales" value={money(sales)} hint="13 Aug" />
-        <StatCard label="They owe us" value={money(owe)} tone="rose" hint="Khata receivable" />
-        <StatCard label="We hold as advance" value={money(adv)} tone="emerald" hint="Used on next bill" />
-        <StatCard label="Low stock" value={String(low.length)} tone="amber" hint="Need reorder" />
+      <div className="kpi-row">
+        <article className="panel kpi-card">
+          <p className="kpi-label">Today's sales</p>
+          <p className="kpi-value">{money(salesToday.reduce((s, i) => s + i.total, 0))}</p>
+        </article>
+        <article className="panel kpi-card">
+          <p className="kpi-label">Cash / bank in</p>
+          <p className="kpi-value">{money(cashToday)}</p>
+        </article>
+        <article className="panel kpi-card">
+          <p className="kpi-label">Customer owes</p>
+          <p className="kpi-value">{money(creditOpen)}</p>
+        </article>
+        <article className="panel kpi-card">
+          <p className="kpi-label">Low stock SKUs</p>
+          <p className="kpi-value">{low}</p>
+        </article>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <div className="rounded-md border border-slate-200 bg-white p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-[13px] font-semibold">Recent bills</p>
-            <button className="text-[12px] text-teal-700" onClick={() => navigate("/invoices")}>
+      <div className="dash-mid">
+        <section className="panel">
+          <div className="panel-head">
+            <h2 className="panel-title">Sales this week</h2>
+          </div>
+          <div className="panel-body">
+            <div className="chart">
+              {chart.map((point) => (
+                <div key={point.label} className="chart-col">
+                  <div className="chart-bar-wrap">
+                    <div
+                      className={point.label === "Today" ? "chart-bar is-today" : "chart-bar"}
+                      style={{ height: `${Math.max(8, (point.value / max) * 100)}%` }}
+                      title={money(point.value)}
+                    />
+                  </div>
+                  <span className="chart-label">{point.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-head">
+            <h2 className="panel-title">Needs action</h2>
+            <AlertTriangle size={14} color="var(--gold)" />
+          </div>
+          <div className="panel-body" style={{ paddingTop: 6, paddingBottom: 8 }}>
+            {[
+              { icon: PackageMinus, tone: "is-warn", title: `${low} products below minimum`, sub: "Open stock to reorder as a new lot", to: routes.stock },
+              { icon: Wallet, tone: "is-rose", title: `${money(creditOpen)} customer udhaar`, sub: "Record a payment on Credit / Udhaar", to: routes.credit },
+              { icon: RotateCcw, tone: "", title: `${pendingReturns} return to review`, sub: "Refund or replacement against an invoice", to: routes.returns },
+              { icon: Factory, tone: "", title: `${pendingJobs} production jobs open`, sub: "Components come off lots via PRODUCTION_USE", to: routes.production },
+              { icon: AlertTriangle, tone: "is-warn", title: `${pendingTransfers} branch transfer pending`, sub: "Complete to write TRANSFER_IN / OUT", to: routes.transfers },
+            ].map((row) => {
+              const Icon = row.icon;
+              return (
+                <button key={row.title} type="button" className="attn-row" onClick={() => navigate(row.to)}>
+                  <span className={row.tone ? `attn-ico ${row.tone}` : "attn-ico"}>
+                    <Icon size={15} strokeWidth={1.8} />
+                  </span>
+                  <span className="attn-copy">
+                    <span className="attn-title">{row.title}</span>
+                    <span className="attn-sub">{row.sub}</span>
+                  </span>
+                  <ChevronRight size={14} color="var(--muted)" />
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+
+      <div className="dash-low">
+        <section className="panel">
+          <div className="panel-head">
+            <h2 className="panel-title">Latest invoices</h2>
+            <button type="button" className="auth-link" style={{ fontSize: 12 }} onClick={() => navigate(routes.invoices)}>
               All invoices
             </button>
           </div>
-          <Table>
-            <THead>
-              <tr>
-                <Th>No</Th>
-                <Th>Time</Th>
-                <Th className="text-right">Total</Th>
-                <Th>Status</Th>
-              </tr>
-            </THead>
-            <tbody>
-              {invoices.map((inv) => (
-                <tr key={inv.id}>
-                  <Td>{inv.no}</Td>
-                  <Td>{inv.time}</Td>
-                  <Td className="text-right tabular-nums">{money(inv.total)}</Td>
-                  <Td className="capitalize">{inv.status}</Td>
+          <div className="panel-body" style={{ paddingTop: 8 }}>
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th>No</th>
+                  <th>When</th>
+                  <th>Pay</th>
+                  <th className="num">Total</th>
+                  <th>Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </Table>
-        </div>
-        <div className="rounded-md border border-slate-200 bg-white p-3">
-          <p className="mb-2 text-[13px] font-semibold">Stock highlights</p>
-          {low.map((p) => (
-            <div key={p.id} className="flex items-center justify-between border-t border-slate-100 py-1.5 first:border-0">
-              <span>{p.name}</span>
-              <span className="text-amber-700">{p.stock} {p.unit} left</span>
-            </div>
-          ))}
-          <p className="mt-3 text-[13px] font-semibold">Product mix</p>
-          {[
-            { name: "Wire", pct: 48 },
-            { name: "Switches", pct: 22 },
-            { name: "Fans", pct: 18 },
-            { name: "Lights", pct: 12 },
-          ].map((row) => (
-            <div key={row.name} className="mt-1.5">
-              <div className="flex justify-between text-[11px] text-slate-500">
-                <span>{row.name}</span>
-                <span>{row.pct}%</span>
-              </div>
-              <div className="mt-0.5 h-1.5 rounded bg-slate-100">
-                <div className="h-1.5 rounded bg-teal-700" style={{ width: `${row.pct}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+              </thead>
+              <tbody>
+                {invoices.slice(0, 5).map((row) => (
+                  <tr key={row.id}>
+                    <td className="num" style={{ textAlign: "left", fontFamily: "var(--mono)", fontSize: 12 }}>
+                      {row.invoiceNumber}
+                    </td>
+                    <td>{row.createdAt}</td>
+                    <td>{row.paymentStatus}</td>
+                    <td className="num">{money(row.total)}</td>
+                    <td>
+                      <Badge tone={row.status === "COMPLETED" ? "ok" : "danger"}>{row.status}</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
 
-      <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
-        <p className="mb-2 text-[13px] font-semibold">Money today</p>
-        <Table>
-          <THead>
-            <tr>
-              <Th>Kind</Th>
-              <Th>Party</Th>
-              <Th>Note</Th>
-              <Th className="text-right">In</Th>
-              <Th className="text-right">Out</Th>
-            </tr>
-          </THead>
-          <tbody>
-            {transactions
-              .filter((t) => t.date === "2026-08-13")
-              .map((t) => (
-                <tr key={t.id}>
-                  <Td className="capitalize">{t.kind}</Td>
-                  <Td>{t.party}</Td>
-                  <Td className="text-slate-500">{t.note}</Td>
-                  <Td className="text-right tabular-nums">{t.inflow ? money(t.inflow) : "—"}</Td>
-                  <Td className="text-right tabular-nums">{t.outflow ? money(t.outflow) : "—"}</Td>
-                </tr>
-              ))}
-          </tbody>
-        </Table>
+        <section className="panel">
+          <div className="panel-head">
+            <h2 className="panel-title">What happens next</h2>
+          </div>
+          <div className="panel-body">
+            <p className="ui-note" style={{ marginBottom: 10 }}>
+              A sale writes Invoice + InvoiceItem, consumes FIFO ProductLot, posts StockMovement SALE, and if unpaid posts CustomerLedger CREDIT_SALE.
+            </p>
+            <p className="ui-note">
+              Receive stock on Lots. Move between shops on Transfers. Assemble fans on Production. Staff permissions live on Staff.
+            </p>
+          </div>
+        </section>
       </div>
     </div>
   );

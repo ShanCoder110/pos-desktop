@@ -1,61 +1,119 @@
-import { useState } from "react";
-import { Button } from "@/components/ui/Button";
-import { PageHeader, RowActions, SearchBox } from "@/components/ui/Chrome";
-import { Field, Input } from "@/components/ui/Field";
-import { ConfirmDialog, Modal } from "@/components/ui/Modal";
-import { Table, THead, Th, Td } from "@/components/ui/Table";
-import { suppliers as seed } from "@/shared/mock";
-import type { Supplier } from "@/shared/types";
-import { money } from "@/utils/format";
+import { useMemo, useState } from "react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  Badge,
+  Button,
+  ConfirmDialog,
+  Drawer,
+  EmptyRow,
+  Field,
+  KpiCard,
+  Menu,
+  MenuItem,
+  PageHead,
+  Pagination,
+  SearchInput,
+  Table,
+  Tabs,
+  Td,
+  TextArea,
+  TextInput,
+  THead,
+  Th,
+} from "@/components/common";
+import { suppliers as seed } from "@/shared/domain/mock";
+import type { SupplierRow } from "@/shared/domain/types";
 
-const blank: Supplier = { id: "", name: "", phone: "", payable: 0 };
+const PAGE = 10;
+const blank: SupplierRow = { id: "", name: "", phone: "", email: "", address: "", notes: "", isActive: true };
 
 export function SuppliersPage() {
   const [rows, setRows] = useState(seed);
   const [q, setQ] = useState("");
-  const [edit, setEdit] = useState<Supplier | null>(null);
-  const [remove, setRemove] = useState<Supplier | null>(null);
-  const shown = rows.filter((r) => r.name.toLowerCase().includes(q.toLowerCase()));
+  const [tab, setTab] = useState("active");
+  const [page, setPage] = useState(1);
+  const [edit, setEdit] = useState<SupplierRow | null>(null);
+  const [remove, setRemove] = useState<SupplierRow | null>(null);
+
+  const filtered = useMemo(() => {
+    return rows.filter((r) => {
+      if (q && !`${r.name} ${r.phone}`.toLowerCase().includes(q.toLowerCase())) return false;
+      if (tab === "active") return r.isActive;
+      if (tab === "inactive") return !r.isActive;
+      return true;
+    });
+  }, [rows, q, tab]);
+
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
+  const shown = filtered.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div>
-      <PageHeader
-        title="Suppliers"
-        hint="Who you buy from, and what this shop still owes them."
-        actions={
-          <>
-            <SearchBox value={q} onChange={setQ} placeholder="Search" />
-            <Button variant="primary" onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}>
-              Add
-            </Button>
-          </>
-        }
+    <div className="ui-stack">
+      <PageHead title="Suppliers">
+        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}>
+          Add supplier
+        </Button>
+      </PageHead>
+      <p className="ui-note">No supplier ledger in V1. Receiving stock creates a ProductLot with this supplier_id.</p>
+      <div className="ui-kpi-row">
+        <KpiCard label="Active" value={rows.filter((r) => r.isActive).length} hint="Can receive lots" tone="ok" />
+        <KpiCard label="Inactive" value={rows.filter((r) => !r.isActive).length} hint="Hidden on receive" tone="stale" />
+      </div>
+      <Tabs
+        value={tab}
+        onChange={(id) => {
+          setTab(id);
+          setPage(1);
+        }}
+        items={[
+          { id: "all", label: "All" },
+          { id: "active", label: "Active" },
+          { id: "inactive", label: "Inactive" },
+        ]}
       />
-      <Table>
+      <Table
+        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Name or phone" />}
+        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={filtered.length} onChange={setPage} />}
+      >
         <THead>
           <tr>
             <Th>Name</Th>
             <Th>Phone</Th>
-            <Th className="text-right">We owe</Th>
+            <Th>Email</Th>
+            <Th>Address</Th>
+            <Th>Active</Th>
             <Th />
           </tr>
         </THead>
         <tbody>
+          {shown.length === 0 ? <EmptyRow cols={6} /> : null}
           {shown.map((row) => (
             <tr key={row.id}>
               <Td>{row.name}</Td>
-              <Td className="text-slate-500">{row.phone}</Td>
-              <Td className="text-right tabular-nums">{row.payable ? money(row.payable) : "—"}</Td>
+              <Td>{row.phone || "—"}</Td>
+              <Td>{row.email || "—"}</Td>
+              <Td>{row.address || "—"}</Td>
               <Td>
-                <RowActions onEdit={() => setEdit(row)} onDelete={() => setRemove(row)} />
+                <Badge tone={row.isActive ? "ok" : "danger"}>{row.isActive ? "Yes" : "No"}</Badge>
+              </Td>
+              <Td>
+                <Menu>
+                  <MenuItem icon={<Pencil size={14} />} onClick={() => setEdit(row)}>
+                    Edit
+                  </MenuItem>
+                  <MenuItem danger icon={<Trash2 size={14} />} onClick={() => setRemove(row)}>
+                    Delete
+                  </MenuItem>
+                </Menu>
               </Td>
             </tr>
           ))}
         </tbody>
       </Table>
-      <Modal
+
+      <Drawer
         open={Boolean(edit)}
-        title="Supplier"
+        title={edit?.name ? "Edit supplier" : "Add supplier"}
         onClose={() => setEdit(null)}
         footer={
           <>
@@ -64,7 +122,7 @@ export function SuppliersPage() {
               variant="primary"
               onClick={() => {
                 if (!edit?.name) return;
-                setRows((prev) => (prev.some((r) => r.id === edit.id) ? prev.map((r) => (r.id === edit.id ? edit : r)) : [...prev, edit]));
+                setRows((p) => (p.some((r) => r.id === edit.id) ? p.map((r) => (r.id === edit.id ? edit : r)) : [...p, edit]));
                 setEdit(null);
               }}
             >
@@ -74,23 +132,30 @@ export function SuppliersPage() {
         }
       >
         {edit ? (
-          <div className="grid gap-3">
+          <div className="ui-stack">
             <Field label="Name">
-              <Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+              <TextInput value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
             </Field>
             <Field label="Phone">
-              <Input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} />
+              <TextInput value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} />
             </Field>
-            <Field label="Payable">
-              <Input value={String(edit.payable)} onChange={(e) => setEdit({ ...edit, payable: Number(e.target.value) || 0 })} />
+            <Field label="Email">
+              <TextInput value={edit.email} onChange={(e) => setEdit({ ...edit, email: e.target.value })} />
+            </Field>
+            <Field label="Address">
+              <TextInput value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} />
+            </Field>
+            <Field label="Notes">
+              <TextArea value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} />
             </Field>
           </div>
         ) : null}
-      </Modal>
+      </Drawer>
+
       <ConfirmDialog
         open={Boolean(remove)}
         title="Delete supplier?"
-        body="Blocked if lots or reorders still point here. Design only — this demo removes the row."
+        body="Blocked if lots still point here."
         onCancel={() => setRemove(null)}
         onConfirm={() => {
           if (remove) setRows((p) => p.filter((r) => r.id !== remove.id));

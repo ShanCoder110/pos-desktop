@@ -1,232 +1,172 @@
 import { useMemo, useState } from "react";
-import { Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/Button";
-import { PageHeader, RowActions } from "@/components/ui/Chrome";
-import { Field, Input, Select } from "@/components/ui/Field";
-import { ConfirmDialog, Modal } from "@/components/ui/Modal";
-import { Table, THead, Th, Td } from "@/components/ui/Table";
-import { creditSales as seed, customerName, customers, products, suppliers } from "@/shared/mock";
-import { useSettings } from "@/shared/settings";
-import type { CreditSale, InvoiceLine } from "@/shared/types";
-import { money } from "@/utils/format";
-import { consumeLots } from "@/utils/lots";
+import { Eye, Plus } from "lucide-react";
+import {
+  Badge,
+  Button,
+  Drawer,
+  EmptyRow,
+  Field,
+  KpiCard,
+  PageHead,
+  Pagination,
+  SearchInput,
+  SelectInput,
+  Table,
+  Tabs,
+  Td,
+  TextInput,
+  THead,
+  Th,
+} from "@/components/common";
+import { domainCustomers as seed, ledger, branchName, invoiceNumber } from "@/shared/domain/mock";
+import type { DomainCustomer } from "@/shared/domain/types";
+import { creditState, money } from "@/utils/format";
+
+const PAGE = 10;
 
 export function CreditSalesPage() {
-  const { settings } = useSettings();
-  const [rows, setRows] = useState(seed);
-  const [edit, setEdit] = useState<CreditSale | null>(null);
-  const [remove, setRemove] = useState<CreditSale | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [customerId, setCustomerId] = useState("");
-  const [lines, setLines] = useState<InvoiceLine[]>([]);
   const [q, setQ] = useState("");
-  const [qty, setQty] = useState("1");
-  const [supplierId, setSupplierId] = useState("");
+  const [tab, setTab] = useState("all");
+  const [page, setPage] = useState(1);
+  const [open, setOpen] = useState<DomainCustomer | null>(null);
+  const [pay, setPay] = useState("");
 
-  const results = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return [];
-    return products.filter((p) => p.name.toLowerCase().includes(s)).slice(0, 6);
-  }, [q]);
+  const rows = useMemo(() => {
+    return seed.filter((r) => {
+      if (!r.isActive && tab !== "all") return false;
+      if (q && !`${r.name} ${r.phone}`.toLowerCase().includes(q.toLowerCase())) return false;
+      if (tab === "owe") return r.currentBalance > 0;
+      if (tab === "advance") return r.currentBalance < 0;
+      if (tab === "settled") return r.currentBalance === 0 && r.isActive;
+      return true;
+    });
+  }, [q, tab]);
 
-  function addLine(productId: string) {
-    const product = products.find((p) => p.id === productId);
-    if (!product) return;
-    const result = consumeLots(product, Number(qty) || 1, settings.stockPick, supplierId || undefined);
-    if ("error" in result) return;
-    setLines((p) => [
-      ...p,
-      {
-        id: crypto.randomUUID(),
-        productId: product.id,
-        name: product.name,
-        qty: Number(qty) || 1,
-        unit: product.unit,
-        price: result.price,
-        minFloor: result.minFloor,
-        lotsNote: result.lotsNote,
-      },
-    ]);
-    setQ("");
-  }
-
-  const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
-  const customer = customers.find((c) => c.id === customerId);
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  const shown = rows.slice((page - 1) * PAGE, page * PAGE);
+  const owing = seed.filter((c) => c.currentBalance > 0);
+  const lines = open ? ledger.filter((l) => l.customerId === open.id) : [];
 
   return (
-    <div>
-      <PageHeader
-        title="Credit sale"
-        hint="Pick a customer first, then add products. Same lot rules as POS. No cash drawer."
-        actions={
-          <Button variant="primary" onClick={() => { setCreating(true); setCustomerId(""); setLines([]); }}>
-            New credit sale
-          </Button>
-        }
+    <div className="ui-stack">
+      <PageHead title="Credit / Udhaar">
+        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(owing[0] ?? seed[0])}>
+          Record payment
+        </Button>
+      </PageHead>
+      <p className="ui-note">
+        + balance = customer owes. 0 = settled. − balance = advance on the next bill. Walk-in invoices never hit this ledger.
+      </p>
+      <div className="ui-kpi-row">
+        <KpiCard label="Owed to shop" value={money(owing.reduce((s, c) => s + c.currentBalance, 0))} hint="Collect" tone="danger" />
+        <KpiCard label="On udhaar" value={owing.length} hint="Customers" tone="warn" />
+        <KpiCard label="Advance" value={money(Math.abs(seed.filter((c) => c.currentBalance < 0).reduce((s, c) => s + c.currentBalance, 0)))} hint="Held for next bill" tone="ok" />
+        <KpiCard label="Settled" value={seed.filter((c) => c.currentBalance === 0 && c.isActive).length} hint="Zero khata" tone="ok" />
+      </div>
+      <Tabs
+        value={tab}
+        onChange={(id) => {
+          setTab(id);
+          setPage(1);
+        }}
+        items={[
+          { id: "all", label: "All" },
+          { id: "owe", label: "Owes" },
+          { id: "advance", label: "Advance" },
+          { id: "settled", label: "Settled" },
+        ]}
       />
-      <Table>
+      <Table
+        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Name or phone" />}
+        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
+      >
         <THead>
           <tr>
-            <Th>No</Th>
-            <Th>Date</Th>
             <Th>Customer</Th>
-            <Th className="text-right">Total</Th>
+            <Th>Phone</Th>
+            <Th>Limit</Th>
+            <Th>Khata</Th>
             <Th />
           </tr>
         </THead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <Td>{row.no}</Td>
-              <Td>{row.date}</Td>
-              <Td>{customerName(row.customerId)}</Td>
-              <Td className="text-right tabular-nums">{money(row.total)}</Td>
-              <Td>
-                <RowActions onEdit={() => setEdit(row)} onDelete={() => setRemove(row)} />
-              </Td>
-            </tr>
-          ))}
+          {shown.length === 0 ? <EmptyRow cols={5} /> : null}
+          {shown.map((row) => {
+            const st = creditState(row.currentBalance);
+            return (
+              <tr key={row.id}>
+                <Td>{row.name}</Td>
+                <Td>{row.phone || "—"}</Td>
+                <Td numeric>{row.creditLimit == null ? "None" : money(row.creditLimit)}</Td>
+                <Td>
+                  <Badge tone={st.tone === "neutral" ? "info" : st.tone}>{st.text}</Badge>
+                </Td>
+                <Td>
+                  <Button size="icon" variant="ghost" onClick={() => setOpen(row)} aria-label="Ledger">
+                    <Eye size={15} />
+                  </Button>
+                </Td>
+              </tr>
+            );
+          })}
         </tbody>
       </Table>
 
-      <Modal
-        open={creating}
-        title="Credit sale"
-        wide
-        onClose={() => setCreating(false)}
+      <Drawer
+        open={Boolean(open)}
+        title={open ? `${open.name} ledger` : "Ledger"}
+        onClose={() => setOpen(null)}
         footer={
           <>
-            <Button onClick={() => setCreating(false)}>Cancel</Button>
-            <Button
-              variant="primary"
-              disabled={!customerId || !lines.length}
-              onClick={() => {
-                setRows((p) => [
-                  {
-                    id: crypto.randomUUID(),
-                    no: `CR-${220 + p.length + 1}`,
-                    date: "2026-08-13",
-                    customerId,
-                    lines,
-                    total,
-                  },
-                  ...p,
-                ]);
-                setCreating(false);
-              }}
-            >
-              Save
+            <Button onClick={() => setOpen(null)}>Close</Button>
+            <Button variant="primary" onClick={() => setOpen(null)}>
+              Save payment
             </Button>
           </>
         }
       >
-        <div className="grid gap-3">
-          <Field label="Customer">
-            <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-              <option value="">Select customer</option>
-              {customers.filter((c) => !c.isWalking).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} {c.balance < 0 ? `(owes ${money(-c.balance)})` : c.balance > 0 ? `(adv ${money(c.balance)})` : ""}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {customer ? (
-            <p className="text-[12px] text-slate-500">
-              After {money(total)} unpaid, khata becomes{" "}
-              {customer.balance - total < 0
-                ? `owes ${money(-(customer.balance - total))}`
-                : customer.balance - total > 0
-                  ? `advance ${money(customer.balance - total)}`
-                  : "settled"}
-            </p>
-          ) : null}
-          {settings.stockPick === "ask" ? (
-            <Field label="Supplier for next line">
-              <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                <option value="">Select supplier</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
+        {open ? (
+          <div className="ui-stack">
+            <p className="ui-note">A payment writes CustomerLedger PAYMENT (credit) and Transaction CUSTOMER_PAYMENT IN.</p>
+            <Field label="Amount received">
+              <TextInput value={pay} onChange={(e) => setPay(e.target.value)} placeholder="0" />
             </Field>
-          ) : null}
-          <div className="flex gap-2">
-            <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && results[0]) addLine(results[0].id);
-              }}
-              placeholder="Search product, Enter, then qty"
-            />
-            <Input className="w-20" value={qty} onChange={(e) => setQty(e.target.value)} />
+            <Field label="Method">
+              <SelectInput defaultValue="CASH">
+                <option>CASH</option>
+                <option>CARD</option>
+                <option>BANK</option>
+              </SelectInput>
+            </Field>
+            <Table>
+              <THead>
+                <tr>
+                  <Th>When</Th>
+                  <Th>Type</Th>
+                  <Th>Debit</Th>
+                  <Th>Credit</Th>
+                  <Th>After</Th>
+                </tr>
+              </THead>
+              <tbody>
+                {lines.length === 0 ? <EmptyRow cols={5} text="No ledger lines" /> : null}
+                {lines.map((line) => (
+                  <tr key={line.id}>
+                    <Td>{line.createdAt}</Td>
+                    <Td>
+                      {line.type}
+                      <span className="ui-note"> {line.invoiceId ? invoiceNumber(line.invoiceId) : branchName(line.branchId)}</span>
+                    </Td>
+                    <Td numeric>{line.debit ? money(line.debit) : "—"}</Td>
+                    <Td numeric>{line.credit ? money(line.credit) : "—"}</Td>
+                    <Td numeric>{creditState(line.balanceAfter).text}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
           </div>
-          {results.map((p) => (
-            <button key={p.id} className="rounded border border-slate-200 px-2 py-1 text-left hover:bg-slate-50" onClick={() => addLine(p.id)}>
-              {p.name} · shop {p.stock} {p.unit}
-            </button>
-          ))}
-          {lines.map((line) => (
-            <div key={line.id} className="flex items-center justify-between text-[13px]">
-              <span>
-                {line.qty} {line.unit} {line.name}
-                <span className="ml-2 text-[11px] text-slate-400">{line.lotsNote}</span>
-              </span>
-              <span className="flex items-center gap-2">
-                {money(line.qty * line.price)}
-                <button onClick={() => setLines((p) => p.filter((l) => l.id !== line.id))}>
-                  <Trash2 size={13} className="text-rose-600" />
-                </button>
-              </span>
-            </div>
-          ))}
-        </div>
-      </Modal>
-      <Modal
-        open={Boolean(edit)}
-        title="Update credit sale"
-        onClose={() => setEdit(null)}
-        footer={
-          <>
-            <Button onClick={() => setEdit(null)}>Cancel</Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                if (!edit) return;
-                setRows((p) => p.map((r) => (r.id === edit.id ? edit : r)));
-                setEdit(null);
-              }}
-            >
-              Save
-            </Button>
-          </>
-        }
-      >
-        {edit ? (
-          <Field label="Customer">
-            <Select value={edit.customerId} onChange={(e) => setEdit({ ...edit, customerId: e.target.value })}>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
         ) : null}
-      </Modal>
-      <ConfirmDialog
-        open={Boolean(remove)}
-        title="Delete credit sale?"
-        body="Customer khata from this sale should be reversed in the live app."
-        onCancel={() => setRemove(null)}
-        onConfirm={() => {
-          if (remove) setRows((p) => p.filter((r) => r.id !== remove.id));
-          setRemove(null);
-        }}
-      />
+      </Drawer>
     </div>
   );
 }

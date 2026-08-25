@@ -1,133 +1,165 @@
-import { useState } from "react";
-import { Button } from "@/components/ui/Button";
-import { PageHeader, RowActions } from "@/components/ui/Chrome";
-import { Field, Input } from "@/components/ui/Field";
-import { ConfirmDialog, Modal } from "@/components/ui/Modal";
-import { Table, THead, Th, Td } from "@/components/ui/Table";
-import { employees as seed } from "@/shared/mock";
-import type { Employee } from "@/shared/types";
-import { money } from "@/utils/format";
+import { useMemo, useState } from "react";
+import { Pencil, Plus } from "lucide-react";
+import {
+  Badge,
+  Button,
+  Drawer,
+  EmptyRow,
+  Field,
+  KpiCard,
+  PageHead,
+  Pagination,
+  SearchInput,
+  SelectInput,
+  Table,
+  Tabs,
+  Td,
+  TextInput,
+  THead,
+  Th,
+  Toggle,
+} from "@/components/common";
+import { staffUsers as seed, userPermissions, branchName, branches } from "@/shared/domain/mock";
+import type { StaffUser, UserRole } from "@/shared/domain/types";
 
-const blank: Employee = { id: "", name: "", role: "Cashier", salary: 0, paidThisMonth: 0 };
+const PAGE = 10;
+const PERMS = ["invoice.create", "product.edit", "return.create", "expense.view", "report.view"];
 
 export function EmployeesPage() {
-  const [rows, setRows] = useState(seed);
-  const [edit, setEdit] = useState<Employee | null>(null);
-  const [remove, setRemove] = useState<Employee | null>(null);
-  const [pay, setPay] = useState<Employee | null>(null);
-  const [amount, setAmount] = useState("");
+  const [q, setQ] = useState("");
+  const [tab, setTab] = useState("all");
+  const [page, setPage] = useState(1);
+  const [open, setOpen] = useState<StaffUser | null>(null);
+
+  const rows = useMemo(() => {
+    return seed.filter((r) => {
+      if (q && !`${r.name} ${r.username}`.toLowerCase().includes(q.toLowerCase())) return false;
+      if (tab === "inactive") return !r.isActive;
+      if (tab !== "all" && tab !== "inactive") return r.role === (tab.toUpperCase() as UserRole);
+      return tab === "inactive" ? !r.isActive : true;
+    });
+  }, [q, tab]);
+
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  const shown = rows.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div>
-      <PageHeader
-        title="Employees"
-        hint="Salary, partial pay, repair commission is recorded on the job."
-        actions={
-          <Button variant="primary" onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}>
-            Add
-          </Button>
-        }
+    <div className="ui-stack">
+      <PageHead title="Staff">
+        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(seed[1])}>
+          Add user
+        </Button>
+      </PageHead>
+      <p className="ui-note">
+        Users log in with username + password_hash. Owner sees every screen. Cashier permissions are per-flag (invoice.create, product.edit, …).
+      </p>
+      <div className="ui-kpi-row">
+        <KpiCard label="Active" value={seed.filter((u) => u.isActive).length} hint="Can sign in" tone="ok" />
+        <KpiCard label="Cashiers" value={seed.filter((u) => u.role === "CASHIER").length} hint="POS users" tone="ok" />
+        <KpiCard label="Inactive" value={seed.filter((u) => !u.isActive).length} hint="Blocked" tone="stale" />
+      </div>
+      <Tabs
+        value={tab}
+        onChange={(id) => {
+          setTab(id);
+          setPage(1);
+        }}
+        items={[
+          { id: "all", label: "All" },
+          { id: "cashier", label: "Cashier" },
+          { id: "manager", label: "Manager" },
+          { id: "technician", label: "Technician" },
+          { id: "inactive", label: "Inactive" },
+        ]}
       />
-      <Table>
+      <Table
+        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Name or username" />}
+        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
+      >
         <THead>
           <tr>
             <Th>Name</Th>
+            <Th>Username</Th>
             <Th>Role</Th>
-            <Th className="text-right">Salary</Th>
-            <Th className="text-right">Paid</Th>
-            <Th className="text-right">Left</Th>
+            <Th>Branch</Th>
+            <Th>Phone</Th>
+            <Th>Active</Th>
             <Th />
           </tr>
         </THead>
         <tbody>
-          {rows.map((row) => (
+          {shown.length === 0 ? <EmptyRow cols={7} /> : null}
+          {shown.map((row) => (
             <tr key={row.id}>
               <Td>{row.name}</Td>
-              <Td>{row.role}</Td>
-              <Td className="text-right tabular-nums">{money(row.salary)}</Td>
-              <Td className="text-right tabular-nums">{money(row.paidThisMonth)}</Td>
-              <Td className="text-right tabular-nums">{money(row.salary - row.paidThisMonth)}</Td>
+              <Td>{row.username}</Td>
               <Td>
-                <div className="flex justify-end gap-1">
-                  <Button size="sm" onClick={() => { setPay(row); setAmount(""); }}>
-                    Pay
-                  </Button>
-                  <RowActions onEdit={() => setEdit(row)} onDelete={() => setRemove(row)} />
-                </div>
+                <Badge tone={row.role === "OWNER" ? "ok" : "info"}>{row.role}</Badge>
+              </Td>
+              <Td>{branchName(row.branchId)}</Td>
+              <Td>{row.phone || "—"}</Td>
+              <Td>
+                <Badge tone={row.isActive ? "ok" : "danger"}>{row.isActive ? "Yes" : "No"}</Badge>
+              </Td>
+              <Td>
+                <Button size="icon" variant="ghost" onClick={() => setOpen(row)} aria-label="Edit">
+                  <Pencil size={15} />
+                </Button>
               </Td>
             </tr>
           ))}
         </tbody>
       </Table>
-      <Modal
-        open={Boolean(edit)}
-        title="Employee"
-        onClose={() => setEdit(null)}
+
+      <Drawer
+        open={Boolean(open)}
+        title={open ? open.name : "User"}
+        onClose={() => setOpen(null)}
         footer={
           <>
-            <Button onClick={() => setEdit(null)}>Cancel</Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                if (!edit?.name) return;
-                setRows((prev) => (prev.some((r) => r.id === edit.id) ? prev.map((r) => (r.id === edit.id ? edit : r)) : [...prev, edit]));
-                setEdit(null);
-              }}
-            >
+            <Button onClick={() => setOpen(null)}>Cancel</Button>
+            <Button variant="primary" onClick={() => setOpen(null)}>
               Save
             </Button>
           </>
         }
       >
-        {edit ? (
-          <div className="grid gap-3">
+        {open ? (
+          <div className="ui-stack">
             <Field label="Name">
-              <Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+              <TextInput defaultValue={open.name} />
+            </Field>
+            <Field label="Username">
+              <TextInput defaultValue={open.username} />
             </Field>
             <Field label="Role">
-              <Input value={edit.role} onChange={(e) => setEdit({ ...edit, role: e.target.value })} />
+              <SelectInput defaultValue={open.role}>
+                <option>OWNER</option>
+                <option>MANAGER</option>
+                <option>CASHIER</option>
+                <option>TECHNICIAN</option>
+              </SelectInput>
             </Field>
-            <Field label="Salary">
-              <Input value={String(edit.salary)} onChange={(e) => setEdit({ ...edit, salary: Number(e.target.value) || 0 })} />
+            <Field label="Home branch">
+              <SelectInput defaultValue={open.branchId}>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </SelectInput>
             </Field>
+            <p className="ui-page-title" style={{ fontSize: 14 }}>
+              Permissions
+            </p>
+            {PERMS.map((perm) => {
+              const row = userPermissions.find((p) => p.userId === open.id && p.permission === perm);
+              const on = open.role === "OWNER" || Boolean(row?.isAllowed);
+              return <Toggle key={perm} checked={on} onChange={() => undefined} label={perm} />;
+            })}
           </div>
         ) : null}
-      </Modal>
-      <Modal
-        open={Boolean(pay)}
-        title={`Pay ${pay?.name ?? ""}`}
-        onClose={() => setPay(null)}
-        footer={
-          <>
-            <Button onClick={() => setPay(null)}>Cancel</Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                if (!pay) return;
-                const n = Number(amount) || 0;
-                setRows((p) => p.map((r) => (r.id === pay.id ? { ...r, paidThisMonth: r.paidThisMonth + n } : r)));
-                setPay(null);
-              }}
-            >
-              Update
-            </Button>
-          </>
-        }
-      >
-        <Field label="Amount this time">
-          <Input value={amount} onChange={(e) => setAmount(e.target.value)} />
-        </Field>
-      </Modal>
-      <ConfirmDialog
-        open={Boolean(remove)}
-        title="Delete employee?"
-        body={`${remove?.name} will be removed.`}
-        onCancel={() => setRemove(null)}
-        onConfirm={() => {
-          if (remove) setRows((p) => p.filter((r) => r.id !== remove.id));
-          setRemove(null);
-        }}
-      />
+      </Drawer>
     </div>
   );
 }

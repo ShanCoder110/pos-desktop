@@ -1,67 +1,141 @@
-import { useState } from "react";
-import { Button } from "@/components/ui/Button";
-import { BalanceBadge, PageHeader, RowActions, SearchBox } from "@/components/ui/Chrome";
-import { Field, Input } from "@/components/ui/Field";
-import { ConfirmDialog, Modal } from "@/components/ui/Modal";
-import { Table, THead, Th, Td } from "@/components/ui/Table";
-import { customers as seed } from "@/shared/mock";
-import type { Customer } from "@/shared/types";
+import { useMemo, useState } from "react";
+import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  Badge,
+  Button,
+  ConfirmDialog,
+  Drawer,
+  EmptyRow,
+  Field,
+  KpiCard,
+  Menu,
+  MenuItem,
+  PageHead,
+  Pagination,
+  SearchInput,
+  Table,
+  Tabs,
+  Td,
+  TextArea,
+  TextInput,
+  THead,
+  Th,
+} from "@/components/common";
+import { domainCustomers as seed, ledger } from "@/shared/domain/mock";
+import type { DomainCustomer } from "@/shared/domain/types";
+import { creditState, money } from "@/utils/format";
 
-const blank: Customer = { id: "", name: "", phone: "", balance: 0, isWalking: false };
+const PAGE = 10;
+const blank: DomainCustomer = {
+  id: "",
+  name: "",
+  phone: "",
+  address: "",
+  currentBalance: 0,
+  creditLimit: null,
+  notes: "",
+  isActive: true,
+};
 
 export function CustomersPage() {
   const [rows, setRows] = useState(seed);
   const [q, setQ] = useState("");
-  const [edit, setEdit] = useState<Customer | null>(null);
-  const [remove, setRemove] = useState<Customer | null>(null);
+  const [tab, setTab] = useState("all");
+  const [page, setPage] = useState(1);
+  const [edit, setEdit] = useState<DomainCustomer | null>(null);
+  const [open, setOpen] = useState<DomainCustomer | null>(null);
+  const [remove, setRemove] = useState<DomainCustomer | null>(null);
 
-  const shown = rows.filter((r) => r.name.toLowerCase().includes(q.toLowerCase()));
+  const filtered = useMemo(() => {
+    return rows.filter((r) => {
+      if (q && !`${r.name} ${r.phone}`.toLowerCase().includes(q.toLowerCase())) return false;
+      if (tab === "owe") return r.currentBalance > 0;
+      if (tab === "inactive") return !r.isActive;
+      return tab === "all" ? true : r.isActive;
+    });
+  }, [rows, q, tab]);
+
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
+  const shown = filtered.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div>
-      <PageHeader
-        title="Customers"
-        hint="Negative = they pay us later. Positive = store credit used on the next bill."
-        actions={
-          <>
-            <SearchBox value={q} onChange={setQ} placeholder="Search name" />
-            <Button variant="primary" onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}>
-              Add
-            </Button>
-          </>
-        }
+    <div className="ui-stack">
+      <PageHead title="Customers">
+        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}>
+          Add customer
+        </Button>
+      </PageHead>
+      <p className="ui-note">
+        Walk-in sales leave customer_id empty on the invoice — they never get a khata. +balance owes the shop. −balance is advance.
+      </p>
+      <div className="ui-kpi-row">
+        <KpiCard label="Active" value={rows.filter((r) => r.isActive).length} hint="Can sell on name" tone="ok" />
+        <KpiCard label="Owing" value={rows.filter((r) => r.currentBalance > 0).length} hint="Open udhaar" tone="warn" />
+        <KpiCard label="To collect" value={money(rows.filter((r) => r.currentBalance > 0).reduce((s, r) => s + r.currentBalance, 0))} hint="Sum of +" tone="danger" />
+      </div>
+      <Tabs
+        value={tab}
+        onChange={(id) => {
+          setTab(id);
+          setPage(1);
+        }}
+        items={[
+          { id: "all", label: "All" },
+          { id: "owe", label: "Owes" },
+          { id: "inactive", label: "Inactive" },
+        ]}
       />
-      <Table>
+      <Table
+        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Name or phone" />}
+        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={filtered.length} onChange={setPage} />}
+      >
         <THead>
           <tr>
             <Th>Name</Th>
             <Th>Phone</Th>
+            <Th>Limit</Th>
             <Th>Khata</Th>
+            <Th>Active</Th>
             <Th />
           </tr>
         </THead>
         <tbody>
-          {shown.map((row) => (
-            <tr key={row.id} className={row.isWalking ? "bg-slate-50" : undefined}>
-              <Td>
-                {row.name}
-                {row.isWalking ? <span className="ml-2 text-[11px] text-slate-400">default</span> : null}
-              </Td>
-              <Td className="text-slate-500">{row.phone || "—"}</Td>
-              <Td>
-                <BalanceBadge n={row.balance} />
-              </Td>
-              <Td>
-                <RowActions onEdit={() => setEdit(row)} onDelete={() => setRemove(row)} />
-              </Td>
-            </tr>
-          ))}
+          {shown.length === 0 ? <EmptyRow cols={6} /> : null}
+          {shown.map((row) => {
+            const st = creditState(row.currentBalance);
+            return (
+              <tr key={row.id}>
+                <Td>{row.name}</Td>
+                <Td>{row.phone || "—"}</Td>
+                <Td numeric>{row.creditLimit == null ? "None" : money(row.creditLimit)}</Td>
+                <Td>
+                  <Badge tone={st.tone === "neutral" ? "info" : st.tone}>{st.text}</Badge>
+                </Td>
+                <Td>
+                  <Badge tone={row.isActive ? "ok" : "danger"}>{row.isActive ? "Yes" : "No"}</Badge>
+                </Td>
+                <Td>
+                  <Menu>
+                    <MenuItem icon={<Eye size={14} />} onClick={() => setOpen(row)}>
+                      Ledger
+                    </MenuItem>
+                    <MenuItem icon={<Pencil size={14} />} onClick={() => setEdit(row)}>
+                      Edit
+                    </MenuItem>
+                    <MenuItem danger icon={<Trash2 size={14} />} onClick={() => setRemove(row)}>
+                      Delete
+                    </MenuItem>
+                  </Menu>
+                </Td>
+              </tr>
+            );
+          })}
         </tbody>
       </Table>
 
-      <Modal
+      <Drawer
         open={Boolean(edit)}
-        title={edit && rows.some((r) => r.id === edit.id && r.name) ? "Update customer" : "Add customer"}
+        title={edit?.name ? "Edit customer" : "Add customer"}
         onClose={() => setEdit(null)}
         footer={
           <>
@@ -70,7 +144,7 @@ export function CustomersPage() {
               variant="primary"
               onClick={() => {
                 if (!edit?.name) return;
-                setRows((prev) => (prev.some((r) => r.id === edit.id) ? prev.map((r) => (r.id === edit.id ? edit : r)) : [...prev, edit]));
+                setRows((p) => (p.some((r) => r.id === edit.id) ? p.map((r) => (r.id === edit.id ? edit : r)) : [...p, edit]));
                 setEdit(null);
               }}
             >
@@ -80,30 +154,63 @@ export function CustomersPage() {
         }
       >
         {edit ? (
-          <div className="grid gap-3">
+          <div className="ui-stack">
             <Field label="Name">
-              <Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+              <TextInput value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
             </Field>
             <Field label="Phone">
-              <Input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} placeholder="Needed for WhatsApp" />
+              <TextInput value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} />
             </Field>
-            <Field label="Opening khata (− they owe, + advance)">
-              <Input
-                value={String(edit.balance)}
-                onChange={(e) => setEdit({ ...edit, balance: Number(e.target.value) || 0 })}
+            <Field label="Address">
+              <TextInput value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} />
+            </Field>
+            <Field label="Credit limit (empty = none)">
+              <TextInput
+                value={edit.creditLimit == null ? "" : String(edit.creditLimit)}
+                onChange={(e) => setEdit({ ...edit, creditLimit: e.target.value === "" ? null : Number(e.target.value) || 0 })}
               />
+            </Field>
+            <Field label="Notes">
+              <TextArea value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} />
             </Field>
           </div>
         ) : null}
-      </Modal>
+      </Drawer>
+
+      <Drawer open={Boolean(open)} title={open ? `${open.name} ledger` : "Ledger"} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
+        {open ? (
+          <Table>
+            <THead>
+              <tr>
+                <Th>When</Th>
+                <Th>Type</Th>
+                <Th>Debit</Th>
+                <Th>Credit</Th>
+                <Th>After</Th>
+              </tr>
+            </THead>
+            <tbody>
+              {ledger.filter((l) => l.customerId === open.id).map((line) => (
+                <tr key={line.id}>
+                  <Td>{line.createdAt}</Td>
+                  <Td>{line.type}</Td>
+                  <Td numeric>{line.debit ? money(line.debit) : "—"}</Td>
+                  <Td numeric>{line.credit ? money(line.credit) : "—"}</Td>
+                  <Td numeric>{creditState(line.balanceAfter).text}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        ) : null}
+      </Drawer>
 
       <ConfirmDialog
         open={Boolean(remove)}
         title="Delete customer?"
-        body={remove?.isWalking ? "Walking customer is the default. Deleting is blocked." : `${remove?.name} will be removed from the directory.`}
+        body="Blocked if invoices or ledger lines still point here."
         onCancel={() => setRemove(null)}
         onConfirm={() => {
-          if (remove && !remove.isWalking) setRows((p) => p.filter((r) => r.id !== remove.id));
+          if (remove) setRows((p) => p.filter((r) => r.id !== remove.id));
           setRemove(null);
         }}
       />

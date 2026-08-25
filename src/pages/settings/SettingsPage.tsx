@@ -1,99 +1,152 @@
-import type { ReactNode } from "react";
-import { Button } from "@/components/ui/Button";
-import { PageHeader } from "@/components/ui/Chrome";
-import { Field, Input, Select, Textarea, Toggle } from "@/components/ui/Field";
-import { stockPickLabel, useSettings } from "@/shared/settings";
-import type { PrintSize, StockPick } from "@/shared/types";
+import { useState } from "react";
+import { Badge, Button, Field, PageHead, SelectInput, Table, Tabs, Td, TextArea, TextInput, THead, Th, Toggle } from "@/components/common";
+import { devices, syncLogs, branchName } from "@/shared/domain/mock";
+import { useSettings } from "@/shared/settings";
 
 export function SettingsPage() {
   const { settings, setSettings } = useSettings();
-  const patch = <K extends keyof typeof settings>(key: K, value: (typeof settings)[K]) =>
-    setSettings({ ...settings, [key]: value });
+  const [tab, setTab] = useState("business");
+  const [name, setName] = useState("Madina Electric");
+  const [phone, setPhone] = useState("042 1110001");
+  const [address, setAddress] = useState("Hall Road, Lahore");
+  const [lot, setLot] = useState(false);
+  const [neg, setNeg] = useState(false);
+  const [prefix, setPrefix] = useState("INV-");
+  const [footer, setFooter] = useState("Thank you. Goods once sold are not returned without receipt.");
+  const [showBal, setShowBal] = useState(true);
+  const [autoPrint, setAutoPrint] = useState(true);
+  const [paper, setPaper] = useState("thermal");
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <PageHeader title="Settings" hint="Short labels. No FIFO jargon on the screen." />
-
-      <Section title="Shop">
-        <Field label="Name on receipts">
-          <Input value={settings.shopName} onChange={(e) => patch("shopName", e.target.value)} />
-        </Field>
-      </Section>
-
-      <Section title="Receipt">
-        <Field label="Footer">
-          <Textarea value={settings.footer} onChange={(e) => patch("footer", e.target.value)} />
-        </Field>
-        <Toggle
-          checked={settings.showBalanceOnSlip}
-          onChange={(v) => patch("showBalanceOnSlip", v)}
-          label="Show customer khata on the slip"
-        />
-        <Field label="Paper">
-          <Select value={settings.printSize} onChange={(e) => patch("printSize", e.target.value as PrintSize)}>
-            <option value="thermal">Thermal</option>
-            <option value="a4">A4</option>
-          </Select>
-        </Field>
-        <Toggle checked={settings.autoPrint} onChange={(v) => patch("autoPrint", v)} label="Print right after a sale" />
-      </Section>
-
-      <Section title="Prices">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Default tax %">
-            <Input
-              value={String(settings.defaultTax)}
-              onChange={(e) => patch("defaultTax", Number(e.target.value) || 0)}
-            />
-          </Field>
-          <Field label="Default discount %">
-            <Input
-              value={String(settings.defaultDiscount)}
-              onChange={(e) => patch("defaultDiscount", Number(e.target.value) || 0)}
-            />
-          </Field>
+    <div className="ui-stack">
+      <PageHead title="Settings">
+        <Button variant="primary">Save</Button>
+      </PageHead>
+      <p className="ui-note">AppSetting is shop-wide. InvoiceSetting is the slip. PrinterSetting and Device are per computer. SyncLog is the last pull/push.</p>
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        items={[
+          { id: "business", label: "Business" },
+          { id: "invoice", label: "Invoice print" },
+          { id: "printer", label: "Printer" },
+          { id: "devices", label: "Devices" },
+        ]}
+      />
+      {tab === "business" ? (
+        <div className="ui-form-grid">
+          <section className="settings-card">
+            <h2 className="panel-title">AppSetting</h2>
+            <div className="ui-stack" style={{ marginTop: 12 }}>
+              <Field label="Business name">
+                <TextInput value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+              <Field label="Phone">
+                <TextInput value={phone} onChange={(e) => setPhone(e.target.value)} />
+              </Field>
+              <Field label="Address">
+                <TextInput value={address} onChange={(e) => setAddress(e.target.value)} />
+              </Field>
+              <Field label="Currency">
+                <TextInput defaultValue="PKR" />
+              </Field>
+            </div>
+          </section>
+          <section className="settings-card">
+            <h2 className="panel-title">Defaults</h2>
+            <div className="ui-stack" style={{ marginTop: 12 }}>
+              <Toggle
+                checked={settings.autoSku}
+                onChange={(v) => setSettings({ ...settings, autoSku: v })}
+                label="Assign SKU on save"
+              />
+              <Toggle checked={lot} onChange={setLot} label="branch_lot_enabled (shop default)" />
+              <Toggle checked={neg} onChange={setNeg} label="allow_negative_stock (shop default)" />
+              <p className="ui-note">SKU stays optional unless this is on. Each branch can override lot and stock rules on Branches.</p>
+            </div>
+          </section>
         </div>
-        <Toggle
-          checked={settings.minPriceRule}
-          onChange={(v) => patch("minPriceRule", v)}
-          label="Do not sell below minimum (POS, credit, repair)"
-        />
-      </Section>
-
-      <Section title="Which stock to sell">
-        <Field label="When a product has more than one supplier">
-          <Select value={settings.stockPick} onChange={(e) => patch("stockPick", e.target.value as StockPick)}>
-            <option value="oldest">{stockPickLabel.oldest}</option>
-            <option value="newest">{stockPickLabel.newest}</option>
-            <option value="ask">{stockPickLabel.ask}</option>
-          </Select>
-        </Field>
-        <p className="text-[12px] text-slate-500">
-          Oldest = first received lot. Newest = last received lot. Ask = cashier picks the supplier on every sale.
-        </p>
-      </Section>
-
-      <Section title="This computer">
-        <Toggle
-          checked={settings.isMainServer}
-          onChange={(v) => patch("isMainServer", v)}
-          label="This PC is the main server"
-        />
-        <p className="text-[12px] text-slate-500">Other tills connect over Wi‑Fi. They do not start a new shop.</p>
-        <div className="flex gap-2">
-          <Button disabled={!settings.isMainServer}>Export database</Button>
-          <Button disabled={!settings.isMainServer}>Import database</Button>
+      ) : null}
+      {tab === "invoice" ? (
+        <div className="ui-form-grid">
+          <section className="settings-card">
+            <h2 className="panel-title">InvoiceSetting</h2>
+            <div className="ui-stack" style={{ marginTop: 12 }}>
+              <Field label="Invoice prefix">
+                <TextInput value={prefix} onChange={(e) => setPrefix(e.target.value)} />
+              </Field>
+              <Field label="Footer">
+                <TextArea value={footer} onChange={(e) => setFooter(e.target.value)} />
+              </Field>
+              <Toggle checked={showBal} onChange={setShowBal} label="Show customer balance on slip" />
+            </div>
+          </section>
+          <section className="settings-card">
+            <h2 className="panel-title">Paper</h2>
+            <div className="ui-stack" style={{ marginTop: 12 }}>
+              <Field label="Paper size">
+                <SelectInput value={paper} onChange={(e) => setPaper(e.target.value)}>
+                  <option value="thermal">Thermal 80mm</option>
+                  <option value="a4">A4</option>
+                </SelectInput>
+              </Field>
+              <Toggle checked={true} onChange={() => undefined} label="Show logo" />
+              <Toggle checked={true} onChange={() => undefined} label="Show discount" />
+            </div>
+          </section>
         </div>
-      </Section>
+      ) : null}
+      {tab === "printer" ? (
+        <section className="settings-card">
+          <h2 className="panel-title">PrinterSetting for this device</h2>
+          <div className="ui-stack" style={{ marginTop: 12, maxWidth: 420 }}>
+            <Field label="Printer name">
+              <TextInput defaultValue="XP-80C" />
+            </Field>
+            <Field label="Receipt width (mm)">
+              <TextInput defaultValue="80" />
+            </Field>
+            <Field label="Copies">
+              <TextInput defaultValue="1" />
+            </Field>
+            <Toggle checked={autoPrint} onChange={setAutoPrint} label="auto_print after sale" />
+          </div>
+        </section>
+      ) : null}
+      {tab === "devices" ? (
+        <Table>
+          <THead>
+            <tr>
+              <Th>Device</Th>
+              <Th>Branch</Th>
+              <Th>Last seen</Th>
+              <Th>Last sync</Th>
+              <Th>Active</Th>
+              <Th>Last log</Th>
+            </tr>
+          </THead>
+          <tbody>
+            {devices.map((d) => {
+              const log = syncLogs.find((s) => s.deviceId === d.id);
+              return (
+                <tr key={d.id}>
+                  <Td>{d.name}</Td>
+                  <Td>{branchName(d.branchId)}</Td>
+                  <Td>{d.lastSeenAt}</Td>
+                  <Td>{d.lastSyncedAt}</Td>
+                  <Td>
+                    <Badge tone={d.isActive ? "ok" : "danger"}>{d.isActive ? "Yes" : "No"}</Badge>
+                  </Td>
+                  <Td>
+                    {log ? <Badge tone={log.status === "SUCCESS" ? "ok" : "danger"}>{log.status}</Badge> : "—"}
+                    {log?.errorMessage ? <span className="ui-note"> {log.errorMessage}</span> : null}
+                  </Td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </Table>
+      ) : null}
     </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="mb-3 rounded-md border border-slate-200 bg-white p-4">
-      <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-wide text-slate-500">{title}</h2>
-      <div className="grid gap-3">{children}</div>
-    </section>
   );
 }

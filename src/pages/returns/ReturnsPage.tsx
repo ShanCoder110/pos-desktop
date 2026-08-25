@@ -1,159 +1,167 @@
-import { useState } from "react";
-import { Button } from "@/components/ui/Button";
-import { Badge, PageHeader, RowActions } from "@/components/ui/Chrome";
-import { Field, Input, Select } from "@/components/ui/Field";
-import { ConfirmDialog, Modal } from "@/components/ui/Modal";
-import { Table, THead, Th, Td } from "@/components/ui/Table";
-import { customerName, customers, productName, products, returns as seed, supplierName, suppliers } from "@/shared/mock";
-import type { ReturnKind, ReturnTicket } from "@/shared/types";
+import { useMemo, useState } from "react";
+import { Eye } from "lucide-react";
+import {
+  Badge,
+  Button,
+  Drawer,
+  EmptyRow,
+  KpiCard,
+  PageHead,
+  Pagination,
+  SearchInput,
+  Table,
+  Tabs,
+  Td,
+  THead,
+  Th,
+} from "@/components/common";
+import { returns as seed, customerName, invoiceNumber, lotNumber, productName } from "@/shared/domain/mock";
+import type { ReturnRow } from "@/shared/domain/types";
+import { money } from "@/utils/format";
 
-const kinds: { id: ReturnKind; label: string; restock: boolean }[] = [
-  { id: "refund", label: "Refund", restock: true },
-  { id: "exchange", label: "Exchange", restock: true },
-  { id: "claim", label: "Claim", restock: false },
-  { id: "damage", label: "Damage", restock: false },
-];
+const PAGE = 10;
 
 export function ReturnsPage() {
-  const [rows, setRows] = useState(seed);
-  const [edit, setEdit] = useState<ReturnTicket | null>(null);
-  const [remove, setRemove] = useState<ReturnTicket | null>(null);
+  const [q, setQ] = useState("");
+  const [tab, setTab] = useState("all");
+  const [page, setPage] = useState(1);
+  const [open, setOpen] = useState<ReturnRow | null>(null);
+
+  const rows = useMemo(() => {
+    return seed.filter((r) => {
+      const text = `${invoiceNumber(r.invoiceId)} ${customerName(r.customerId)} ${r.reason}`.toLowerCase();
+      if (q && !text.includes(q.toLowerCase())) return false;
+      if (tab === "refund") return r.type === "REFUND";
+      if (tab === "replace") return r.type === "REPLACEMENT";
+      return true;
+    });
+  }, [q, tab]);
+
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
+  const shown = rows.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div>
-      <PageHeader
-        title="Returns"
-        hint="Refund / exchange put stock back in the old lot. Claim / damage do not. Tag a supplier if you need to track it."
-        actions={
-          <Button
-            variant="primary"
-            onClick={() =>
-              setEdit({
-                id: crypto.randomUUID(),
-                date: "2026-08-13",
-                customerId: customers[1].id,
-                productId: products[0].id,
-                qty: 1,
-                kind: "refund",
-                supplierId: "",
-              })
-            }
-          >
-            Add
-          </Button>
-        }
+    <div className="ui-stack">
+      <PageHead title="Returns" />
+      <p className="ui-note">
+        Always tied to an invoice. Goods coming back are ReturnItems (GOOD restock, DAMAGED / WARRANTY do not sell again). A replacement also writes ReplacementItems and StockMovement REPLACEMENT.
+      </p>
+      <div className="ui-kpi-row">
+        <KpiCard label="Tickets" value={seed.length} hint="All types" tone="ok" />
+        <KpiCard label="Refunds" value={seed.filter((r) => r.type === "REFUND").length} hint="Cash out" tone="warn" />
+        <KpiCard label="Replacements" value={seed.filter((r) => r.type === "REPLACEMENT").length} hint="New lot out" tone="phantom" />
+        <KpiCard label="Refunded" value={money(seed.reduce((s, r) => s + r.refundAmount, 0))} hint="Money OUT" tone="danger" />
+      </div>
+      <Tabs
+        value={tab}
+        onChange={(id) => {
+          setTab(id);
+          setPage(1);
+        }}
+        items={[
+          { id: "all", label: "All" },
+          { id: "refund", label: "Refund" },
+          { id: "replace", label: "Replacement" },
+        ]}
       />
-      <Table>
+      <Table
+        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Invoice, customer, reason" />}
+        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
+      >
         <THead>
           <tr>
-            <Th>Date</Th>
+            <Th>When</Th>
+            <Th>Invoice</Th>
             <Th>Customer</Th>
-            <Th>Product</Th>
-            <Th>Qty</Th>
-            <Th>Kind</Th>
-            <Th>Supplier</Th>
-            <Th>Stock</Th>
+            <Th>Type</Th>
+            <Th>Refund</Th>
+            <Th>Reason</Th>
             <Th />
           </tr>
         </THead>
         <tbody>
-          {rows.map((row) => {
-            const restock = row.kind === "refund" || row.kind === "exchange";
-            return (
-              <tr key={row.id}>
-                <Td>{row.date}</Td>
-                <Td>{customerName(row.customerId)}</Td>
-                <Td>{productName(row.productId)}</Td>
-                <Td>{row.qty}</Td>
-                <Td>
-                  <Badge tone={restock ? "teal" : "amber"}>{row.kind}</Badge>
-                </Td>
-                <Td>{row.supplierId ? supplierName(row.supplierId) : "—"}</Td>
-                <Td className="text-[12px] text-slate-500">{restock ? "Back to lot" : "Not sellable"}</Td>
-                <Td>
-                  <RowActions onEdit={() => setEdit(row)} onDelete={() => setRemove(row)} />
-                </Td>
-              </tr>
-            );
-          })}
+          {shown.length === 0 ? <EmptyRow cols={7} /> : null}
+          {shown.map((row) => (
+            <tr key={row.id}>
+              <Td>{row.createdAt}</Td>
+              <Td>{invoiceNumber(row.invoiceId)}</Td>
+              <Td>{customerName(row.customerId)}</Td>
+              <Td>
+                <Badge tone={row.type === "REFUND" ? "warn" : "info"}>{row.type}</Badge>
+              </Td>
+              <Td numeric>{money(row.refundAmount)}</Td>
+              <Td>{row.reason}</Td>
+              <Td>
+                <Button size="icon" variant="ghost" onClick={() => setOpen(row)} aria-label="View">
+                  <Eye size={15} />
+                </Button>
+              </Td>
+            </tr>
+          ))}
         </tbody>
       </Table>
-      <Modal
-        open={Boolean(edit)}
-        title="Return"
-        onClose={() => setEdit(null)}
-        footer={
-          <>
-            <Button onClick={() => setEdit(null)}>Cancel</Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                if (!edit) return;
-                setRows((p) => (p.some((r) => r.id === edit.id) ? p.map((r) => (r.id === edit.id ? edit : r)) : [edit, ...p]));
-                setEdit(null);
-              }}
-            >
-              Save
-            </Button>
-          </>
-        }
-      >
-        {edit ? (
-          <div className="grid gap-3">
-            <Field label="Customer">
-              <Select value={edit.customerId} onChange={(e) => setEdit({ ...edit, customerId: e.target.value })}>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
+
+      <Drawer open={Boolean(open)} title={open?.type ?? "Return"} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
+        {open ? (
+          <div className="ui-stack">
+            <p className="ui-note">{open.notes}</p>
+            <p className="ui-page-title" style={{ fontSize: 14 }}>Coming back</p>
+            <Table>
+              <THead>
+                <tr>
+                  <Th>Product</Th>
+                  <Th>Lot</Th>
+                  <Th>Qty</Th>
+                  <Th>Condition</Th>
+                  <Th>Refund</Th>
+                </tr>
+              </THead>
+              <tbody>
+                {open.returnItems.map((item, i) => (
+                  <tr key={i}>
+                    <Td>{productName(item.productId)}</Td>
+                    <Td>{lotNumber(item.lotId)}</Td>
+                    <Td numeric>{item.baseQuantity}</Td>
+                    <Td>
+                      <Badge tone={item.condition === "GOOD" ? "ok" : item.condition === "DAMAGED" ? "danger" : "warn"}>
+                        {item.condition}
+                      </Badge>
+                    </Td>
+                    <Td numeric>{money(item.refundAmount)}</Td>
+                  </tr>
                 ))}
-              </Select>
-            </Field>
-            <Field label="Product">
-              <Select value={edit.productId} onChange={(e) => setEdit({ ...edit, productId: e.target.value })}>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Qty">
-              <Input value={String(edit.qty)} onChange={(e) => setEdit({ ...edit, qty: Number(e.target.value) || 1 })} />
-            </Field>
-            <Field label="Kind">
-              <Select value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value as ReturnKind })}>
-                {kinds.map((k) => (
-                  <option key={k.id} value={k.id}>
-                    {k.label}
-                    {k.restock ? " — back to stock" : " — not sellable"}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Supplier (optional)">
-              <Select value={edit.supplierId} onChange={(e) => setEdit({ ...edit, supplierId: e.target.value })}>
-                <option value="">None</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+              </tbody>
+            </Table>
+            {open.replacementItems.length ? (
+              <>
+                <p className="ui-page-title" style={{ fontSize: 14 }}>Given instead</p>
+                <Table>
+                  <THead>
+                    <tr>
+                      <Th>Product</Th>
+                      <Th>Unit</Th>
+                      <Th>Qty</Th>
+                      <Th>Base qty</Th>
+                    </tr>
+                  </THead>
+                  <tbody>
+                    {open.replacementItems.map((item, i) => (
+                      <tr key={i}>
+                        <Td>{productName(item.productId)}</Td>
+                        <Td>{item.unitName}</Td>
+                        <Td numeric>{item.quantity}</Td>
+                        <Td numeric>{item.baseQuantity}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </>
+            ) : (
+              <p className="ui-note">No replacement line. Money out is a Transaction REFUND.</p>
+            )}
           </div>
         ) : null}
-      </Modal>
-      <ConfirmDialog
-        open={Boolean(remove)}
-        title="Delete return?"
-        body="This ticket will be removed."
-        onCancel={() => setRemove(null)}
-        onConfirm={() => {
-          if (remove) setRows((p) => p.filter((r) => r.id !== remove.id));
-          setRemove(null);
-        }}
-      />
+      </Drawer>
     </div>
   );
 }
