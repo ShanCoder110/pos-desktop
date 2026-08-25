@@ -8,11 +8,15 @@
   --paper: #fff;
   --header: #0f172a;
   --accent: #0d9488;
+  --accent-deep: #0f766e;
   --accent-bg: #f0fdfa;
+  --accent-ring: color-mix(in srgb, var(--accent) 18%, transparent);
+  --shell: #e8eef5;
   --sale: #059669;
   --sale-bg: #ecfdf5;
   --hold: #ea580c;
   --danger: #dc2626;
+  --danger-deep: #b91c1c;
   --gold: #d97706;
   --warn: #eab308;
   --warn-ink: #0f172a;

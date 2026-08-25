@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { PrintPreview } from "@/components/print/PrintPreview";
 import { useDebounce } from "@/hooks/useDebounce";
 import { customers as seedCustomers, heldBills, products as seedProducts } from "@/shared/mock";
 import { useSettings } from "@/shared/settings";
+import { routes } from "@/shared/constants/routes";
 import type { Customer, HeldBill, InvoiceLine, Product } from "@/shared/types";
 import { moneyNum } from "@/utils/format";
 import { consumeLots, remainingStock as lotStock } from "@/utils/lots";
@@ -60,7 +62,7 @@ function prettyUnit(u: string) {
   return ({ m: "Meter", mtr: "Meter", pc: "Piece", pcs: "Piece", pack: "Pack" } as Record<string, string>)[u] || u;
 }
 function packOf(p: Product) {
-  return p.isLinear && p.packQty && p.packQty > 1 ? p.packQty : 0;
+  return p.packQty && p.packQty > 1 ? p.packQty : 0;
 }
 function listPrice(p: Product, mode: PriceMode) {
   return mode === "wholesale" ? p.wholesale : p.retail;
@@ -88,9 +90,15 @@ function recompute(item: CartLine): CartLine {
 }
 
 export function PosPage() {
+  const navigate = useNavigate();
   const { settings } = useSettings();
   const searchRef = useRef<HTMLInputElement>(null);
   const qtyRef = useRef<HTMLInputElement>(null);
+  const unitBaseRef = useRef<HTMLButtonElement>(null);
+  const unitPackRef = useRef<HTMLButtonElement>(null);
+  const focusAfterSelect = useRef<"unit" | "qty" | null>(null);
+  const [unitFocused, setUnitFocused] = useState(false);
+  const fnRef = useRef<Record<string, () => void>>({});
 
   const [query, setQuery] = useState("");
   const debounced = useDebounce(query, 280);
@@ -221,6 +229,63 @@ export function PosPage() {
     return true;
   })();
 
+  function focusQty() {
+    setUnitFocused(false);
+    window.requestAnimationFrame(() => {
+      qtyRef.current?.focus();
+      qtyRef.current?.select();
+    });
+  }
+
+  function focusUnitBar() {
+    if (!pending || !packOf(pending)) {
+      focusQty();
+      return;
+    }
+    setUnitFocused(true);
+    window.requestAnimationFrame(() => {
+      const btn = sellUnit === "pack" ? unitPackRef.current : unitBaseRef.current;
+      btn?.focus();
+    });
+  }
+
+  function togglePendingUnit(stay = true) {
+    if (!pending || !packOf(pending)) return;
+    setSellUnit((u) => (u === "pack" ? "base" : "pack"));
+    if (stay) setUnitFocused(true);
+    else focusQty();
+  }
+
+  function onUnitKey(e: ReactKeyboardEvent) {
+    if (!pending || !packOf(pending)) return;
+    const k = e.key;
+    if (
+      k === "ArrowLeft" ||
+      k === "ArrowRight" ||
+      k === "ArrowUp" ||
+      k === "ArrowDown" ||
+      k === "/" ||
+      k === " " ||
+      k.toLowerCase() === "u"
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      togglePendingUnit(true);
+    } else if (k === "Enter" || (k === "Tab" && !e.shiftKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      focusQty();
+    } else if (k === "Escape") {
+      e.preventDefault();
+      setUnitFocused(false);
+      searchRef.current?.focus();
+    } else if (k.length === 1 && k >= "0" && k <= "9") {
+      e.preventDefault();
+      setQtyInput(k);
+      focusQty();
+    }
+  }
+
   function selectProduct(product: Product) {
     if ((lotStock(product.id) || product.stock) <= 0) {
       showToast("Out of stock");
@@ -231,14 +296,29 @@ export function PosPage() {
     setQuery(product.name);
     setMenuOpen(false);
     setQtyInput("1");
-    window.setTimeout(() => {
-      if (packOf(product)) {
-        // unit bar focus first for packable
-      }
-      qtyRef.current?.focus();
-      qtyRef.current?.select();
-    }, 0);
+    focusAfterSelect.current = packOf(product) ? "unit" : "qty";
   }
+
+  useEffect(() => {
+    if (!pending || !focusAfterSelect.current) return;
+    const want = focusAfterSelect.current;
+    focusAfterSelect.current = null;
+    window.requestAnimationFrame(() => {
+      if (want === "unit") {
+        setUnitFocused(true);
+        unitBaseRef.current?.focus();
+      } else {
+        focusQty();
+      }
+    });
+  }, [pending]);
+
+  useEffect(() => {
+    if (!unitFocused || !pending || !packOf(pending)) return;
+    window.requestAnimationFrame(() => {
+      (sellUnit === "pack" ? unitPackRef.current : unitBaseRef.current)?.focus();
+    });
+  }, [sellUnit, unitFocused, pending]);
 
   function addPendingToCart(supplierId?: string) {
     if (!pending) {
@@ -608,38 +688,62 @@ export function PosPage() {
   }
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (/^F([1-9]|1[0-2])$/.test(e.key)) e.preventDefault();
-      if (e.key === "F1") showToast("F2 customer · F3 search · F4 hold · F12 sale");
-      if (e.key === "F2") {
+    fnRef.current = {
+      F1: () => showToast("F2 customer · F3 search · F4 hold · F7 exact · F12 sale"),
+      F2: () => {
         setCustOpen(true);
-        document.getElementById("customerSearch")?.focus();
-      }
-      if (e.key === "F3") searchRef.current?.focus();
-      if (e.key === "F4") holdInvoice();
-      if (e.key === "F5") cancelBill();
-      if (e.key === "F7") applyExact();
-      if (e.key === "F8") document.getElementById("billDiscount")?.focus();
-      if (e.key === "F9") {
+        window.setTimeout(() => document.getElementById("customerSearch")?.focus(), 0);
+      },
+      F3: () => {
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        setMenuOpen(true);
+      },
+      F4: () => holdInvoice(),
+      F5: () => cancelBill(),
+      F6: () => {
+        if (cart.length) {
+          setSelected(0);
+          showToast("Cart focused — edit qty on the selected row");
+        } else showToast("Cart is empty");
+      },
+      F7: () => applyExact(),
+      F8: () => document.getElementById("billDiscount")?.focus(),
+      F9: () => {
         if (cart.length) setPrintOpen(true);
         else showToast("Nothing to print");
-      }
-      if (e.key === "F10") {
-        setSplitPrint((v) => !v);
-        showToast(!splitPrint ? "Split print on" : "Split print off");
-      }
-      if (e.key === "F11") switchAllCart();
-      if (e.key === "F12") completeSale();
+      },
+      F10: () => {
+        setSplitPrint((v) => {
+          showToast(!v ? "Split print on" : "Split print off");
+          return !v;
+        });
+      },
+      F11: () => switchAllCart(),
+      F12: () => completeSale(),
+    };
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setMenuOpen(false);
         setCustOpen(false);
         setBillsTip(false);
+        setHoldsOpen(false);
+        setRecentOpen(false);
+        return;
       }
+      if (!/^F([1-9]|1[0-2])$/.test(e.key)) return;
+      // Stop browser defaults (F5 refresh, F12 tools, etc.)
+      e.preventDefault();
+      e.stopPropagation();
+      if (printOpen || holdsOpen || recentOpen || askSupplier) return;
+      fnRef.current[e.key]?.();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, pending, query, hit, results, splitPrint, payMethod, t.total, customerId]);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [printOpen, holdsOpen, recentOpen, askSupplier]);
 
   useEffect(() => {
     if (payMethod === "cash" && t.total && received === 0) setReceived(t.total);
@@ -803,26 +907,56 @@ export function PosPage() {
               </button>
             </div>
 
-            <div className="unit-box" hidden={!pending}>
+            <div className={`unit-box ${unitFocused ? "is-focus" : ""}`} hidden={!pending}>
               <span className="qty-label">
                 UNIT <kbd>← →</kbd>
               </span>
-              <div className="unit-toggles">
+              <div className="unit-toggles" id="unitToggles">
                 {pending ? (
                   <>
                     <button
+                      ref={unitBaseRef}
                       type="button"
                       className={`unit-tog ${sellUnit === "base" ? "is-active" : ""}`}
+                      tabIndex={sellUnit === "base" ? 0 : -1}
                       disabled={!packOf(pending)}
-                      onClick={() => setSellUnit("base")}
+                      onClick={() => {
+                        setSellUnit("base");
+                        focusQty();
+                      }}
+                      onKeyDown={onUnitKey}
+                      onFocus={() => setUnitFocused(true)}
+                      onBlur={() => {
+                        window.setTimeout(() => {
+                          const active = document.activeElement;
+                          if (active !== unitBaseRef.current && active !== unitPackRef.current) {
+                            setUnitFocused(false);
+                          }
+                        }, 0);
+                      }}
                     >
                       {prettyUnit(pending.unit)}
                     </button>
                     {packOf(pending) ? (
                       <button
+                        ref={unitPackRef}
                         type="button"
                         className={`unit-tog ${sellUnit === "pack" ? "is-active" : ""}`}
-                        onClick={() => setSellUnit("pack")}
+                        tabIndex={sellUnit === "pack" ? 0 : -1}
+                        onClick={() => {
+                          setSellUnit("pack");
+                          focusQty();
+                        }}
+                        onKeyDown={onUnitKey}
+                        onFocus={() => setUnitFocused(true)}
+                        onBlur={() => {
+                          window.setTimeout(() => {
+                            const active = document.activeElement;
+                            if (active !== unitBaseRef.current && active !== unitPackRef.current) {
+                              setUnitFocused(false);
+                            }
+                          }, 0);
+                        }}
                       >
                         Pack of {packOf(pending)}
                       </button>
@@ -848,6 +982,19 @@ export function PosPage() {
                   if (e.key === "Enter") {
                     e.preventDefault();
                     addPendingToCart();
+                  } else if (
+                    (e.key === "/" || e.key.toLowerCase() === "u") &&
+                    pending &&
+                    packOf(pending)
+                  ) {
+                    e.preventDefault();
+                    togglePendingUnit(false);
+                  } else if (e.key === "Tab" && e.shiftKey && pending && packOf(pending)) {
+                    e.preventDefault();
+                    focusUnitBar();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    searchRef.current?.focus();
                   }
                 }}
               />
@@ -1099,6 +1246,9 @@ export function PosPage() {
               </strong>
             </div>
             <div className="ticket-tools">
+              <button type="button" className="head-btn" onClick={() => navigate(routes.dashboard)}>
+                Dashboard
+              </button>
               <button type="button" className="head-btn head-cancel" onClick={cancelBill}>
                 Cancel
               </button>
@@ -1567,29 +1717,7 @@ export function PosPage() {
             type="button"
             data-fn={k}
             className={k === "F10" && splitPrint ? "is-on" : undefined}
-            onClick={() => {
-              const map: Record<string, () => void> = {
-                F1: () => showToast("F2 customer · F3 search · F4 hold · F12 sale"),
-                F2: () => {
-                  setCustOpen(true);
-                  document.getElementById("customerSearch")?.focus();
-                },
-                F3: () => searchRef.current?.focus(),
-                F4: holdInvoice,
-                F5: cancelBill,
-                F6: () => showToast("Select a cart row to edit qty"),
-                F7: applyExact,
-                F8: () => document.getElementById("billDiscount")?.focus(),
-                F9: () => (cart.length ? setPrintOpen(true) : showToast("Nothing to print")),
-                F10: () => {
-                  setSplitPrint((v) => !v);
-                  showToast(!splitPrint ? "Split print on" : "Split print off");
-                },
-                F11: () => switchAllCart(),
-                F12: completeSale,
-              };
-              map[k]?.();
-            }}
+            onClick={() => fnRef.current[k]?.()}
           >
             <kbd>{k}</kbd>
             <span>{label}</span>
