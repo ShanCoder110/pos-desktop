@@ -1,3 +1,5 @@
+import type { WarrantyUnit } from "@/shared/types";
+
 export function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
@@ -27,6 +29,17 @@ export function qty(n: number, unit: string) {
 
 export function today() {
   return "2026-08-13";
+}
+
+export function warrantyDaysOf(qty: number, unit: WarrantyUnit) {
+  if (!qty) return 0;
+  return unit === "months" ? qty * 30 : qty;
+}
+
+export function creditState(n: number): { text: string; tone: "ok" | "warn" | "danger" | "neutral" } {
+  if (n > 0) return { text: `Owes ${money(n)}`, tone: "danger" };
+  if (n < 0) return { text: `Advance ${money(-n)}`, tone: "ok" };
+  return { text: "Settled", tone: "neutral" };
 }
 
 export type BalanceTone = "owe" | "advance" | "settled";

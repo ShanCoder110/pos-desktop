@@ -20,6 +20,7 @@ export interface ShopSettings {
   showBalanceOnSlip: boolean;
   printSize: PrintSize;
   autoPrint: boolean;
+  autoSku: boolean;
   minPriceRule: boolean;
   stockPick: StockPick;
   defaultTax: number;
@@ -58,21 +59,35 @@ export interface Supplier {
   payable: number;
 }
 
+export type WarrantyUnit = "months" | "days";
+
+export interface BomLine {
+  id: string;
+  productId: string;
+  quantity: number;
+}
+
 export interface Product {
   id: string;
-  sku: string;
   name: string;
+  sku: string;
+  category: string;
   unit: Unit;
   isLinear: boolean;
+  isManufactured: boolean;
   packQty: number | null;
+  packPrice: number;
   cost: number;
   min: number;
   wholesale: number;
   retail: number;
+  warrantyQty: number;
+  warrantyUnit: WarrantyUnit;
   warrantyDays: number;
   claims: number;
   damaged: number;
   stock: number;
+  components: BomLine[];
 }
 
 export interface Lot {
@@ -178,4 +193,23 @@ export interface HeldBill {
   customerId: string;
   lines: InvoiceLine[];
   at: string;
+}
+
+export interface ShopProfile {
+  name: string;
+  address: string;
+}
+
+export interface OwnerProfile {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  password: string;
+}
+
+export interface AuthSession {
+  shop: ShopProfile | null;
+  owner: OwnerProfile | null;
+  loggedIn: boolean;
 }

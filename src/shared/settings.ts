@@ -7,6 +7,7 @@ export const defaultSettings: ShopSettings = {
   showBalanceOnSlip: true,
   printSize: "thermal",
   autoPrint: true,
+  autoSku: false,
   minPriceRule: true,
   stockPick: "oldest",
   defaultTax: 0,
