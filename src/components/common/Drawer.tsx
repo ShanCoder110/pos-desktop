@@ -6,28 +6,35 @@ import { cn } from "@/utils/format";
 export function Drawer({
   open,
   title,
+  subtitle,
   children,
   footer,
   wide,
   form,
+  dim = true,
   onClose,
 }: {
   open: boolean;
   title: string;
+  subtitle?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
   form?: boolean;
+  dim?: boolean;
   onClose: () => void;
 }) {
   if (!open) return null;
   return (
     <>
-      <div className="ui-drawer-back" onClick={onClose} />
+      {dim ? <div className="ui-drawer-back" onClick={onClose} /> : null}
       <aside className={cn("ui-drawer", wide && "is-wide")} role="dialog" aria-modal="true">
         <div className="ui-drawer-head">
-          <h2 className="ui-drawer-title">{title}</h2>
-          <Button size="icon" variant="ghost" onClick={onClose} aria-label="Close">
+          <div className="ui-drawer-head-copy">
+            <h2 className="ui-drawer-title">{title}</h2>
+            {subtitle}
+          </div>
+          <Button size="icon" variant="ghost" tabIndex={form ? -1 : undefined} onClick={onClose} aria-label="Close">
             <X size={16} />
           </Button>
         </div>

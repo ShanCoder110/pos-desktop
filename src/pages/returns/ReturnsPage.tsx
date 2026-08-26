@@ -1,20 +1,18 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Eye } from "lucide-react";
 import {
   Badge,
   Button,
   Drawer,
   EmptyRow,
-  KpiCard,
-  PageHead,
   Pagination,
   SearchInput,
   Table,
-  Tabs,
   Td,
   THead,
   Th,
 } from "@/components/common";
+import { useSalesHub } from "@/pages/sales/SalesLayout";
 import { returns as seed, customerName, invoiceNumber, lotNumber, productName } from "@/shared/domain/mock";
 import type { ReturnRow } from "@/shared/domain/types";
 import { money } from "@/utils/format";
@@ -22,48 +20,30 @@ import { money } from "@/utils/format";
 const PAGE = 10;
 
 export function ReturnsPage() {
+  const { sectionKpi } = useSalesHub();
   const [q, setQ] = useState("");
-  const [tab, setTab] = useState("all");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<ReturnRow | null>(null);
+
+  useEffect(() => {
+    setPage(1);
+  }, [sectionKpi]);
 
   const rows = useMemo(() => {
     return seed.filter((r) => {
       const text = `${invoiceNumber(r.invoiceId)} ${customerName(r.customerId)} ${r.reason}`.toLowerCase();
       if (q && !text.includes(q.toLowerCase())) return false;
-      if (tab === "refund") return r.type === "REFUND";
-      if (tab === "replace") return r.type === "REPLACEMENT";
+      if (sectionKpi === "refund") return r.type === "REFUND";
+      if (sectionKpi === "replace") return r.type === "REPLACEMENT";
       return true;
     });
-  }, [q, tab]);
+  }, [q, sectionKpi]);
 
   const pages = Math.max(1, Math.ceil(rows.length / PAGE));
   const shown = rows.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div className="ui-stack">
-      <PageHead title="Returns" />
-      <p className="ui-note">
-        Always tied to an invoice. Goods coming back are ReturnItems (GOOD restock, DAMAGED / WARRANTY do not sell again). A replacement also writes ReplacementItems and StockMovement REPLACEMENT.
-      </p>
-      <div className="ui-kpi-row">
-        <KpiCard label="Tickets" value={seed.length} hint="All types" tone="ok" />
-        <KpiCard label="Refunds" value={seed.filter((r) => r.type === "REFUND").length} hint="Cash out" tone="warn" />
-        <KpiCard label="Replacements" value={seed.filter((r) => r.type === "REPLACEMENT").length} hint="New lot out" tone="phantom" />
-        <KpiCard label="Refunded" value={money(seed.reduce((s, r) => s + r.refundAmount, 0))} hint="Money OUT" tone="danger" />
-      </div>
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All" },
-          { id: "refund", label: "Refund" },
-          { id: "replace", label: "Replacement" },
-        ]}
-      />
+    <div className="products-hub-panel">
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Invoice, customer, reason" />}
         footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}

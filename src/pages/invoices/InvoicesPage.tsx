@@ -1,20 +1,18 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Eye } from "lucide-react";
 import {
   Badge,
   Button,
   Drawer,
   EmptyRow,
-  KpiCard,
-  PageHead,
   Pagination,
   SearchInput,
   Table,
-  Tabs,
   Td,
   THead,
   Th,
 } from "@/components/common";
+import { useSalesHub } from "@/pages/sales/SalesLayout";
 import { invoices as seed, branchName, customerName, productName, userName } from "@/shared/domain/mock";
 import type { InvoiceRow, PaymentStatus } from "@/shared/domain/types";
 import { money } from "@/utils/format";
@@ -28,53 +26,32 @@ function payTone(s: PaymentStatus) {
 }
 
 export function InvoicesPage() {
+  const { sectionKpi } = useSalesHub();
   const [q, setQ] = useState("");
-  const [tab, setTab] = useState("all");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<InvoiceRow | null>(null);
+
+  useEffect(() => {
+    setPage(1);
+  }, [sectionKpi]);
 
   const rows = useMemo(() => {
     return seed.filter((r) => {
       const text = `${r.invoiceNumber} ${customerName(r.customerId)}`.toLowerCase();
       if (q && !text.includes(q.toLowerCase())) return false;
-      if (tab === "paid") return r.paymentStatus === "PAID" && r.status === "COMPLETED";
-      if (tab === "partial") return r.paymentStatus === "PARTIAL";
-      if (tab === "credit") return r.paymentStatus === "CREDIT";
-      if (tab === "cancelled") return r.status === "CANCELLED";
+      if (sectionKpi === "paid") return r.paymentStatus === "PAID" && r.status === "COMPLETED";
+      if (sectionKpi === "partial") return r.paymentStatus === "PARTIAL";
+      if (sectionKpi === "credit") return r.paymentStatus === "CREDIT";
+      if (sectionKpi === "cancelled") return r.status === "CANCELLED";
       return true;
     });
-  }, [q, tab]);
+  }, [q, sectionKpi]);
 
   const pages = Math.max(1, Math.ceil(rows.length / PAGE));
   const shown = rows.slice((page - 1) * PAGE, page * PAGE);
-  const completed = seed.filter((r) => r.status === "COMPLETED");
 
   return (
-    <div className="ui-stack">
-      <PageHead title="Invoices" />
-      <p className="ui-note">
-        Created at POS. Walk-in has no customer. Credit amount posts to CustomerLedger. FIFO lots consumed are on Stock movements.
-      </p>
-      <div className="ui-kpi-row">
-        <KpiCard label="Bills" value={completed.length} hint="Completed" tone="ok" />
-        <KpiCard label="Collected" value={money(completed.reduce((s, r) => s + r.paidAmount, 0))} hint="Paid amount" tone="ok" />
-        <KpiCard label="On khata" value={money(completed.reduce((s, r) => s + r.creditAmount, 0))} hint="Credit amount" tone="warn" />
-        <KpiCard label="Cancelled" value={seed.filter((r) => r.status === "CANCELLED").length} hint="No stock change" tone="danger" />
-      </div>
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All" },
-          { id: "paid", label: "Paid" },
-          { id: "partial", label: "Partial" },
-          { id: "credit", label: "Credit" },
-          { id: "cancelled", label: "Cancelled" },
-        ]}
-      />
+    <div className="products-hub-panel">
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Search number or customer" />}
         footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}

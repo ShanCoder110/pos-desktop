@@ -10,6 +10,7 @@ import {
   Pagination,
   SearchInput,
   Table,
+  TabSheet,
   Tabs,
   Td,
   THead,
@@ -57,19 +58,23 @@ export function RepairPage() {
         <KpiCard label="Completed" value={seed.filter((p) => p.status === "COMPLETED").length} hint="Stock in" tone="ok" />
         <KpiCard label="Commission due" value={money(seed.reduce((s, p) => s + (p.status === "COMPLETED" ? p.commissionAmount : 0), 0))} hint="Pay staff" tone="stale" />
       </div>
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All" },
-          { id: "pending", label: "Pending" },
-          { id: "in_progress", label: "In progress" },
-          { id: "completed", label: "Completed" },
-        ]}
-      />
+      <TabSheet
+        tabs={
+          <Tabs
+            value={tab}
+            onChange={(id) => {
+              setTab(id);
+              setPage(1);
+            }}
+            items={[
+              { id: "all", label: "All" },
+              { id: "pending", label: "Pending" },
+              { id: "in_progress", label: "In progress" },
+              { id: "completed", label: "Completed" },
+            ]}
+          />
+        }
+      >
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Job no or product" />}
         footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
@@ -108,6 +113,7 @@ export function RepairPage() {
           ))}
         </tbody>
       </Table>
+      </TabSheet>
 
       <Drawer open={Boolean(open)} title={open?.productionNumber ?? "Job"} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
         {open ? (

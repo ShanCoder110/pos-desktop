@@ -78,9 +78,9 @@ export function DashboardPage() {
           </div>
           <div className="panel-body" style={{ paddingTop: 6, paddingBottom: 8 }}>
             {[
-              { icon: PackageMinus, tone: "is-warn", title: `${low} products below minimum`, sub: "Open stock to reorder as a new lot", to: routes.stock },
+              { icon: PackageMinus, tone: "is-warn", title: `${low} products below minimum`, sub: "Open products to check qty and reorder as a new lot", to: routes.productsLow },
               { icon: Wallet, tone: "is-rose", title: `${money(creditOpen)} customer udhaar`, sub: "Record a payment on Credit / Udhaar", to: routes.credit },
-              { icon: RotateCcw, tone: "", title: `${pendingReturns} return to review`, sub: "Refund or replacement against an invoice", to: routes.returns },
+              { icon: RotateCcw, tone: "", title: `${pendingReturns} return to review`, sub: "Refund or replacement against an invoice", to: routes.salesReturns },
               { icon: Factory, tone: "", title: `${pendingJobs} production jobs open`, sub: "Components come off lots via PRODUCTION_USE", to: routes.production },
               { icon: AlertTriangle, tone: "is-warn", title: `${pendingTransfers} branch transfer pending`, sub: "Complete to write TRANSFER_IN / OUT", to: routes.transfers },
             ].map((row) => {
@@ -106,7 +106,7 @@ export function DashboardPage() {
         <section className="panel">
           <div className="panel-head">
             <h2 className="panel-title">Latest invoices</h2>
-            <button type="button" className="auth-link" style={{ fontSize: 12 }} onClick={() => navigate(routes.invoices)}>
+            <button type="button" className="auth-link" style={{ fontSize: 12 }} onClick={() => navigate(routes.sales)}>
               All invoices
             </button>
           </div>

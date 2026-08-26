@@ -12,6 +12,7 @@ import {
   SearchInput,
   SelectInput,
   Table,
+  TabSheet,
   Tabs,
   Td,
   TextInput,
@@ -63,19 +64,23 @@ export function CreditSalesPage() {
         <KpiCard label="Advance" value={money(Math.abs(seed.filter((c) => c.currentBalance < 0).reduce((s, c) => s + c.currentBalance, 0)))} hint="Held for next bill" tone="ok" />
         <KpiCard label="Settled" value={seed.filter((c) => c.currentBalance === 0 && c.isActive).length} hint="Zero khata" tone="ok" />
       </div>
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All" },
-          { id: "owe", label: "Owes" },
-          { id: "advance", label: "Advance" },
-          { id: "settled", label: "Settled" },
-        ]}
-      />
+      <TabSheet
+        tabs={
+          <Tabs
+            value={tab}
+            onChange={(id) => {
+              setTab(id);
+              setPage(1);
+            }}
+            items={[
+              { id: "all", label: "All" },
+              { id: "owe", label: "Owes" },
+              { id: "advance", label: "Advance" },
+              { id: "settled", label: "Settled" },
+            ]}
+          />
+        }
+      >
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Name or phone" />}
         footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
@@ -111,6 +116,7 @@ export function CreditSalesPage() {
           })}
         </tbody>
       </Table>
+      </TabSheet>
 
       <Drawer
         open={Boolean(open)}

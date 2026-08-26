@@ -12,6 +12,7 @@ import {
   SearchInput,
   SelectInput,
   Table,
+  TabSheet,
   Tabs,
   Td,
   TextInput,
@@ -58,20 +59,24 @@ export function EmployeesPage() {
         <KpiCard label="Cashiers" value={seed.filter((u) => u.role === "CASHIER").length} hint="POS users" tone="ok" />
         <KpiCard label="Inactive" value={seed.filter((u) => !u.isActive).length} hint="Blocked" tone="stale" />
       </div>
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All" },
-          { id: "cashier", label: "Cashier" },
-          { id: "manager", label: "Manager" },
-          { id: "technician", label: "Technician" },
-          { id: "inactive", label: "Inactive" },
-        ]}
-      />
+      <TabSheet
+        tabs={
+          <Tabs
+            value={tab}
+            onChange={(id) => {
+              setTab(id);
+              setPage(1);
+            }}
+            items={[
+              { id: "all", label: "All" },
+              { id: "cashier", label: "Cashier" },
+              { id: "manager", label: "Manager" },
+              { id: "technician", label: "Technician" },
+              { id: "inactive", label: "Inactive" },
+            ]}
+          />
+        }
+      >
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Name or username" />}
         footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
@@ -110,6 +115,7 @@ export function EmployeesPage() {
           ))}
         </tbody>
       </Table>
+      </TabSheet>
 
       <Drawer
         open={Boolean(open)}

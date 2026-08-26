@@ -14,13 +14,16 @@ import { InvoicesPage } from "@/pages/invoices/InvoicesPage";
 import { LoginPage } from "@/pages/login/LoginPage";
 import { LotsPage } from "@/pages/lots/LotsPage";
 import { PosPage } from "@/pages/pos/PosPage";
+import { CategoriesPage } from "@/pages/products/CategoriesPage";
+import { ProductsLayout } from "@/pages/products/ProductsLayout";
 import { ProductsPage } from "@/pages/products/ProductsPage";
 import { RepairPage } from "@/pages/repair/RepairPage";
+import { ClaimsPage } from "@/pages/sales/ClaimsPage";
+import { SalesLayout } from "@/pages/sales/SalesLayout";
 import { ReturnsPage } from "@/pages/returns/ReturnsPage";
 import { SettingsPage } from "@/pages/settings/SettingsPage";
 import { SetupPage } from "@/pages/setup/SetupPage";
 import { ShopsPage } from "@/pages/shops/ShopsPage";
-import { StockPage } from "@/pages/stock/StockPage";
 import { SuppliersPage } from "@/pages/suppliers/SuppliersPage";
 import { TransactionsPage } from "@/pages/transactions/TransactionsPage";
 import { TransfersPage } from "@/pages/transfers/TransfersPage";
@@ -43,15 +46,30 @@ export default function App() {
               <Route element={<AppLayout />}>
                 <Route path={routes.dashboard} element={<DashboardPage />} />
                 <Route path={routes.pos} element={<PosPage />} />
-                <Route path={routes.invoices} element={<InvoicesPage />} />
+                <Route path={routes.sales} element={<SalesLayout />}>
+                  <Route index element={<InvoicesPage />} />
+                  <Route path="returns" element={<ReturnsPage />} />
+                  <Route path="claims" element={<ClaimsPage />} />
+                </Route>
+                <Route path={routes.invoices} element={<Navigate to={routes.sales} replace />} />
                 <Route path={routes.credit} element={<CreditSalesPage />} />
-                <Route path={routes.returns} element={<ReturnsPage />} />
-                <Route path={routes.products} element={<ProductsPage />} />
-                <Route path={routes.stock} element={<StockPage />} />
-                <Route path={routes.lots} element={<LotsPage />} />
-                <Route path={routes.categories} element={<Navigate to={routes.products} replace />} />
-                <Route path={routes.units} element={<UnitsPage />} />
-                <Route path={routes.transfers} element={<TransfersPage />} />
+                <Route path={routes.returns} element={<Navigate to={routes.salesReturns} replace />} />
+                <Route path={routes.productsClaims} element={<Navigate to={routes.salesClaims} replace />} />
+                <Route path={routes.products} element={<ProductsLayout />}>
+                  <Route index element={<ProductsPage />} />
+                  <Route path="stock" element={<Navigate to={routes.products} replace />} />
+                  <Route path="lots" element={<LotsPage />} />
+                  <Route path="units" element={<UnitsPage />} />
+                  <Route path="categories" element={<CategoriesPage />} />
+                  <Route path="transfers" element={<TransfersPage />} />
+                  <Route path="low" element={<ProductsPage />} />
+                  <Route path="sold" element={<ProductsPage />} />
+                </Route>
+                <Route path="/stock" element={<Navigate to={routes.products} replace />} />
+                <Route path="/lots" element={<Navigate to={routes.lots} replace />} />
+                <Route path="/units" element={<Navigate to={routes.units} replace />} />
+                <Route path="/transfers" element={<Navigate to={routes.transfers} replace />} />
+                <Route path={routes.categories} element={<Navigate to={routes.productsCategories} replace />} />
                 <Route path={routes.reorder} element={<Navigate to={routes.lots} replace />} />
                 <Route path={routes.suppliers} element={<SuppliersPage />} />
                 <Route path={routes.customers} element={<CustomersPage />} />

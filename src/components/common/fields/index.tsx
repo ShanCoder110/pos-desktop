@@ -20,7 +20,7 @@ export function Field({
   className?: string;
 }) {
   return (
-    <label className={cn("field", className)}>
+    <label className={cn("field", error && "is-invalid", className)}>
       <span className="field-label">{label}</span>
       {children}
       {hint ? <span className="field-hint">{hint}</span> : null}
@@ -29,8 +29,25 @@ export function Field({
   );
 }
 
-export function TextInput({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={cn("field-input", className)} {...props} />;
+export function TextInput({
+  className,
+  startIcon,
+  endIcon,
+  ...props
+}: InputHTMLAttributes<HTMLInputElement> & {
+  startIcon?: ReactNode;
+  endIcon?: ReactNode;
+}) {
+  if (!startIcon && !endIcon) {
+    return <input className={cn("field-input", className)} {...props} />;
+  }
+  return (
+    <div className={cn("field-wrap", startIcon ? "has-start" : undefined, endIcon ? "has-end" : undefined)}>
+      {startIcon ? <span className="field-icon is-start">{startIcon}</span> : null}
+      <input className={cn("field-input", className)} {...props} />
+      {endIcon ? <span className="field-icon is-end">{endIcon}</span> : null}
+    </div>
+  );
 }
 
 export function SelectInput({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {

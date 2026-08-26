@@ -67,12 +67,34 @@ export interface BomLine {
   quantity: number;
 }
 
+export interface ProductSellUnit {
+  id: string;
+  name: string;
+  symbol?: string;
+  kind?: "base" | "bigger" | "smaller" | "pack" | "small";
+  contains: number;
+  cost: number;
+  min: number;
+  wholesale: number;
+  price: number;
+  barcode: string;
+  priceManual?: {
+    cost?: boolean;
+    min?: boolean;
+    wholesale?: boolean;
+    price?: boolean;
+  };
+}
+
 export interface Product {
   id: string;
   name: string;
   sku: string;
+  barcode?: string;
   category: string;
-  unit: Unit;
+  unit: string;
+  supplierId?: string;
+  minimumStock?: number;
   isLinear: boolean;
   isManufactured: boolean;
   packQty: number | null;
@@ -81,13 +103,16 @@ export interface Product {
   min: number;
   wholesale: number;
   retail: number;
+  warrantyEnabled?: boolean;
   warrantyQty: number;
   warrantyUnit: WarrantyUnit;
   warrantyDays: number;
+  warrantyNote?: string;
   claims: number;
   damaged: number;
   stock: number;
   components: BomLine[];
+  sellUnits?: ProductSellUnit[];
 }
 
 export interface Lot {

@@ -67,7 +67,7 @@ export function TopBar() {
           </button>
           {notesOpen ? (
             <div className="mgmt-menu">
-              <button type="button" onClick={() => navigate(routes.stock)}>
+              <button type="button" onClick={() => navigate(routes.productsLow)}>
                 12 Low stock products
                 <span className="mgmt-menu-note">Reorder</span>
               </button>
@@ -75,7 +75,7 @@ export function TopBar() {
                 Customer outstanding
                 <span className="mgmt-menu-note">Rs 83,900</span>
               </button>
-              <button type="button" onClick={() => navigate(routes.returns)}>
+              <button type="button" onClick={() => navigate(routes.salesReturns)}>
                 3 Pending returns
                 <span className="mgmt-menu-note">Review</span>
               </button>

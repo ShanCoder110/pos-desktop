@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Badge, EmptyRow, KpiCard, PageHead, Table, Tabs, Td, THead, Th } from "@/components/common";
+import { Badge, EmptyRow, KpiCard, PageHead, Table, TabSheet, Tabs, Td, THead, Th } from "@/components/common";
 import { catalog, invoices, ledger, stockMovements, domainCustomers, productName } from "@/shared/domain/mock";
 import { money } from "@/utils/format";
 
@@ -18,15 +18,19 @@ export function AnalyticsPage() {
         <KpiCard label="Udhaar" value={money(owed.reduce((s, c) => s + c.currentBalance, 0))} hint="Still to collect" tone="warn" />
         <KpiCard label="Low SKUs" value={catalog.filter((p) => p.onHand < p.minimumStock).length} hint="Below minimum" tone="danger" />
       </div>
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        items={[
-          { id: "sales", label: "Sales" },
-          { id: "stock", label: "Stock movement" },
-          { id: "khata", label: "Khata" },
-        ]}
-      />
+      <TabSheet
+        tabs={
+          <Tabs
+            value={tab}
+            onChange={setTab}
+            items={[
+              { id: "sales", label: "Sales" },
+              { id: "stock", label: "Stock movement" },
+              { id: "khata", label: "Khata" },
+            ]}
+          />
+        }
+      >
       {tab === "sales" ? (
         <Table>
           <THead>
@@ -108,6 +112,7 @@ export function AnalyticsPage() {
           </tbody>
         </Table>
       ) : null}
+      </TabSheet>
     </div>
   );
 }

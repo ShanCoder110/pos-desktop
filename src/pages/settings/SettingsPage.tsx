@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Badge, Button, Field, PageHead, SelectInput, Table, Tabs, Td, TextArea, TextInput, THead, Th, Toggle } from "@/components/common";
+import { Badge, Button, Field, PageHead, SelectInput, Table, TabSheet, Tabs, Td, TextArea, TextInput, THead, Th, Toggle } from "@/components/common";
 import { devices, syncLogs, branchName } from "@/shared/domain/mock";
 import { useSettings } from "@/shared/settings";
 
@@ -23,17 +23,22 @@ export function SettingsPage() {
         <Button variant="primary">Save</Button>
       </PageHead>
       <p className="ui-note">AppSetting is shop-wide. InvoiceSetting is the slip. PrinterSetting and Device are per computer. SyncLog is the last pull/push.</p>
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        items={[
-          { id: "business", label: "Business" },
-          { id: "invoice", label: "Invoice print" },
-          { id: "printer", label: "Printer" },
-          { id: "devices", label: "Devices" },
-        ]}
-      />
+      <TabSheet
+        tabs={
+          <Tabs
+            value={tab}
+            onChange={setTab}
+            items={[
+              { id: "business", label: "Business" },
+              { id: "invoice", label: "Invoice print" },
+              { id: "printer", label: "Printer" },
+              { id: "devices", label: "Devices" },
+            ]}
+          />
+        }
+      >
       {tab === "business" ? (
+        <div className="ui-sheet-panel">
         <div className="ui-form-grid">
           <section className="settings-card">
             <h2 className="panel-title">AppSetting</h2>
@@ -66,8 +71,10 @@ export function SettingsPage() {
             </div>
           </section>
         </div>
+        </div>
       ) : null}
       {tab === "invoice" ? (
+        <div className="ui-sheet-panel">
         <div className="ui-form-grid">
           <section className="settings-card">
             <h2 className="panel-title">InvoiceSetting</h2>
@@ -95,8 +102,10 @@ export function SettingsPage() {
             </div>
           </section>
         </div>
+        </div>
       ) : null}
       {tab === "printer" ? (
+        <div className="ui-sheet-panel">
         <section className="settings-card">
           <h2 className="panel-title">PrinterSetting for this device</h2>
           <div className="ui-stack" style={{ marginTop: 12, maxWidth: 420 }}>
@@ -112,6 +121,7 @@ export function SettingsPage() {
             <Toggle checked={autoPrint} onChange={setAutoPrint} label="auto_print after sale" />
           </div>
         </section>
+        </div>
       ) : null}
       {tab === "devices" ? (
         <Table>
@@ -147,6 +157,7 @@ export function SettingsPage() {
           </tbody>
         </Table>
       ) : null}
+      </TabSheet>
     </div>
   );
 }

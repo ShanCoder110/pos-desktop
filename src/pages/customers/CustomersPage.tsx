@@ -14,6 +14,7 @@ import {
   Pagination,
   SearchInput,
   Table,
+  TabSheet,
   Tabs,
   Td,
   TextArea,
@@ -73,18 +74,22 @@ export function CustomersPage() {
         <KpiCard label="Owing" value={rows.filter((r) => r.currentBalance > 0).length} hint="Open udhaar" tone="warn" />
         <KpiCard label="To collect" value={money(rows.filter((r) => r.currentBalance > 0).reduce((s, r) => s + r.currentBalance, 0))} hint="Sum of +" tone="danger" />
       </div>
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All" },
-          { id: "owe", label: "Owes" },
-          { id: "inactive", label: "Inactive" },
-        ]}
-      />
+      <TabSheet
+        tabs={
+          <Tabs
+            value={tab}
+            onChange={(id) => {
+              setTab(id);
+              setPage(1);
+            }}
+            items={[
+              { id: "all", label: "All" },
+              { id: "owe", label: "Owes" },
+              { id: "inactive", label: "Inactive" },
+            ]}
+          />
+        }
+      >
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Name or phone" />}
         footer={<Pagination page={Math.min(page, pages)} pages={pages} total={filtered.length} onChange={setPage} />}
@@ -132,6 +137,7 @@ export function CustomersPage() {
           })}
         </tbody>
       </Table>
+      </TabSheet>
 
       <Drawer
         open={Boolean(edit)}

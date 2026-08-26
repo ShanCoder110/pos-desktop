@@ -12,6 +12,7 @@ import {
   SearchInput,
   SelectInput,
   Table,
+  TabSheet,
   Tabs,
   Td,
   TextInput,
@@ -65,14 +66,18 @@ export function ExpensesPage() {
         <KpiCard label="Cash" value={money(rows.filter((r) => r.paymentMethod === "CASH").reduce((s, r) => s + r.amount, 0))} hint="OUT cash" tone="warn" />
         <KpiCard label="Bank" value={money(rows.filter((r) => r.paymentMethod === "BANK").reduce((s, r) => s + r.amount, 0))} hint="OUT bank" tone="stale" />
       </div>
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[{ id: "all", label: "All" }, ...expenseCategories.map((c) => ({ id: c.id, label: c.name }))]}
-      />
+      <TabSheet
+        tabs={
+          <Tabs
+            value={tab}
+            onChange={(id) => {
+              setTab(id);
+              setPage(1);
+            }}
+            items={[{ id: "all", label: "All" }, ...expenseCategories.map((c) => ({ id: c.id, label: c.name }))]}
+          />
+        }
+      >
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Description or category" />}
         footer={<Pagination page={Math.min(page, pages)} pages={pages} total={filtered.length} onChange={setPage} />}
@@ -105,6 +110,7 @@ export function ExpensesPage() {
           ))}
         </tbody>
       </Table>
+      </TabSheet>
 
       <Drawer
         open={Boolean(edit)}

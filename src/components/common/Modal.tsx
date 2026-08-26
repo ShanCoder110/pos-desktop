@@ -6,30 +6,37 @@ import { cn } from "@/utils/format";
 export function Modal({
   open,
   title,
+  subtitle,
   children,
   footer,
   wide,
+  size,
   onClose,
 }: {
   open: boolean;
   title: string;
+  subtitle?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
+  size?: "default" | "work";
   onClose: () => void;
 }) {
   if (!open) return null;
   return (
     <>
       <div className="ui-modal-back" onClick={onClose} />
-      <div className={cn("ui-modal", wide && "is-wide")} role="dialog" aria-modal="true">
+      <div className={cn("ui-modal", wide && "is-wide", size === "work" && "is-work")} role="dialog" aria-modal="true">
         <div className="ui-modal-head">
-          <h2 className="ui-modal-title">{title}</h2>
-          <Button size="icon" variant="ghost" onClick={onClose} aria-label="Close">
+          <div className="ui-modal-head-copy">
+            <h2 className="ui-modal-title">{title}</h2>
+            {subtitle}
+          </div>
+          <Button size="icon" variant="ghost" tabIndex={-1} onClick={onClose} aria-label="Close">
             <X size={16} />
           </Button>
         </div>
-        <div className="ui-modal-body">{children}</div>
+        <div className={cn("ui-modal-body", size === "work" && "is-fill")}>{children}</div>
         {footer ? <div className="ui-modal-foot">{footer}</div> : null}
       </div>
     </>

@@ -22,27 +22,32 @@ import {
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { HubToolbar } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
-import { units as seed } from "@/shared/domain/mock";
-import type { UnitRow } from "@/shared/domain/types";
+import { productCategories, products as catalog } from "@/shared/mock";
+
+type CategoryRow = { id: string; name: string };
 
 const PAGE_SIZE = 10;
 const COLUMNS = [
   { id: "name", label: "Name", locked: true },
-  { id: "symbol", label: "Symbol" },
+  { id: "products", label: "Products" },
 ];
-const blank: UnitRow = { id: "", name: "", symbol: "" };
+const blank: CategoryRow = { id: "", name: "" };
 
-export function UnitsPage() {
+function seedRows(): CategoryRow[] {
+  return productCategories.map((name, i) => ({ id: `cat${i + 1}`, name }));
+}
+
+export function CategoriesPage() {
   const { setActions, sectionKpi } = useProductsHub();
-  const [rows, setRows] = useState(seed);
+  const [rows, setRows] = useState(seedRows);
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
   const [selected, setSelected] = useState<string[]>([]);
-  const [edit, setEdit] = useState<UnitRow | null>(null);
-  const [remove, setRemove] = useState<UnitRow | null>(null);
+  const [edit, setEdit] = useState<CategoryRow | null>(null);
+  const [remove, setRemove] = useState<CategoryRow | null>(null);
 
   useEffect(() => {
     setPage(1);
@@ -51,7 +56,7 @@ export function UnitsPage() {
   useLayoutEffect(() => {
     setActions(
       <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}>
-        Add unit
+        Add category
       </Button>,
     );
     return () => setActions(null);
@@ -60,12 +65,12 @@ export function UnitsPage() {
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const nameChip = chips.find((c) => c.field === "name")?.value.toLowerCase();
-    const symbolChip = chips.find((c) => c.field === "symbol")?.value.toLowerCase();
     return rows.filter((r) => {
-      if (needle && !`${r.name} ${r.symbol}`.toLowerCase().includes(needle)) return false;
-      if (sectionKpi === "pack") return r.symbol === "pk" || r.symbol === "box";
+      const count = catalog.filter((p) => p.category === r.name).length;
+      if (needle && !r.name.toLowerCase().includes(needle)) return false;
+      if (sectionKpi === "used") return count > 0;
+      if (sectionKpi === "empty") return count === 0;
       if (nameChip && !r.name.toLowerCase().includes(nameChip)) return false;
-      if (symbolChip && !r.symbol.toLowerCase().includes(symbolChip)) return false;
       return true;
     });
   }, [rows, q, chips, sectionKpi]);
@@ -95,16 +100,13 @@ export function UnitsPage() {
               setChips([]);
               setPage(1);
             }}
-            filterFields={[
-              { id: "name", label: "Name" },
-              { id: "symbol", label: "Symbol" },
-            ]}
+            filterFields={[{ id: "name", label: "Name" }]}
             search={q}
             onSearch={(v) => {
               setQ(v);
               setPage(1);
             }}
-            searchPlaceholder="Search units"
+            searchPlaceholder="Search categories"
             trailing={
               selected.length > 0 ? (
                 <BulkActions count={selected.length}>
@@ -149,7 +151,7 @@ export function UnitsPage() {
               />
             </Th>
             <Th>Name</Th>
-            {cols.includes("symbol") ? <Th>Symbol</Th> : null}
+            {cols.includes("products") ? <Th>Products</Th> : null}
             <Th>Actions</Th>
           </tr>
         </THead>
@@ -166,7 +168,7 @@ export function UnitsPage() {
                 />
               </Td>
               <Td>{row.name}</Td>
-              {cols.includes("symbol") ? <Td>{row.symbol}</Td> : null}
+              {cols.includes("products") ? <Td numeric>{catalog.filter((p) => p.category === row.name).length}</Td> : null}
               <Td>
                 <Menu>
                   <MenuItem icon={<Pencil size={14} />} onClick={() => setEdit(row)}>
@@ -184,7 +186,7 @@ export function UnitsPage() {
 
       <Drawer
         open={Boolean(edit)}
-        title={edit?.name ? "Edit unit" : "Add unit"}
+        title={edit?.name ? "Edit category" : "Add category"}
         onClose={() => setEdit(null)}
         footer={
           <>
@@ -192,7 +194,7 @@ export function UnitsPage() {
             <Button
               variant="primary"
               onClick={() => {
-                if (!edit?.name || !edit.symbol) return;
+                if (!edit?.name) return;
                 setRows((p) => (p.some((r) => r.id === edit.id) ? p.map((r) => (r.id === edit.id ? edit : r)) : [...p, edit]));
                 setEdit(null);
               }}
@@ -203,21 +205,16 @@ export function UnitsPage() {
         }
       >
         {edit ? (
-          <div className="ui-stack">
-            <Field label="Name">
-              <TextInput value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="Meter" />
-            </Field>
-            <Field label="Symbol">
-              <TextInput value={edit.symbol} onChange={(e) => setEdit({ ...edit, symbol: e.target.value })} placeholder="m" />
-            </Field>
-          </div>
+          <Field label="Name">
+            <TextInput value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="Wire" />
+          </Field>
         ) : null}
       </Drawer>
 
       <ConfirmDialog
         open={Boolean(remove)}
-        title="Delete unit?"
-        body="Products still using this unit as base_unit_id cannot be saved in the live app."
+        title="Delete category?"
+        body="Products still using this category will need a new group before save in the live app."
         onCancel={() => setRemove(null)}
         onConfirm={() => {
           if (remove) {

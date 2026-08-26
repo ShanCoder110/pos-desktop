@@ -14,6 +14,7 @@ import {
   Pagination,
   SearchInput,
   Table,
+  TabSheet,
   Tabs,
   Td,
   TextArea,
@@ -59,18 +60,22 @@ export function SuppliersPage() {
         <KpiCard label="Active" value={rows.filter((r) => r.isActive).length} hint="Can receive lots" tone="ok" />
         <KpiCard label="Inactive" value={rows.filter((r) => !r.isActive).length} hint="Hidden on receive" tone="stale" />
       </div>
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All" },
-          { id: "active", label: "Active" },
-          { id: "inactive", label: "Inactive" },
-        ]}
-      />
+      <TabSheet
+        tabs={
+          <Tabs
+            value={tab}
+            onChange={(id) => {
+              setTab(id);
+              setPage(1);
+            }}
+            items={[
+              { id: "all", label: "All" },
+              { id: "active", label: "Active" },
+              { id: "inactive", label: "Inactive" },
+            ]}
+          />
+        }
+      >
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Name or phone" />}
         footer={<Pagination page={Math.min(page, pages)} pages={pages} total={filtered.length} onChange={setPage} />}
@@ -110,6 +115,7 @@ export function SuppliersPage() {
           ))}
         </tbody>
       </Table>
+      </TabSheet>
 
       <Drawer
         open={Boolean(edit)}

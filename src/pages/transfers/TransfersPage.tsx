@@ -1,27 +1,37 @@
-import { useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Eye, Plus } from "lucide-react";
 import {
   Badge,
   Button,
+  Checkbox,
   Drawer,
   EmptyRow,
   Field,
-  KpiCard,
-  PageHead,
+  PAGE_SIZE_ALL,
   Pagination,
-  SearchInput,
   SelectInput,
   Table,
-  Tabs,
   Td,
   TextArea,
   THead,
   Th,
 } from "@/components/common";
+import type { FilterChip } from "@/components/common/FilterPicker";
+import { HubToolbar } from "@/pages/products/HubToolbar";
+import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { transfers as seed, branchName, lotNumber, productName, userName, branches, productLots } from "@/shared/domain/mock";
 import type { StockTransferRow, TransferStatus } from "@/shared/domain/types";
 
-const PAGE = 10;
+const PAGE_SIZE = 10;
+const COLUMNS = [
+  { id: "from", label: "From", locked: true },
+  { id: "to", label: "To" },
+  { id: "status", label: "Status" },
+  { id: "items", label: "Items" },
+  { id: "created", label: "Created" },
+  { id: "completed", label: "Completed" },
+  { id: "by", label: "By" },
+];
 
 function tone(s: TransferStatus) {
   if (s === "COMPLETED") return "ok" as const;
@@ -30,80 +40,137 @@ function tone(s: TransferStatus) {
 }
 
 export function TransfersPage() {
+  const { setActions, sectionKpi } = useProductsHub();
   const [q, setQ] = useState("");
-  const [tab, setTab] = useState("all");
+  const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
+  const [selected, setSelected] = useState<string[]>([]);
   const [open, setOpen] = useState<StockTransferRow | null>(null);
 
+  useEffect(() => {
+    setPage(1);
+  }, [sectionKpi]);
+
+  useLayoutEffect(() => {
+    setActions(
+      <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(seed[1])}>
+        Add transfer
+      </Button>,
+    );
+    return () => setActions(null);
+  }, [setActions]);
+
   const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const status = chips.find((c) => c.field === "status")?.value?.toUpperCase();
     return seed.filter((r) => {
-      const text = `${branchName(r.fromBranchId)} ${branchName(r.toBranchId)} ${r.notes}`.toLowerCase();
-      if (q && !text.includes(q.toLowerCase())) return false;
-      if (tab !== "all") return r.status === tab.toUpperCase();
+      if (needle) {
+        const text = `${branchName(r.fromBranchId)} ${branchName(r.toBranchId)} ${r.notes}`.toLowerCase();
+        if (!text.includes(needle)) return false;
+      }
+      if (sectionKpi === "PENDING" || sectionKpi === "COMPLETED" || sectionKpi === "CANCELLED") {
+        return r.status === sectionKpi;
+      }
+      if (status) return r.status === status;
       return true;
     });
-  }, [q, tab]);
+  }, [q, chips, sectionKpi]);
 
-  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
-  const shown = rows.slice((page - 1) * PAGE, page * PAGE);
+  const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(rows.length / pageSize));
+  const shown = pageSize === PAGE_SIZE_ALL ? rows : rows.slice((page - 1) * pageSize, page * pageSize);
+  const show = (id: string) => cols.includes(id);
+  const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
   return (
-    <div className="ui-stack">
-      <PageHead title="Transfers">
-        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(seed[1])}>
-          New transfer
-        </Button>
-      </PageHead>
-      <p className="ui-note">
-        Completing a transfer writes TRANSFER_OUT on the source branch and TRANSFER_IN on the destination, against the same ProductLot. Warehouse uses BranchLot when branch_lot_enabled is on.
-      </p>
-      <div className="ui-kpi-row">
-        <KpiCard label="Pending" value={seed.filter((t) => t.status === "PENDING").length} hint="Waiting receive" tone="warn" />
-        <KpiCard label="Completed" value={seed.filter((t) => t.status === "COMPLETED").length} hint="Stock moved" tone="ok" />
-        <KpiCard label="Cancelled" value={seed.filter((t) => t.status === "CANCELLED").length} hint="No movement" tone="danger" />
-      </div>
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All" },
-          { id: "pending", label: "Pending" },
-          { id: "completed", label: "Completed" },
-          { id: "cancelled", label: "Cancelled" },
-        ]}
-      />
+    <div className="products-hub-panel">
       <Table
-        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Branch or note" />}
-        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
+        toolbar={
+          <HubToolbar
+            columns={COLUMNS}
+            cols={cols}
+            onCols={setCols}
+            chips={chips}
+            onApply={(chip) => {
+              setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
+              setPage(1);
+            }}
+            onRemove={(field) => {
+              setChips((c) => c.filter((x) => x.field !== field));
+              setPage(1);
+            }}
+            onClear={() => {
+              setChips([]);
+              setPage(1);
+            }}
+            filterFields={[{ id: "status", label: "Status", options: ["Pending", "Completed", "Cancelled"] }]}
+            search={q}
+            onSearch={(v) => {
+              setQ(v);
+              setPage(1);
+            }}
+            searchPlaceholder="Search transfers"
+          />
+        }
+        footer={
+          <Pagination
+            page={Math.min(page, pages)}
+            pages={pages}
+            total={rows.length}
+            pageSize={pageSize}
+            onPageSize={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
+            onChange={setPage}
+          />
+        }
       >
         <THead>
           <tr>
+            <Th className="ui-check-col">
+              <Checkbox
+                checked={allShownSelected}
+                onChange={(e) => {
+                  if (e.target.checked) setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
+                  else setSelected((s) => s.filter((id) => !shown.some((r) => r.id === id)));
+                }}
+              />
+            </Th>
             <Th>From</Th>
-            <Th>To</Th>
-            <Th>Status</Th>
-            <Th>Items</Th>
-            <Th>Created</Th>
-            <Th>Completed</Th>
-            <Th>By</Th>
-            <Th />
+            {show("to") ? <Th>To</Th> : null}
+            {show("status") ? <Th>Status</Th> : null}
+            {show("items") ? <Th>Items</Th> : null}
+            {show("created") ? <Th>Created</Th> : null}
+            {show("completed") ? <Th>Completed</Th> : null}
+            {show("by") ? <Th>By</Th> : null}
+            <Th>Actions</Th>
           </tr>
         </THead>
         <tbody>
-          {shown.length === 0 ? <EmptyRow cols={8} /> : null}
+          {shown.length === 0 ? <EmptyRow cols={cols.length + 2} /> : null}
           {shown.map((row) => (
             <tr key={row.id}>
-              <Td>{branchName(row.fromBranchId)}</Td>
-              <Td>{branchName(row.toBranchId)}</Td>
-              <Td>
-                <Badge tone={tone(row.status)}>{row.status}</Badge>
+              <Td className="ui-check-col">
+                <Checkbox
+                  checked={selected.includes(row.id)}
+                  onChange={(e) => {
+                    setSelected((s) => (e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id)));
+                  }}
+                />
               </Td>
-              <Td numeric>{row.items.length}</Td>
-              <Td>{row.createdAt}</Td>
-              <Td>{row.completedAt ?? "—"}</Td>
-              <Td>{userName(row.createdBy)}</Td>
+              <Td>{branchName(row.fromBranchId)}</Td>
+              {show("to") ? <Td>{branchName(row.toBranchId)}</Td> : null}
+              {show("status") ? (
+                <Td>
+                  <Badge tone={tone(row.status)}>{row.status}</Badge>
+                </Td>
+              ) : null}
+              {show("items") ? <Td numeric>{row.items.length}</Td> : null}
+              {show("created") ? <Td>{row.createdAt}</Td> : null}
+              {show("completed") ? <Td>{row.completedAt ?? "—"}</Td> : null}
+              {show("by") ? <Td>{userName(row.createdBy)}</Td> : null}
               <Td>
                 <Button size="icon" variant="ghost" onClick={() => setOpen(row)} aria-label="View">
                   <Eye size={15} />

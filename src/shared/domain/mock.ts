@@ -65,6 +65,7 @@ export const units: UnitRow[] = [
   { id: "un3", name: "Kilogram", symbol: "kg" },
   { id: "un4", name: "Pack", symbol: "pk" },
   { id: "un5", name: "Box", symbol: "box" },
+  { id: "un6", name: "Gaz", symbol: "gaz" },
 ];
 
 export const catalog: CatalogProduct[] = [
@@ -95,12 +96,12 @@ export const suppliers: SupplierRow[] = [
 ];
 
 export const productLots: ProductLotRow[] = [
-  { id: "lot1", productId: "p1", supplierId: "s1", lotNumber: "L-2401", purchasePrice: 62, originalQuantity: 90, remainingQuantity: 2, receivedAt: "2026-06-02", expiryDate: null, createdBy: "u1" },
-  { id: "lot2", productId: "p1", supplierId: "s2", lotNumber: "L-2408", purchasePrice: 58, originalQuantity: 90, remainingQuantity: 40, receivedAt: "2026-08-01", expiryDate: null, createdBy: "u3" },
-  { id: "lot3", productId: "p3", supplierId: "s3", lotNumber: "L-2410", purchasePrice: 4200, originalQuantity: 12, remainingQuantity: 7, receivedAt: "2026-08-04", expiryDate: null, createdBy: "u1" },
-  { id: "lot4", productId: "p4", supplierId: "s3", lotNumber: "L-2411", purchasePrice: 180, originalQuantity: 100, remainingQuantity: 64, receivedAt: "2026-08-06", expiryDate: "2028-08-06", createdBy: "u3" },
-  { id: "lot5", productId: "p5", supplierId: "s1", lotNumber: "L-2412", purchasePrice: 45, originalQuantity: 200, remainingQuantity: 120, receivedAt: "2026-08-08", expiryDate: null, createdBy: "u2" },
-  { id: "lot6", productId: "p8", supplierId: "s1", lotNumber: "L-2390", purchasePrice: 40, originalQuantity: 48, remainingQuantity: 0, receivedAt: "2026-05-12", expiryDate: null, createdBy: "u1" },
+  { id: "lot1", productId: "p1", supplierId: "s1", lotNumber: "L-2401", purchasePrice: 62, originalQuantity: 90, remainingQuantity: 2, damagedQuantity: 0, receivedAt: "2026-06-02", expiryDate: null, createdBy: "u1" },
+  { id: "lot2", productId: "p1", supplierId: "s2", lotNumber: "L-2408", purchasePrice: 58, originalQuantity: 90, remainingQuantity: 40, damagedQuantity: 0, receivedAt: "2026-08-01", expiryDate: null, createdBy: "u3" },
+  { id: "lot3", productId: "p3", supplierId: "s3", lotNumber: "L-2410", purchasePrice: 4200, originalQuantity: 12, remainingQuantity: 7, damagedQuantity: 0, receivedAt: "2026-08-04", expiryDate: null, createdBy: "u1" },
+  { id: "lot4", productId: "p4", supplierId: "s3", lotNumber: "L-2411", purchasePrice: 180, originalQuantity: 100, remainingQuantity: 64, damagedQuantity: 0, receivedAt: "2026-08-06", expiryDate: "2028-08-06", createdBy: "u3" },
+  { id: "lot5", productId: "p5", supplierId: "s1", lotNumber: "L-2412", purchasePrice: 45, originalQuantity: 200, remainingQuantity: 120, damagedQuantity: 0, receivedAt: "2026-08-08", expiryDate: null, createdBy: "u2" },
+  { id: "lot6", productId: "p8", supplierId: "s1", lotNumber: "L-2390", purchasePrice: 40, originalQuantity: 48, remainingQuantity: 0, damagedQuantity: 4, receivedAt: "2026-05-12", expiryDate: null, createdBy: "u1" },
 ];
 
 export const branchLots: BranchLotRow[] = [

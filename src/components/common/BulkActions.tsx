@@ -40,13 +40,19 @@ export function BulkAction({
   icon,
   children,
   onClick,
+  danger,
 }: {
   icon?: ReactNode;
   children: ReactNode;
   onClick: () => void;
+  danger?: boolean;
 }) {
   return (
-    <button type="button" className="ui-pop-item" onClick={onClick}>
+    <button
+      type="button"
+      className={danger ? "ui-pop-item is-danger" : "ui-pop-item"}
+      onClick={onClick}
+    >
       {icon}
       {children}
     </button>

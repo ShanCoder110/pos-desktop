@@ -102,6 +102,7 @@ export interface ProductLotRow {
   purchasePrice: number;
   originalQuantity: number;
   remainingQuantity: number;
+  damagedQuantity: number;
   receivedAt: string;
   expiryDate: string | null;
   createdBy: string;

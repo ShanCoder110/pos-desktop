@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Badge, EmptyRow, KpiCard, PageHead, Pagination, SearchInput, Table, Tabs, Td, THead, Th } from "@/components/common";
+import { Badge, EmptyRow, KpiCard, PageHead, Pagination, SearchInput, Table, TabSheet, Tabs, Td, THead, Th } from "@/components/common";
 import { moneyTxns as seed, branchName, userName } from "@/shared/domain/mock";
 import { money } from "@/utils/format";
 
@@ -36,18 +36,22 @@ export function TransactionsPage() {
         <KpiCard label="Out" value={money(out)} hint="Refunds, bills, commission" tone="danger" />
         <KpiCard label="Net" value={money(inn - out)} hint="Drawer" tone={inn - out >= 0 ? "ok" : "warn"} />
       </div>
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All" },
-          { id: "in", label: "In" },
-          { id: "out", label: "Out" },
-        ]}
-      />
+      <TabSheet
+        tabs={
+          <Tabs
+            value={tab}
+            onChange={(id) => {
+              setTab(id);
+              setPage(1);
+            }}
+            items={[
+              { id: "all", label: "All" },
+              { id: "in", label: "In" },
+              { id: "out", label: "Out" },
+            ]}
+          />
+        }
+      >
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Type, method, note" />}
         footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
@@ -82,6 +86,7 @@ export function TransactionsPage() {
           ))}
         </tbody>
       </Table>
+      </TabSheet>
     </div>
   );
 }

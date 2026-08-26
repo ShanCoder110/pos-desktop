@@ -1,17 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
-  AlertTriangle,
   ChevronDown,
-  Clock,
   FileSpreadsheet,
   FileText,
-  Gift,
-  Minus,
   Pencil,
   Plus,
   Printer,
   Receipt,
-  ShieldCheck,
   Tags,
   Trash2,
 } from "lucide-react";
@@ -21,61 +17,39 @@ import {
   BulkActions,
   Button,
   Checkbox,
-  ColumnPicker,
   ConfirmDialog,
   Drawer,
-  Field,
-  FilterChips,
-  FilterPicker,
-  KpiCard,
   Menu,
   MenuItem,
-  MoneyInput,
+  PAGE_SIZE_ALL,
   Pagination,
   Popover,
-  SearchInput,
-  SelectInput,
   Table,
-  Tabs,
+  TableRowsSkeleton,
   Td,
-  TextInput,
   THead,
   Th,
-  Toggle,
+  TruncatedTooltip,
+  toaster,
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
-import { productCategories, products as seed } from "@/shared/mock";
+import { HubToolbar } from "@/pages/products/HubToolbar";
+import { ProductForm } from "@/pages/products/ProductForm";
+import { blankProduct, lotTotals, openingLot } from "@/pages/products/productLots";
+import { formatStockQty, stockBreakdown } from "@/pages/products/productQty";
+import {
+  HEALTH_FROM_LABEL,
+  HEALTH_LABEL,
+  matchesHealth,
+  useProductsHub,
+} from "@/pages/products/ProductsLayout";
+import { productCategories, topSelling } from "@/shared/mock";
 import { useSettings } from "@/shared/settings";
 import type { Product } from "@/shared/types";
 import { exportProductsCsv, exportProductsExcel, printProducts } from "@/utils/exportFile";
-import { money, warrantyDaysOf } from "@/utils/format";
+import { money } from "@/utils/format";
 
-const blank: Product = {
-  id: "",
-  sku: "",
-  name: "",
-  category: "Wire",
-  unit: "pc",
-  isLinear: false,
-  isManufactured: false,
-  packQty: null,
-  packPrice: 0,
-  cost: 0,
-  min: 0,
-  wholesale: 0,
-  retail: 0,
-  warrantyQty: 0,
-  warrantyUnit: "months",
-  warrantyDays: 0,
-  claims: 0,
-  damaged: 0,
-  stock: 0,
-  components: [],
-};
-
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
-}
+const PAGE_SIZE = 10;
 
 function nextSku(existing: Product[]) {
   const used = new Set(existing.map((r) => r.sku));
@@ -88,17 +62,6 @@ function nextSku(existing: Product[]) {
   return sku;
 }
 
-function numVal(raw: string) {
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function numStr(n: number) {
-  return n ? String(n) : "";
-}
-
-const PAGE_SIZE = 10;
-
 const COLUMNS = [
   { id: "name", label: "Name", locked: true },
   { id: "sku", label: "SKU" },
@@ -106,9 +69,13 @@ const COLUMNS = [
   { id: "cost", label: "Cost" },
   { id: "retail", label: "Sell" },
   { id: "margin", label: "Margin" },
-  { id: "stock", label: "Stock" },
+  { id: "sales", label: "Total sales" },
+  { id: "profit", label: "Profit" },
+  { id: "stock", label: "Qty" },
   { id: "status", label: "Status" },
 ];
+
+const DEFAULT_COLS = ["name", "category", "cost", "retail", "margin", "sales", "profit", "stock", "status"];
 
 function marginPct(row: Product) {
   if (!row.cost) return 0;
@@ -127,14 +94,23 @@ function stockLabel(row: Product) {
   return "In stock";
 }
 
-type HealthKpi = "healthy" | "risk" | "stale" | "dead" | "phantom";
+const soldById = new Map(topSelling.map((t) => [t.productId, t]));
 
-function matchesHealth(row: Product, kpi: HealthKpi) {
-  if (kpi === "healthy") return row.stock >= 20;
-  if (kpi === "risk") return row.stock > 0 && row.stock < 20;
-  if (kpi === "stale") return row.claims > 0 || row.damaged > 0;
-  if (kpi === "dead") return row.stock <= 0;
-  return row.isLinear;
+function soldQty(id: string) {
+  return soldById.get(id)?.qty ?? 0;
+}
+
+function salesAmount(id: string) {
+  return soldById.get(id)?.amount ?? 0;
+}
+
+function profitOf(row: Product) {
+  return (row.retail - row.cost) * soldQty(row.id);
+}
+
+function minAmount(raw: string) {
+  const n = Number(String(raw).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? n : 0;
 }
 
 function ExportMenu({ rows, shopName }: { rows: Product[]; shopName: string }) {
@@ -175,29 +151,61 @@ function ExportMenu({ rows, shopName }: { rows: Product[]; shopName: string }) {
 
 export function ProductsPage() {
   const { settings } = useSettings();
-  const [rows, setRows] = useState(seed);
+  const { setActions, health, setHealth, sectionKpi, lots, setLots, products: rows, setProducts: setRows } = useProductsHub();
+  const location = useLocation();
+  const tab = location.pathname.endsWith("/sold")
+    ? "sold"
+    : location.pathname.endsWith("/low")
+      ? "low"
+      : "all";
   const [q, setQ] = useState("");
-  const [tab, setTab] = useState("all");
+  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
+  const [cols, setCols] = useState(DEFAULT_COLS);
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<Product | null>(null);
-  const [formTab, setFormTab] = useState("details");
-  const [unitManual, setUnitManual] = useState(false);
   const [remove, setRemove] = useState<Product | null>(null);
   const [blocked, setBlocked] = useState(false);
-  const [kpi, setKpi] = useState<HealthKpi | null>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setLoading(false), 450);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    setPage(1);
+    setSelected([]);
+  }, [tab, sectionKpi]);
+
+  useEffect(() => {
+    setChips((prev) => {
+      const without = prev.filter((c) => c.field !== "health");
+      if (!health) return without;
+      return [...without, { field: "health", label: "Health", value: HEALTH_LABEL[health] }];
+    });
+    setPage(1);
+  }, [health]);
 
   const filtered = useMemo(() => {
-    return rows.filter((r) => {
+    const list = rows.filter((r) => {
       const text = `${r.name} ${r.sku} ${r.category}`.toLowerCase();
       if (q && !text.includes(q.toLowerCase())) return false;
-      if (kpi && !matchesHealth(r, kpi)) return false;
       for (const chip of chips) {
+        if (chip.field === "health") {
+          const key = HEALTH_FROM_LABEL[chip.value];
+          if (!key || !matchesHealth(r, key)) return false;
+        }
         if (chip.field === "name" && !r.name.toLowerCase().includes(chip.value.toLowerCase())) return false;
+        if (chip.field === "sku" && !r.sku.toLowerCase().includes(chip.value.toLowerCase())) return false;
         if (chip.field === "category" && r.category !== chip.value) return false;
+        if (chip.field === "sales") {
+          if (salesAmount(r.id) < minAmount(chip.value)) return false;
+        }
+        if (chip.field === "profit") {
+          if (profitOf(r) < minAmount(chip.value)) return false;
+        }
         if (chip.field === "stock") {
           const tone = stockTone(r);
           if (chip.value === "In stock" && tone !== "ok") return false;
@@ -205,220 +213,162 @@ export function ProductsPage() {
           if (chip.value === "Out of stock" && tone !== "danger") return false;
         }
       }
-      if (tab === "low") return r.stock > 0 && r.stock < 20;
-      if (tab === "linear") return r.isLinear;
-      if (tab === "claims") return r.claims > 0 || r.damaged > 0;
+      if (tab === "sold") return soldQty(r.id) > 0;
+      if (tab === "low") {
+        if (sectionKpi === "below") return r.stock > 0 && r.stock < 20;
+        if (sectionKpi === "out") return r.stock <= 0;
+        return r.stock < 20;
+      }
       return true;
     });
-  }, [rows, q, tab, chips, kpi]);
+    if (tab === "sold") {
+      return [...list].sort((a, b) => soldQty(b.id) - soldQty(a.id));
+    }
+    return list;
+  }, [rows, q, tab, chips, sectionKpi]);
 
-  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const shown = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const pageCount = pageSize === PAGE_SIZE_ALL ? Math.max(filtered.length, 1) : pageSize;
+  const pages = Math.max(1, Math.ceil(filtered.length / pageCount));
+  const shown =
+    pageSize === PAGE_SIZE_ALL
+      ? filtered
+      : filtered.slice((page - 1) * pageSize, page * pageSize);
   const show = (id: string) => cols.includes(id);
-  const healthCounts: Record<HealthKpi, number> = {
-    healthy: rows.filter((r) => matchesHealth(r, "healthy")).length,
-    risk: rows.filter((r) => matchesHealth(r, "risk")).length,
-    stale: rows.filter((r) => matchesHealth(r, "stale")).length,
-    dead: rows.filter((r) => matchesHealth(r, "dead")).length,
-    phantom: rows.filter((r) => matchesHealth(r, "phantom")).length,
-  };
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
-  function toggleKpi(id: HealthKpi) {
-    setKpi((cur) => (cur === id ? null : id));
-    setTab("all");
+  function removeChip(field: string) {
+    if (field === "health") setHealth(null);
+    setChips((prev) => prev.filter((c) => c.field !== field));
     setPage(1);
   }
 
-  function save() {
-    if (!edit?.name.trim()) return;
-    const next: Product = {
-      ...edit,
-      name: edit.name.trim(),
-      sku: settings.autoSku && !edit.sku.trim() ? nextSku(rows.filter((r) => r.id !== edit.id)) : edit.sku.trim(),
-      warrantyDays: warrantyDaysOf(edit.warrantyQty, edit.warrantyUnit),
-      components: edit.isManufactured ? edit.components.filter((c) => c.productId && c.quantity > 0) : [],
-      packQty: edit.packQty && edit.packQty > 0 ? edit.packQty : null,
-      packPrice: edit.packQty && edit.packQty > 0 ? edit.packPrice : 0,
+  function clearChips() {
+    setHealth(null);
+    setChips([]);
+    setPage(1);
+  }
+
+  function commit(next: Product) {
+    const isNewRow = !rows.some((r) => r.id === next.id);
+    const saved: Product = {
+      ...next,
+      sku: settings.autoSku && !next.sku.trim() ? nextSku(rows.filter((r) => r.id !== next.id)) : next.sku.trim(),
     };
-    setRows((prev) => (prev.some((r) => r.id === next.id) ? prev.map((r) => (r.id === next.id ? next : r)) : [...prev, next]));
-    setEdit(null);
+    if (isNewRow && saved.stock > 0) {
+      const lot = openingLot(saved, lots);
+      setLots((prev) => [...prev, lot]);
+      const totals = lotTotals([lot]);
+      saved.stock = totals.stock;
+      saved.damaged = totals.damaged;
+    }
+    setRows((prev) => (prev.some((r) => r.id === saved.id) ? prev.map((r) => (r.id === saved.id ? saved : r)) : [...prev, saved]));
+    return true;
   }
 
   const picked = rows.filter((r) => selected.includes(r.id));
 
   function openEdit(row: Product) {
-    const auto = row.packQty && row.packPrice ? round2(row.packPrice / row.packQty) : null;
-    setFormTab("details");
-    setUnitManual(auto != null && Math.abs(auto - row.retail) > 0.009);
-    setEdit(row);
+    setEdit({
+      ...row,
+      barcode: row.barcode ?? "",
+      supplierId: row.supplierId ?? "",
+      minimumStock: row.minimumStock ?? 0,
+      warrantyEnabled: row.warrantyEnabled ?? row.warrantyQty > 0,
+      warrantyNote: row.warrantyNote ?? "",
+    });
   }
 
   function openNew() {
-    openEdit({ ...blank, id: crypto.randomUUID() });
-  }
-
-  function patch(next: Partial<Product>) {
-    setEdit((cur) => (cur ? { ...cur, ...next } : cur));
-  }
-
-  function setPackPrice(packPrice: number) {
-    setEdit((cur) => {
-      if (!cur) return cur;
-      const next = { ...cur, packPrice };
-      if (!unitManual && next.packQty && next.packQty > 0) next.retail = round2(packPrice / next.packQty);
-      return next;
-    });
-  }
-
-  function setPackQty(packQty: number | null) {
-    setEdit((cur) => {
-      if (!cur) return cur;
-      const next = { ...cur, packQty };
-      if (!unitManual && packQty && packQty > 0 && next.packPrice) next.retail = round2(next.packPrice / packQty);
-      return next;
-    });
+    setEdit(blankProduct());
   }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== "F2") return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (remove || blocked || edit) return;
-      openNew();
+      if (edit || remove || blocked) return;
+      if (e.key === "F2") {
+        e.preventDefault();
+        e.stopPropagation();
+        openNew();
+      }
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [edit, remove, blocked]);
 
+  useLayoutEffect(() => {
+    setActions(
+      <>
+        <ExportMenu rows={filtered} shopName={settings.shopName} />
+        <Button variant="primary" icon={<Plus size={14} />} onClick={openNew}>
+          Add Product
+          <kbd className="ui-kbd">F2</kbd>
+        </Button>
+      </>,
+    );
+    return () => setActions(null);
+  }, [filtered, settings.shopName, setActions]);
+
+  const isNew = !edit || !rows.some((r) => r.id === edit.id);
+
   return (
-    <div className="ui-stack">
-      <div className="ui-page-head">
-        <h1 className="ui-page-title">Products</h1>
-        <div className="ui-actions">
-          <ExportMenu rows={filtered} shopName={settings.shopName} />
-          <Button icon={<Plus size={14} />} onClick={openNew}>
-            Add product
-            <kbd className="ui-kbd">F2</kbd>
-          </Button>
-          <BulkActions count={selected.length}>
-            <BulkAction icon={<FileText size={14} />} onClick={() => exportProductsCsv(picked, "selected-products.csv")}>
-              CSV
-            </BulkAction>
-            <BulkAction icon={<FileSpreadsheet size={14} />} onClick={() => exportProductsExcel(picked, "selected-products.xls")}>
-              Excel
-            </BulkAction>
-            <BulkAction icon={<Receipt size={14} />} onClick={() => printProducts(picked, "thermal", settings.shopName)}>
-              Thermal printer
-            </BulkAction>
-            <BulkAction icon={<Printer size={14} />} onClick={() => printProducts(picked, "a4", settings.shopName)}>
-              A4
-            </BulkAction>
-            <BulkAction
-              icon={<Tags size={14} />}
-              onClick={() => {
-                const first = picked[0];
-                if (first) openEdit(first);
-              }}
-            >
-              Edit selected
-            </BulkAction>
-          </BulkActions>
-        </div>
-      </div>
-
-      <div className="ui-kpi-row">
-        <KpiCard
-          label="Healthy"
-          value={healthCounts.healthy}
-          hint="In stock"
-          tone="ok"
-          icon={<ShieldCheck size={16} />}
-          active={kpi === "healthy"}
-          onClick={() => toggleKpi("healthy")}
-        />
-        <KpiCard
-          label="At risk"
-          value={healthCounts.risk}
-          hint="Low stock"
-          tone="warn"
-          icon={<AlertTriangle size={16} />}
-          active={kpi === "risk"}
-          onClick={() => toggleKpi("risk")}
-        />
-        <KpiCard
-          label="Stale"
-          value={healthCounts.stale}
-          hint="Has claims"
-          tone="stale"
-          icon={<Clock size={16} />}
-          active={kpi === "stale"}
-          onClick={() => toggleKpi("stale")}
-        />
-        <KpiCard
-          label="Dead"
-          value={healthCounts.dead}
-          hint="Out of stock"
-          tone="danger"
-          icon={<Trash2 size={16} />}
-          active={kpi === "dead"}
-          onClick={() => toggleKpi("dead")}
-        />
-        <KpiCard
-          label="Phantom"
-          value={healthCounts.phantom}
-          hint="Sold by length"
-          tone="phantom"
-          icon={<Gift size={16} />}
-          active={kpi === "phantom"}
-          onClick={() => toggleKpi("phantom")}
-        />
-      </div>
-
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All products" },
-          { id: "low", label: "Low stock" },
-          { id: "linear", label: "Sold by length" },
-          { id: "claims", label: "Claims" },
-        ]}
-      />
-
+    <div className={edit ? "products-hub-panel is-drawer-open" : "products-hub-panel"}>
       <Table
         toolbar={
-          <>
-            <div className="ui-toolbar-row">
-              <div className="ui-toolbar-left" style={{ width: "100%" }}>
-                <ColumnPicker columns={COLUMNS} value={cols} onChange={setCols} />
-                <FilterPicker
-                  chips={chips}
-                  onApply={(chip) => {
-                    setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
-                    setPage(1);
-                  }}
-                  fields={[
-                    { id: "name", label: "Name" },
-                    { id: "category", label: "Category", options: productCategories },
-                    { id: "stock", label: "Stock", options: ["In stock", "Low stock", "Out of stock"] },
-                  ]}
-                />
-                <SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Search by name, SKU, category" />
-              </div>
-            </div>
-            <FilterChips
-              items={chips}
-              onRemove={(field) => {
-                setChips((prev) => prev.filter((c) => c.field !== field));
-                setPage(1);
-              }}
-            />
-          </>
+          <HubToolbar
+            columns={COLUMNS}
+            cols={cols}
+            onCols={setCols}
+            chips={chips}
+            onApply={(chip) => {
+              setLoading(true);
+              setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
+              setPage(1);
+              window.setTimeout(() => setLoading(false), 220);
+            }}
+            onRemove={removeChip}
+            onClear={clearChips}
+            filterFields={[
+              { id: "name", label: "Name" },
+              { id: "sku", label: "SKU" },
+              { id: "category", label: "Category", options: productCategories, searchable: true },
+              { id: "sales", label: "Total sales", placeholder: "Min amount e.g. 5000", numeric: true },
+              { id: "profit", label: "Profit", placeholder: "Min amount e.g. 1000", numeric: true },
+              { id: "stock", label: "Qty", options: ["In stock", "Low stock", "Out of stock"] },
+            ]}
+            search={q}
+            onSearch={(v) => {
+              setQ(v);
+              setPage(1);
+            }}
+            searchPlaceholder="Search by name, SKU, category"
+            trailing={
+              selected.length > 0 ? (
+                <BulkActions count={selected.length}>
+                  <BulkAction icon={<FileText size={14} />} onClick={() => exportProductsCsv(picked, "selected-products.csv")}>
+                    CSV
+                  </BulkAction>
+                  <BulkAction icon={<FileSpreadsheet size={14} />} onClick={() => exportProductsExcel(picked, "selected-products.xls")}>
+                    Excel
+                  </BulkAction>
+                  <BulkAction icon={<Receipt size={14} />} onClick={() => printProducts(picked, "thermal", settings.shopName)}>
+                    Thermal printer
+                  </BulkAction>
+                  <BulkAction icon={<Printer size={14} />} onClick={() => printProducts(picked, "a4", settings.shopName)}>
+                    A4
+                  </BulkAction>
+                  <BulkAction
+                    icon={<Tags size={14} />}
+                    onClick={() => {
+                      const first = picked[0];
+                      if (first) openEdit(first);
+                    }}
+                  >
+                    Edit selected
+                  </BulkAction>
+                </BulkActions>
+              ) : null
+            }
+          />
         }
         footer={
           <Pagination
@@ -436,7 +386,7 @@ export function ProductsPage() {
       >
         <THead>
           <tr>
-            <Th>
+            <Th className="ui-check-col">
               <Checkbox
                 checked={allShownSelected}
                 onChange={(e) => {
@@ -451,18 +401,28 @@ export function ProductsPage() {
             {show("cost") ? <Th>Cost</Th> : null}
             {show("retail") ? <Th>Sell</Th> : null}
             {show("margin") ? <Th>Margin</Th> : null}
-            {show("stock") ? <Th>Stock</Th> : null}
+            {show("sales") ? <Th>Total sales</Th> : null}
+            {show("profit") ? <Th>Profit</Th> : null}
+            {show("stock") ? <Th>Qty</Th> : null}
             {show("status") ? <Th>Status</Th> : null}
             <Th>Actions</Th>
           </tr>
         </THead>
         <tbody>
-          {shown.map((row) => {
+          {loading ? (
+            <TableRowsSkeleton
+              columnCount={cols.length}
+              rows={pageSize === PAGE_SIZE_ALL ? Math.min(Math.max(filtered.length, 6), 12) : pageSize}
+              selectable
+              hasActions
+            />
+          ) : (
+            shown.map((row) => {
             const tone = stockTone(row);
             const pct = marginPct(row);
             return (
               <tr key={row.id} className={`is-${tone}`}>
-                <Td>
+                <Td className="ui-check-col">
                   <Checkbox
                     checked={selected.includes(row.id)}
                     onChange={(e) => {
@@ -471,9 +431,8 @@ export function ProductsPage() {
                   />
                 </Td>
                 <Td>
-                  {row.name}
+                  <TruncatedTooltip text={row.name} />
                   {row.isLinear ? <span className="sub">Sold by meter</span> : null}
-                  {row.packQty ? <span className="sub">Pack of {row.packQty}</span> : null}
                   {row.isManufactured ? <span className="sub">Production</span> : null}
                 </Td>
                 {show("sku") ? <Td>{row.sku || "—"}</Td> : null}
@@ -488,9 +447,23 @@ export function ProductsPage() {
                     </span>
                   </Td>
                 ) : null}
+                {show("sales") ? <Td numeric>{money(salesAmount(row.id))}</Td> : null}
+                {show("profit") ? (
+                  <Td numeric>
+                    <span style={{ color: profitOf(row) >= 0 ? "var(--sale)" : "var(--danger)", fontWeight: 700 }}>
+                      {money(profitOf(row))}
+                    </span>
+                  </Td>
+                ) : null}
                 {show("stock") ? (
                   <Td numeric>
-                    {row.stock} {row.unit}
+                    <div className="product-qty">
+                      {stockBreakdown(row).map((q) => (
+                        <span key={q.name}>
+                          {formatStockQty(q.qty)} {q.name}
+                        </span>
+                      ))}
+                    </div>
                   </Td>
                 ) : null}
                 {show("status") ? (
@@ -520,289 +493,46 @@ export function ProductsPage() {
                 </Td>
               </tr>
             );
-          })}
+          })
+          )}
         </tbody>
       </Table>
 
       <Drawer
         open={Boolean(edit)}
-        title={edit?.name ? "Edit product" : "Add product"}
         wide
         form
-        onClose={() => setEdit(null)}
-        footer={
-          <>
-            <Button onClick={() => setEdit(null)}>Cancel</Button>
-            <Button variant="primary" onClick={save}>
-              Save
-            </Button>
-          </>
+        dim={false}
+        title={isNew ? "Add Product" : "Edit Product"}
+        subtitle={
+          <p className="product-keys">
+            <span>
+              <kbd className="ui-kbd">Tab</kbd> Move
+            </span>
+            <span>
+              <kbd className="ui-kbd">Shift + Tab</kbd> Back
+            </span>
+            <span>
+              <kbd className="ui-kbd">Enter</kbd> Select
+            </span>
+            <span>
+              <kbd className="ui-kbd">F12</kbd> Save
+            </span>
+            <span>
+              <kbd className="ui-kbd">Esc</kbd> Close
+            </span>
+          </p>
         }
+        onClose={() => setEdit(null)}
       >
         {edit ? (
-          <div className="product-form">
-            <Tabs
-              value={formTab}
-              onChange={setFormTab}
-              items={[
-                { id: "details", label: "Details" },
-                { id: "pack", label: "Pack" },
-                { id: "recipe", label: "Recipe" },
-                { id: "warranty", label: "Warranty" },
-              ]}
-            />
-            {formTab === "details" ? (
-              <div className="product-form-pane">
-                <div className="product-form-grid">
-                  <Field label="Name" className="is-full">
-                    <TextInput
-                      autoFocus
-                      placeholder="e.g. 1.5mm copper wire"
-                      value={edit.name}
-                      onChange={(e) => patch({ name: e.target.value })}
-                    />
-                  </Field>
-                  <Field
-                    label="SKU"
-                    hint={settings.autoSku ? "Assigned when you save." : "Leave blank if you do not use SKUs."}
-                  >
-                    <TextInput
-                      placeholder={settings.autoSku ? "Assigned when saved" : "Optional"}
-                      value={edit.sku}
-                      disabled={settings.autoSku}
-                      onChange={(e) => patch({ sku: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="Category">
-                    <SelectInput value={edit.category} onChange={(e) => patch({ category: e.target.value })}>
-                      {productCategories.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </SelectInput>
-                  </Field>
-                  <Field label="Unit">
-                    <SelectInput
-                      value={edit.unit}
-                      onChange={(e) => patch({ unit: e.target.value as Product["unit"] })}
-                    >
-                      <option value="pc">Piece</option>
-                      <option value="m">Meter</option>
-                    </SelectInput>
-                  </Field>
-                  <div className="product-flag is-full">
-                    <Toggle
-                      checked={edit.isLinear}
-                      onChange={(v) => patch({ isLinear: v, unit: v ? "m" : "pc" })}
-                      label="Sold by length (wire, pipe)"
-                    />
-                  </div>
-                  <Field label="Cost">
-                    <MoneyInput
-                      placeholder="0.00"
-                      value={numStr(edit.cost)}
-                      onChange={(e) => patch({ cost: numVal(e.target.value) })}
-                    />
-                  </Field>
-                  <Field label="Minimum">
-                    <MoneyInput
-                      placeholder="0.00"
-                      value={numStr(edit.min)}
-                      onChange={(e) => patch({ min: numVal(e.target.value) })}
-                    />
-                  </Field>
-                  <Field label="Wholesale">
-                    <MoneyInput
-                      placeholder="0.00"
-                      value={numStr(edit.wholesale)}
-                      onChange={(e) => patch({ wholesale: numVal(e.target.value) })}
-                    />
-                  </Field>
-                  {!edit.packQty ? (
-                    <Field label="Retail">
-                      <MoneyInput
-                        placeholder="0.00"
-                        value={numStr(edit.retail)}
-                        onChange={(e) => patch({ retail: numVal(e.target.value) })}
-                      />
-                    </Field>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-            {formTab === "pack" ? (
-              <div className="product-form-pane">
-                <div className="product-flag">
-                  <Toggle
-                    checked={edit.packQty != null}
-                    onChange={(v) => {
-                      if (!v) {
-                        setEdit((cur) => (cur ? { ...cur, packQty: null, packPrice: 0 } : cur));
-                        return;
-                      }
-                      setUnitManual(false);
-                      setPackQty(edit.isLinear ? 90 : 12);
-                    }}
-                    label="This product is sold in a pack"
-                  />
-                </div>
-                {edit.packQty != null ? (
-                  <div className="product-form-grid">
-                    <Field label="Pack size" hint={edit.isLinear ? "Meters in one coil." : "Pieces in one pack."}>
-                      <TextInput
-                        inputMode="numeric"
-                        placeholder={edit.isLinear ? "e.g. 90" : "e.g. 12"}
-                        value={numStr(edit.packQty)}
-                        onChange={(e) => setPackQty(e.target.value === "" ? 0 : numVal(e.target.value))}
-                      />
-                    </Field>
-                    <Field label="Pack price">
-                      <MoneyInput
-                        placeholder="0.00"
-                        value={numStr(edit.packPrice)}
-                        onChange={(e) => setPackPrice(numVal(e.target.value))}
-                      />
-                    </Field>
-                    <Field
-                      label="Unit price"
-                      hint="Filled from pack price ÷ size. You can change it."
-                      className="is-full"
-                    >
-                      <MoneyInput
-                        placeholder="0.00"
-                        value={numStr(edit.retail)}
-                        onChange={(e) => {
-                          setUnitManual(true);
-                          patch({ retail: numVal(e.target.value) });
-                        }}
-                      />
-                    </Field>
-                  </div>
-                ) : (
-                  <p className="product-note">Turn this on for cartons, coils, or boxes. Pack price and unit price both stay here.</p>
-                )}
-              </div>
-            ) : null}
-            {formTab === "recipe" ? (
-              <div className="product-form-pane">
-                <div className="product-flag">
-                  <Toggle
-                    checked={edit.isManufactured}
-                    onChange={(v) => patch({ isManufactured: v, components: v ? edit.components : [] })}
-                    label="This is a production product"
-                  />
-                </div>
-                {edit.isManufactured ? (
-                  <>
-                    <div className="product-bom-head">
-                      <h3>Items used to make it</h3>
-                      <Button
-                        icon={<Plus size={14} />}
-                        onClick={() =>
-                          patch({
-                            components: [...edit.components, { id: crypto.randomUUID(), productId: "", quantity: 1 }],
-                          })
-                        }
-                      >
-                        Add item
-                      </Button>
-                    </div>
-                    <div className="product-bom">
-                      {edit.components.length === 0 ? (
-                        <p className="product-note">Add the parts, wire, or hardware that go into this product.</p>
-                      ) : (
-                        edit.components.map((line) => (
-                          <div key={line.id} className="product-bom-row">
-                            <Field label="Item">
-                              <SelectInput
-                                value={line.productId}
-                                onChange={(e) =>
-                                  patch({
-                                    components: edit.components.map((c) =>
-                                      c.id === line.id ? { ...c, productId: e.target.value } : c,
-                                    ),
-                                  })
-                                }
-                              >
-                                <option value="">Choose item</option>
-                                {rows
-                                  .filter((r) => r.id !== edit.id)
-                                  .map((r) => (
-                                    <option key={r.id} value={r.id}>
-                                      {r.name}
-                                    </option>
-                                  ))}
-                              </SelectInput>
-                            </Field>
-                            <Field label="Qty">
-                              <TextInput
-                                inputMode="decimal"
-                                placeholder="1"
-                                value={numStr(line.quantity)}
-                                onChange={(e) =>
-                                  patch({
-                                    components: edit.components.map((c) =>
-                                      c.id === line.id ? { ...c, quantity: numVal(e.target.value) } : c,
-                                    ),
-                                  })
-                                }
-                              />
-                            </Field>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              aria-label="Remove item"
-                              onClick={() => patch({ components: edit.components.filter((c) => c.id !== line.id) })}
-                            >
-                              <Minus size={14} />
-                            </Button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <p className="product-note">Turn this on for assembled or manufactured items, then list the components on this tab.</p>
-                )}
-              </div>
-            ) : null}
-            {formTab === "warranty" ? (
-              <div className="product-form-pane">
-                <p className="product-note">Leave duration blank if there is no warranty. Months is the default.</p>
-                <div className="product-form-grid">
-                  <Field label="Duration">
-                    <TextInput
-                      inputMode="numeric"
-                      placeholder="e.g. 12"
-                      value={numStr(edit.warrantyQty)}
-                      onChange={(e) =>
-                        patch({
-                          warrantyQty: numVal(e.target.value),
-                          warrantyDays: warrantyDaysOf(numVal(e.target.value), edit.warrantyUnit),
-                        })
-                      }
-                    />
-                  </Field>
-                  <Field label="Unit">
-                    <SelectInput
-                      value={edit.warrantyUnit}
-                      onChange={(e) => {
-                        const warrantyUnit = e.target.value as Product["warrantyUnit"];
-                        patch({
-                          warrantyUnit,
-                          warrantyDays: warrantyDaysOf(edit.warrantyQty, warrantyUnit),
-                        });
-                      }}
-                    >
-                      <option value="months">Months</option>
-                      <option value="days">Days</option>
-                    </SelectInput>
-                  </Field>
-                </div>
-              </div>
-            ) : null}
-          </div>
+          <ProductForm
+            product={edit}
+            catalog={rows}
+            onChange={setEdit}
+            onCommit={commit}
+            onClose={() => setEdit(null)}
+          />
         ) : null}
       </Drawer>
 
@@ -824,6 +554,7 @@ export function ProductsPage() {
           if (remove) {
             setRows((p) => p.filter((r) => r.id !== remove.id));
             setSelected((s) => s.filter((id) => id !== remove.id));
+            toaster.success("Product deleted");
           }
           setRemove(null);
         }}
