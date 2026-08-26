@@ -48,12 +48,12 @@ export function RepairPage() {
   const shown = rows.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div className="ui-stack">
+    <div className="ui-stack [display:grid] [gap:12px]">
       <PageHead title="Production" />
-      <p className="ui-note">
+      <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
         A job consumes BOM components (PRODUCTION_USE, including damage) then outputs finished goods (PRODUCTION_OUTPUT). Technician commission is EmployeeCommission until paid as a Transaction OUT.
       </p>
-      <div className="ui-kpi-row">
+      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
         <KpiCard label="Open" value={seed.filter((p) => p.status === "PENDING" || p.status === "IN_PROGRESS").length} hint="Not finished" tone="warn" />
         <KpiCard label="Completed" value={seed.filter((p) => p.status === "COMPLETED").length} hint="Stock in" tone="ok" />
         <KpiCard label="Commission due" value={money(seed.reduce((s, p) => s + (p.status === "COMPLETED" ? p.commissionAmount : 0), 0))} hint="Pay staff" tone="stale" />
@@ -117,8 +117,8 @@ export function RepairPage() {
 
       <Drawer open={Boolean(open)} title={open?.productionNumber ?? "Job"} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
         {open ? (
-          <div className="ui-stack">
-            <dl className="ui-kv">
+          <div className="ui-stack [display:grid] [gap:12px]">
+            <dl className="ui-kv [display:grid] [grid-template-columns:118px_1fr] [gap:8px_12px] [font-size:13px]">
               <dt>Material</dt>
               <dd>{money(open.materialCost)}</dd>
               <dt>Damage</dt>
@@ -128,7 +128,7 @@ export function RepairPage() {
               <dt>Total</dt>
               <dd>{money(open.totalCost)}</dd>
             </dl>
-            <p className="ui-page-title" style={{ fontSize: 14 }}>
+            <p className="ui-page-title [font-size:22px] [font-weight:800] [letter-spacing:-0.03em] [color:var(--ink)] [min-width:0]" style={{ fontSize: 14 }}>
               Recipe (BOM)
             </p>
             <Table>
@@ -149,7 +149,7 @@ export function RepairPage() {
                 ))}
               </tbody>
             </Table>
-            <p className="ui-page-title" style={{ fontSize: 14 }}>
+            <p className="ui-page-title [font-size:22px] [font-weight:800] [letter-spacing:-0.03em] [color:var(--ink)] [min-width:0]" style={{ fontSize: 14 }}>
               Consumed this job
             </p>
             <Table>

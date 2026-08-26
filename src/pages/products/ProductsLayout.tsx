@@ -34,13 +34,12 @@ export const PRODUCT_SECTION_TABS = [
   { id: "sold", to: routes.productsSold, label: "Most sold" },
 ] as const;
 
-export type HealthKpi = "healthy" | "risk" | "stale" | "dead" | "phantom";
+export type HealthKpi = "healthy" | "risk" | "dead" | "phantom";
 export type HubSection = "catalog" | "lots" | "units" | "categories" | "transfers" | "low" | "sold";
 
 export const HEALTH_LABEL: Record<HealthKpi, string> = {
   healthy: "Healthy",
   risk: "At risk",
-  stale: "Stale",
   dead: "Dead",
   phantom: "Phantom",
 };
@@ -48,7 +47,6 @@ export const HEALTH_LABEL: Record<HealthKpi, string> = {
 export const HEALTH_FROM_LABEL: Record<string, HealthKpi> = {
   Healthy: "healthy",
   "At risk": "risk",
-  Stale: "stale",
   Dead: "dead",
   Phantom: "phantom",
 };
@@ -56,7 +54,6 @@ export const HEALTH_FROM_LABEL: Record<string, HealthKpi> = {
 export function matchesHealth(row: Product, kpi: HealthKpi) {
   if (kpi === "healthy") return row.stock >= 20;
   if (kpi === "risk") return row.stock > 0 && row.stock < 20;
-  if (kpi === "stale") return row.claims > 0 || row.damaged > 0;
   if (kpi === "dead") return row.stock <= 0;
   return row.isLinear;
 }
@@ -101,10 +98,10 @@ export function useProductsHub() {
 
 function CatalogKpis() {
   const { health, setHealth, products } = useProductsHub();
+  const productCost = products.reduce((total, product) => total + product.cost * product.stock, 0);
   const counts: Record<HealthKpi, number> = {
     healthy: products.filter((r) => matchesHealth(r, "healthy")).length,
     risk: products.filter((r) => matchesHealth(r, "risk")).length,
-    stale: products.filter((r) => matchesHealth(r, "stale")).length,
     dead: products.filter((r) => matchesHealth(r, "dead")).length,
     phantom: products.filter((r) => matchesHealth(r, "phantom")).length,
   };
@@ -114,10 +111,10 @@ function CatalogKpis() {
   }
 
   return (
-    <div className="ui-kpi-row">
+    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
+      <KpiCard label="Product cost" value={money(productCost)} tone="phantom" icon={<Wallet size={16} />} />
       <KpiCard label="Healthy" value={counts.healthy} hint="In stock" tone="ok" icon={<ShieldCheck size={16} />} active={health === "healthy"} onClick={() => toggle("healthy")} />
       <KpiCard label="At risk" value={counts.risk} hint="Low stock" tone="warn" icon={<AlertTriangle size={16} />} active={health === "risk"} onClick={() => toggle("risk")} />
-      <KpiCard label="Stale" value={counts.stale} hint="Has claims" tone="stale" icon={<Clock size={16} />} active={health === "stale"} onClick={() => toggle("stale")} />
       <KpiCard label="Dead" value={counts.dead} hint="Out of stock" tone="danger" icon={<Trash2 size={16} />} active={health === "dead"} onClick={() => toggle("dead")} />
       <KpiCard label="Phantom" value={counts.phantom} hint="Sold by length" tone="phantom" icon={<Gift size={16} />} active={health === "phantom"} onClick={() => toggle("phantom")} />
     </div>
@@ -136,7 +133,7 @@ function LotsKpis() {
   }
 
   return (
-    <div className="ui-kpi-row">
+    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
       <KpiCard label="Open lots" value={open} hint="Still on shelf" tone="ok" icon={<Layers size={16} />} active={sectionKpi === "open"} onClick={() => toggle("open")} />
       <KpiCard label="Empty" value={empty} hint="Fully sold" tone="stale" icon={<Box size={16} />} active={sectionKpi === "empty"} onClick={() => toggle("empty")} />
       <KpiCard label="Value left" value={money(valueLeft)} hint="At purchase price" tone="ok" icon={<Wallet size={16} />} />
@@ -156,7 +153,7 @@ function UnitsKpis() {
   }
 
   return (
-    <div className="ui-kpi-row">
+    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
       <KpiCard label="Base units" value={units.length} hint="Stock unit" tone="ok" icon={<Ruler size={16} />} active={sectionKpi === null} onClick={() => setSectionKpi(null)} />
       <KpiCard label="Sell units" value={productUnits.length} hint="POS sell options" tone="phantom" icon={<Package size={16} />} />
       <KpiCard label="Packs" value={packs} hint="Conversion over 1" tone="warn" icon={<Box size={16} />} active={sectionKpi === "pack"} onClick={() => toggle("pack")} />
@@ -178,7 +175,7 @@ function TransfersKpis() {
   }
 
   return (
-    <div className="ui-kpi-row">
+    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
       <KpiCard label="Pending" value={pending} hint="Waiting receive" tone="warn" icon={<Clock size={16} />} active={sectionKpi === "PENDING"} onClick={() => toggle("PENDING")} />
       <KpiCard label="Completed" value={done} hint="Stock moved" tone="ok" icon={<CheckCircle2 size={16} />} active={sectionKpi === "COMPLETED"} onClick={() => toggle("COMPLETED")} />
       <KpiCard label="Cancelled" value={cancelled} hint="No movement" tone="danger" icon={<XCircle size={16} />} active={sectionKpi === "CANCELLED"} onClick={() => toggle("CANCELLED")} />
@@ -202,7 +199,7 @@ function CategoriesKpis() {
   }
 
   return (
-    <div className="ui-kpi-row">
+    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
       <KpiCard label="Categories" value={productCategories.length} hint="Catalog groups" tone="ok" icon={<Tags size={16} />} active={sectionKpi === null} onClick={() => setSectionKpi(null)} />
       <KpiCard label="In use" value={used} hint="Have products" tone="phantom" icon={<Package size={16} />} active={sectionKpi === "used"} onClick={() => toggle("used")} />
       <KpiCard label="Empty" value={empty} hint="No products yet" tone="stale" icon={<Box size={16} />} active={sectionKpi === "empty"} onClick={() => toggle("empty")} />
@@ -223,7 +220,7 @@ function LowStockKpis() {
   }
 
   return (
-    <div className="ui-kpi-row">
+    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
       <KpiCard label="Low stock" value={below + out} hint="Needs attention" tone="warn" icon={<AlertTriangle size={16} />} active={sectionKpi === null} onClick={() => setSectionKpi(null)} />
       <KpiCard label="Below min" value={below} hint="Still on shelf" tone="warn" icon={<AlertTriangle size={16} />} active={sectionKpi === "below"} onClick={() => toggle("below")} />
       <KpiCard label="Out" value={out} hint="Zero remaining" tone="danger" icon={<Trash2 size={16} />} active={sectionKpi === "out"} onClick={() => toggle("out")} />
@@ -263,10 +260,10 @@ export function ProductsLayout() {
 
   return (
     <ProductsHubContext.Provider value={ctx}>
-      <div className="products-hub">
-        <div className="ui-page-head">
-          <h1 className="ui-page-title">Products</h1>
-          <div className="ui-actions">{actions}</div>
+      <div className="products-hub [min-height:0]">
+        <div className="ui-page-head [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [width:100%] [flex-shrink:0]">
+          <h1 className="ui-page-title [font-size:22px] [font-weight:800] [letter-spacing:-0.03em] [color:var(--ink)] [min-width:0]">Products</h1>
+          <div className="ui-actions [display:flex] [align-items:center] [gap:8px]">{actions}</div>
         </div>
         <ProductHubKpis />
         <TabSheet tabs={<Tabs items={[...PRODUCT_SECTION_TABS]} ariaLabel="Products sections" />}>

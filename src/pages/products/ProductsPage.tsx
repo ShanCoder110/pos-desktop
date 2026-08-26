@@ -19,6 +19,7 @@ import {
   Checkbox,
   ConfirmDialog,
   Drawer,
+  HubChart,
   Menu,
   MenuItem,
   PAGE_SIZE_ALL,
@@ -33,10 +34,10 @@ import {
   toaster,
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
-import { HubToolbar } from "@/pages/products/HubToolbar";
+import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { ProductForm } from "@/pages/products/ProductForm";
 import { blankProduct, lotTotals, openingLot } from "@/pages/products/productLots";
-import { formatStockQty, stockBreakdown } from "@/pages/products/productQty";
+import { formatStockQty, stockBreakdown, unitLabel } from "@/pages/products/productQty";
 import {
   HEALTH_FROM_LABEL,
   HEALTH_LABEL,
@@ -67,7 +68,9 @@ const COLUMNS = [
   { id: "sku", label: "SKU" },
   { id: "category", label: "Category" },
   { id: "cost", label: "Cost" },
-  { id: "retail", label: "Sell" },
+  { id: "wholesale", label: "Wholesale" },
+  { id: "min", label: "Minimum" },
+  { id: "retail", label: "Retail" },
   { id: "margin", label: "Margin" },
   { id: "sales", label: "Total sales" },
   { id: "profit", label: "Profit" },
@@ -75,7 +78,47 @@ const COLUMNS = [
   { id: "status", label: "Status" },
 ];
 
-const DEFAULT_COLS = ["name", "category", "cost", "retail", "margin", "sales", "profit", "stock", "status"];
+const DEFAULT_COLS = ["name", "category", "cost", "wholesale", "min", "margin", "sales", "profit", "stock", "status"];
+
+type PriceField = "cost" | "min" | "wholesale" | "retail";
+
+function unitPrices(row: Product, field: PriceField) {
+  if (row.sellUnits?.length) {
+    return row.sellUnits.map((unit) => ({
+      id: unit.id,
+      name: unit.name || unitLabel(unit.symbol || row.unit),
+      value: field === "retail" ? unit.price : unit[field],
+    }));
+  }
+
+  const base = {
+    id: `${row.id}-base`,
+    name: unitLabel(row.unit),
+    value: row[field],
+  };
+  if (!row.packQty || row.packQty <= 1) return [base];
+
+  return [
+    base,
+    {
+      id: `${row.id}-pack`,
+      name: "Pack",
+      value: field === "retail" && row.packPrice > 0 ? row.packPrice : row[field] * row.packQty,
+    },
+  ];
+}
+
+function UnitPrice({ row, field }: { row: Product; field: PriceField }) {
+  return (
+    <div className="product-unit-prices grid justify-items-end gap-1 [font-variant-numeric:tabular-nums]">
+      {unitPrices(row, field).map((price) => (
+        <span key={price.id} className="whitespace-nowrap">
+          {money(price.value)} <small className="font-medium text-muted">/ {price.name}</small>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 function marginPct(row: Product) {
   if (!row.cost) return 0;
@@ -126,21 +169,21 @@ function ExportMenu({ rows, shopName }: { rows: Product[]; shopName: string }) {
         </Button>
       }
     >
-      <div className="ui-pop-list" onClick={() => setOpen(false)}>
-        <button type="button" className="ui-pop-item" onClick={() => exportProductsCsv(rows)}>
+      <div className="ui-pop-list [display:grid] [max-height:240px] [overflow:auto]" onClick={() => setOpen(false)}>
+        <button type="button" className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]" onClick={() => exportProductsCsv(rows)}>
           <FileText size={14} />
           CSV
         </button>
-        <button type="button" className="ui-pop-item" onClick={() => exportProductsExcel(rows)}>
+        <button type="button" className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]" onClick={() => exportProductsExcel(rows)}>
           <FileSpreadsheet size={14} />
           Excel
         </button>
-        <div className="ui-pop-sep" />
-        <button type="button" className="ui-pop-item" onClick={() => printProducts(rows, "thermal", shopName)}>
+        <div className="ui-pop-sep [height:1px] [margin:6px_4px] [background:var(--line)]" />
+        <button type="button" className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]" onClick={() => printProducts(rows, "thermal", shopName)}>
           <Receipt size={14} />
           Thermal printer
         </button>
-        <button type="button" className="ui-pop-item" onClick={() => printProducts(rows, "a4", shopName)}>
+        <button type="button" className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]" onClick={() => printProducts(rows, "a4", shopName)}>
           <Printer size={14} />
           A4
         </button>
@@ -163,6 +206,7 @@ export function ProductsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [cols, setCols] = useState(DEFAULT_COLS);
+  const [view, setView] = useState<HubView>("table");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<Product | null>(null);
@@ -233,6 +277,16 @@ export function ProductsPage() {
     pageSize === PAGE_SIZE_ALL
       ? filtered
       : filtered.slice((page - 1) * pageSize, page * pageSize);
+  const chartData = useMemo(
+    () => filtered
+      .map((row) => ({
+        id: row.id,
+        label: row.name,
+        value: tab === "sold" ? salesAmount(row.id) : tab === "low" ? row.stock : row.stock * row.cost,
+      }))
+      .sort((a, b) => b.value - a.value),
+    [filtered, tab],
+  );
   const show = (id: string) => cols.includes(id);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
@@ -301,7 +355,7 @@ export function ProductsPage() {
         <ExportMenu rows={filtered} shopName={settings.shopName} />
         <Button variant="primary" icon={<Plus size={14} />} onClick={openNew}>
           Add Product
-          <kbd className="ui-kbd">F2</kbd>
+          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">F2</kbd>
         </Button>
       </>,
     );
@@ -311,7 +365,7 @@ export function ProductsPage() {
   const isNew = !edit || !rows.some((r) => r.id === edit.id);
 
   return (
-    <div className={edit ? "products-hub-panel is-drawer-open" : "products-hub-panel"}>
+    <div className={edit ? "products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden] is-drawer-open" : "products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]"}>
       <Table
         toolbar={
           <HubToolbar
@@ -341,6 +395,8 @@ export function ProductsPage() {
               setPage(1);
             }}
             searchPlaceholder="Search by name, SKU, category"
+            view={view}
+            onView={setView}
             trailing={
               selected.length > 0 ? (
                 <BulkActions count={selected.length}>
@@ -369,6 +425,17 @@ export function ProductsPage() {
               ) : null
             }
           />
+        }
+        body={
+          view !== "table" ? (
+            <HubChart
+              type={view}
+              title={tab === "sold" ? "Sales by product" : tab === "low" ? "Low-stock quantities" : "Inventory value by product"}
+              subtitle={`${filtered.length} products after search and field filters`}
+              data={chartData}
+              formatValue={tab === "low" ? formatStockQty : money}
+            />
+          ) : undefined
         }
         footer={
           <Pagination
@@ -399,7 +466,9 @@ export function ProductsPage() {
             {show("sku") ? <Th>SKU</Th> : null}
             {show("category") ? <Th>Category</Th> : null}
             {show("cost") ? <Th>Cost</Th> : null}
-            {show("retail") ? <Th>Sell</Th> : null}
+            {show("wholesale") ? <Th>Wholesale</Th> : null}
+            {show("min") ? <Th>Minimum</Th> : null}
+            {show("retail") ? <Th>Retail</Th> : null}
             {show("margin") ? <Th>Margin</Th> : null}
             {show("sales") ? <Th>Total sales</Th> : null}
             {show("profit") ? <Th>Profit</Th> : null}
@@ -437,8 +506,10 @@ export function ProductsPage() {
                 </Td>
                 {show("sku") ? <Td>{row.sku || "—"}</Td> : null}
                 {show("category") ? <Td>{row.category}</Td> : null}
-                {show("cost") ? <Td numeric>{money(row.cost)}</Td> : null}
-                {show("retail") ? <Td numeric>{money(row.retail)}</Td> : null}
+                {show("cost") ? <Td numeric><UnitPrice row={row} field="cost" /></Td> : null}
+                {show("wholesale") ? <Td numeric><UnitPrice row={row} field="wholesale" /></Td> : null}
+                {show("min") ? <Td numeric><UnitPrice row={row} field="min" /></Td> : null}
+                {show("retail") ? <Td numeric><UnitPrice row={row} field="retail" /></Td> : null}
                 {show("margin") ? (
                   <Td numeric>
                     <span style={{ color: pct >= 0 ? "var(--sale)" : "var(--danger)", fontWeight: 700 }}>
@@ -457,7 +528,7 @@ export function ProductsPage() {
                 ) : null}
                 {show("stock") ? (
                   <Td numeric>
-                    <div className="product-qty">
+                    <div className="product-qty [display:grid] [gap:1px] [justify-items:end] [font-variant-numeric:tabular-nums]">
                       {stockBreakdown(row).map((q) => (
                         <span key={q.name}>
                           {formatStockQty(q.qty)} {q.name}
@@ -468,10 +539,7 @@ export function ProductsPage() {
                 ) : null}
                 {show("status") ? (
                   <Td>
-                    <div className="ui-actions">
-                      <Badge tone={tone}>{stockLabel(row)}</Badge>
-                      {row.stock > 0 ? <Badge tone="ok">Sellable</Badge> : <Badge>Held</Badge>}
-                    </div>
+                    <Badge tone={tone}>{stockLabel(row)}</Badge>
                   </Td>
                 ) : null}
                 <Td>
@@ -505,21 +573,21 @@ export function ProductsPage() {
         dim={false}
         title={isNew ? "Add Product" : "Edit Product"}
         subtitle={
-          <p className="product-keys">
+          <p className="product-keys [display:flex] [flex-wrap:wrap] [gap:8px_12px] [margin:0] [font-size:11px] [color:var(--muted)]">
             <span>
-              <kbd className="ui-kbd">Tab</kbd> Move
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Tab</kbd> Move
             </span>
             <span>
-              <kbd className="ui-kbd">Shift + Tab</kbd> Back
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Shift + Tab</kbd> Back
             </span>
             <span>
-              <kbd className="ui-kbd">Enter</kbd> Select
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Enter</kbd> Select
             </span>
             <span>
-              <kbd className="ui-kbd">F12</kbd> Save
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">F12</kbd> Save
             </span>
             <span>
-              <kbd className="ui-kbd">Esc</kbd> Close
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Esc</kbd> Close
             </span>
           </p>
         }

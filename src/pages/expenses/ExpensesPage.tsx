@@ -54,14 +54,14 @@ export function ExpensesPage() {
   const shown = filtered.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div className="ui-stack">
+    <div className="ui-stack [display:grid] [gap:12px]">
       <PageHead title="Expenses">
         <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}>
           Add expense
         </Button>
       </PageHead>
-      <p className="ui-note">Saving writes Expense and a Transaction EXPENSE with direction OUT. Categories are ExpenseCategory.</p>
-      <div className="ui-kpi-row">
+      <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">Saving writes Expense and a Transaction EXPENSE with direction OUT. Categories are ExpenseCategory.</p>
+      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
         <KpiCard label="This month" value={money(rows.reduce((s, r) => s + r.amount, 0))} hint="All branches" tone="danger" />
         <KpiCard label="Cash" value={money(rows.filter((r) => r.paymentMethod === "CASH").reduce((s, r) => s + r.amount, 0))} hint="OUT cash" tone="warn" />
         <KpiCard label="Bank" value={money(rows.filter((r) => r.paymentMethod === "BANK").reduce((s, r) => s + r.amount, 0))} hint="OUT bank" tone="stale" />
@@ -133,7 +133,7 @@ export function ExpensesPage() {
         }
       >
         {edit ? (
-          <div className="ui-stack">
+          <div className="ui-stack [display:grid] [gap:12px]">
             <Field label="Category">
               <SelectInput value={edit.categoryId} onChange={(e) => setEdit({ ...edit, categoryId: e.target.value })}>
                 {expenseCategories.map((c) => (

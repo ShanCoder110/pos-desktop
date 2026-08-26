@@ -60,9 +60,9 @@ export function UnitQtyFields({
   }
 
   return (
-    <div className="unit-qty">
-      <span className="unit-qty-label">{label}</span>
-      <div className="unit-qty-grid">
+    <div className="unit-qty [display:grid] [gap:8px]">
+      <span className="unit-qty-label [font-size:11px] [font-weight:700] [color:var(--muted)]">{label}</span>
+      <div className="unit-qty-grid [display:grid] [grid-template-columns:repeat(auto-fit,_minmax(110px,_1fr))] [gap:8px_10px]">
         {ordered.map((u) => (
           <Field key={u.id} label={u.name || unitLabel(u.symbol || stockSymbol)}>
             <TextInput
@@ -102,9 +102,9 @@ export function LinkedUnitBoxes({
   const ordered = qtyUnits(units).length ? qtyUnits(units) : units;
   const asPrice = stockPrice != null;
   return (
-    <div className="unit-qty">
-      <span className="unit-qty-label">{label}</span>
-      <div className="unit-qty-grid">
+    <div className="unit-qty [display:grid] [gap:8px]">
+      <span className="unit-qty-label [font-size:11px] [font-weight:700] [color:var(--muted)]">{label}</span>
+      <div className="unit-qty-grid [display:grid] [grid-template-columns:repeat(auto-fit,_minmax(110px,_1fr))] [gap:8px_10px]">
         {ordered.map((u) => (
           <Field key={u.id} label={u.name || unitLabel(u.symbol || stockSymbol)}>
             {asPrice ? (
@@ -144,7 +144,7 @@ export function LotCostField({
   }, [ordered, unitId, fallback]);
 
   return (
-    <div className="product-lot-price">
+    <div className="product-lot-price [display:grid] [gap:8px] [grid-template-columns:repeat(auto-fit,_minmax(110px,_1fr))] [gap:8px_10px]">
       <Field label="Lot cost">
         <MoneyInput
           placeholder="0.00"

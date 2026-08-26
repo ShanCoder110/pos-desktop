@@ -33,14 +33,14 @@ export function SetupPage() {
       footer={
         <p>
           Already set up?{" "}
-          <Link to={routes.login} className="auth-link">
+          <Link to={routes.login} className="auth-link [font-weight:600] [color:var(--accent)] [text-decoration:none]">
             Sign in
           </Link>
         </p>
       }
     >
       <form
-        className="auth-form"
+        className="auth-form [display:grid] [gap:16px]"
         onSubmit={(e) => {
           e.preventDefault();
           if (!shopName.trim()) {
@@ -97,7 +97,7 @@ export function SetupPage() {
             placeholder="Shop 12, Hall Road, Lahore"
           />
         </Field>
-        <div className="auth-form-row">
+        <div className="auth-form-row [display:grid] [grid-template-columns:1fr_1fr] [gap:12px]">
           <Field label="First name">
             <TextInput
               className="is-lg"
@@ -142,8 +142,8 @@ export function SetupPage() {
             placeholder="••••••••"
           />
         </Field>
-        {error ? <p className="auth-error">{error}</p> : null}
-        <button type="submit" className="auth-submit">
+        {error ? <p className="auth-error [font-size:12px] [color:var(--danger)]">{error}</p> : null}
+        <button type="submit" className="auth-submit [height:44px] [width:100%] [border:0] [border-radius:8px] [background:var(--accent)] [color:#fff] [font-size:14px] [font-weight:600] [cursor:pointer]">
           Create shop
         </button>
       </form>

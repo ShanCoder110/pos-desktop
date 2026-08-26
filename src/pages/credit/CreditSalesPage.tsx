@@ -49,16 +49,16 @@ export function CreditSalesPage() {
   const lines = open ? ledger.filter((l) => l.customerId === open.id) : [];
 
   return (
-    <div className="ui-stack">
+    <div className="ui-stack [display:grid] [gap:12px]">
       <PageHead title="Credit / Udhaar">
         <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(owing[0] ?? seed[0])}>
           Record payment
         </Button>
       </PageHead>
-      <p className="ui-note">
+      <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
         + balance = customer owes. 0 = settled. − balance = advance on the next bill. Walk-in invoices never hit this ledger.
       </p>
-      <div className="ui-kpi-row">
+      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
         <KpiCard label="Owed to shop" value={money(owing.reduce((s, c) => s + c.currentBalance, 0))} hint="Collect" tone="danger" />
         <KpiCard label="On udhaar" value={owing.length} hint="Customers" tone="warn" />
         <KpiCard label="Advance" value={money(Math.abs(seed.filter((c) => c.currentBalance < 0).reduce((s, c) => s + c.currentBalance, 0)))} hint="Held for next bill" tone="ok" />
@@ -132,8 +132,8 @@ export function CreditSalesPage() {
         }
       >
         {open ? (
-          <div className="ui-stack">
-            <p className="ui-note">A payment writes CustomerLedger PAYMENT (credit) and Transaction CUSTOMER_PAYMENT IN.</p>
+          <div className="ui-stack [display:grid] [gap:12px]">
+            <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">A payment writes CustomerLedger PAYMENT (credit) and Transaction CUSTOMER_PAYMENT IN.</p>
             <Field label="Amount received">
               <TextInput value={pay} onChange={(e) => setPay(e.target.value)} placeholder="0" />
             </Field>
@@ -161,7 +161,7 @@ export function CreditSalesPage() {
                     <Td>{line.createdAt}</Td>
                     <Td>
                       {line.type}
-                      <span className="ui-note"> {line.invoiceId ? invoiceNumber(line.invoiceId) : branchName(line.branchId)}</span>
+                      <span className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]"> {line.invoiceId ? invoiceNumber(line.invoiceId) : branchName(line.branchId)}</span>
                     </Td>
                     <Td numeric>{line.debit ? money(line.debit) : "—"}</Td>
                     <Td numeric>{line.credit ? money(line.credit) : "—"}</Td>

@@ -60,16 +60,16 @@ export function CustomersPage() {
   const shown = filtered.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div className="ui-stack">
+    <div className="ui-stack [display:grid] [gap:12px]">
       <PageHead title="Customers">
         <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}>
           Add customer
         </Button>
       </PageHead>
-      <p className="ui-note">
+      <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
         Walk-in sales leave customer_id empty on the invoice — they never get a khata. +balance owes the shop. −balance is advance.
       </p>
-      <div className="ui-kpi-row">
+      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
         <KpiCard label="Active" value={rows.filter((r) => r.isActive).length} hint="Can sell on name" tone="ok" />
         <KpiCard label="Owing" value={rows.filter((r) => r.currentBalance > 0).length} hint="Open udhaar" tone="warn" />
         <KpiCard label="To collect" value={money(rows.filter((r) => r.currentBalance > 0).reduce((s, r) => s + r.currentBalance, 0))} hint="Sum of +" tone="danger" />
@@ -160,7 +160,7 @@ export function CustomersPage() {
         }
       >
         {edit ? (
-          <div className="ui-stack">
+          <div className="ui-stack [display:grid] [gap:12px]">
             <Field label="Name">
               <TextInput value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
             </Field>

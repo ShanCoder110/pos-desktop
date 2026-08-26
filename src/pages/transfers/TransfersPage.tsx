@@ -6,6 +6,7 @@ import {
   Checkbox,
   Drawer,
   EmptyRow,
+  HubChart,
   Field,
   PAGE_SIZE_ALL,
   Pagination,
@@ -15,9 +16,12 @@ import {
   TextArea,
   THead,
   Th,
+  dateInRange,
+  rangeForPeriod,
 } from "@/components/common";
+import type { DateRangeFilter } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
-import { HubToolbar } from "@/pages/products/HubToolbar";
+import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { transfers as seed, branchName, lotNumber, productName, userName, branches, productLots } from "@/shared/domain/mock";
 import type { StockTransferRow, TransferStatus } from "@/shared/domain/types";
@@ -46,6 +50,8 @@ export function TransfersPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
+  const [view, setView] = useState<HubView>("table");
+  const [dateRange, setDateRange] = useState<DateRangeFilter>(() => rangeForPeriod("all"));
   const [selected, setSelected] = useState<string[]>([]);
   const [open, setOpen] = useState<StockTransferRow | null>(null);
 
@@ -66,6 +72,7 @@ export function TransfersPage() {
     const needle = q.trim().toLowerCase();
     const status = chips.find((c) => c.field === "status")?.value?.toUpperCase();
     return seed.filter((r) => {
+      if (!dateInRange(r.createdAt, dateRange)) return false;
       if (needle) {
         const text = `${branchName(r.fromBranchId)} ${branchName(r.toBranchId)} ${r.notes}`.toLowerCase();
         if (!text.includes(needle)) return false;
@@ -76,15 +83,20 @@ export function TransfersPage() {
       if (status) return r.status === status;
       return true;
     });
-  }, [q, chips, sectionKpi]);
+  }, [q, chips, sectionKpi, dateRange]);
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(rows.length / pageSize));
   const shown = pageSize === PAGE_SIZE_ALL ? rows : rows.slice((page - 1) * pageSize, page * pageSize);
+  const chartData = useMemo(() => {
+    const grouped = new Map<string, number>();
+    rows.forEach((row) => grouped.set(row.status, (grouped.get(row.status) ?? 0) + row.items.length));
+    return [...grouped.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  }, [rows]);
   const show = (id: string) => cols.includes(id);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
   return (
-    <div className="products-hub-panel">
+    <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
         toolbar={
           <HubToolbar
@@ -111,7 +123,24 @@ export function TransfersPage() {
               setPage(1);
             }}
             searchPlaceholder="Search transfers"
+            view={view}
+            onView={setView}
+            dateRange={dateRange}
+            onDateRange={(range) => {
+              setDateRange(range);
+              setPage(1);
+            }}
           />
+        }
+        body={
+          view !== "table" ? (
+            <HubChart
+              type={view}
+              title="Transferred items by status"
+              subtitle={`${rows.length} transfers after search, status, and date filters`}
+              data={chartData}
+            />
+          ) : undefined
         }
         footer={
           <Pagination
@@ -193,7 +222,7 @@ export function TransfersPage() {
         }
       >
         {open ? (
-          <div className="ui-stack">
+          <div className="ui-stack [display:grid] [gap:12px]">
             <Field label="From">
               <SelectInput value={open.fromBranchId} disabled>
                 {branches.map((b) => (

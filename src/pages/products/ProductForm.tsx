@@ -5,6 +5,7 @@ import {
   Checkbox,
   Field,
   MoneyInput,
+  ProductSearch,
   SearchableSelect,
   Tabs,
   TextArea,
@@ -426,13 +427,13 @@ export function ProductForm({
   const typeValue = product.isManufactured ? "manufactured" : "standard";
 
   return (
-    <div className="product-form" ref={rootRef}>
+    <div className="product-form [position:relative] [display:flex] [flex-direction:column] [flex:1] [min-height:0] [min-width:0] [height:100%] [overflow:hidden]" ref={rootRef}>
       {flash ? (
-        <p className="product-saved" role="status">
+        <p className="product-saved [position:absolute] [top:10px] [left:50%] [z-index:4] [display:flex] [align-items:center] [gap:6px] [margin:0] [padding:6px_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [box-shadow:0_8px_20px_rgba(15,_23,_42,_0.12)] [font-size:12px] [font-weight:700] [color:var(--accent-deep)] [transform:translateX(-50%)] [pointer-events:none]" role="status">
           <Check size={14} /> Product saved
         </p>
       ) : null}
-      <div className="product-form-nav">
+      <div className="product-form-nav [display:flex] [align-items:center] [justify-content:space-between] [gap:8px] [padding:0_16px] [border-bottom:1px_solid_var(--line)] [flex-shrink:0] [min-width:0]">
         <Tabs
           variant="line"
           skipTabOrder
@@ -455,17 +456,17 @@ export function ProductForm({
                       : "Warranty",
           }))}
         />
-        <p className="product-nav-hint">
-          <kbd className="ui-kbd">Ctrl</kbd>
-          <kbd className="ui-kbd">←</kbd>
-          <kbd className="ui-kbd">→</kbd>
+        <p className="product-nav-hint [margin:0] [display:inline-flex] [align-items:center] [gap:4px] [font-size:11px] [color:var(--muted)] [white-space:nowrap] [flex-shrink:0]">
+          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Ctrl</kbd>
+          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">←</kbd>
+          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">→</kbd>
           Switch
         </p>
       </div>
 
       {section === "details" ? (
-        <div className="product-form-pane">
-          <div className="product-form-grid">
+        <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
+          <div className="product-form-grid [display:grid] [grid-template-columns:1fr_1fr] [gap:10px_14px]">
             <Field label="Name" className="is-full" error={error === "name" ? "Name is required" : undefined}>
               <TextInput
                 data-field="name"
@@ -500,7 +501,7 @@ export function ProductForm({
               />
             </Field>
             {isNew ? (
-              <div className="product-qty-field is-full">
+              <div className="product-qty-field [display:grid] [gap:6px] is-full">
                 <UnitQtyFields
                   label="Quantity"
                   units={sellUnits}
@@ -510,7 +511,7 @@ export function ProductForm({
                 />
               </div>
             ) : (
-              <div className="product-qty-field is-full">
+              <div className="product-qty-field [display:grid] [gap:6px] is-full">
                 <LinkedUnitBoxes
                   label="Total quantity (all lots)"
                   units={sellUnits}
@@ -530,16 +531,16 @@ export function ProductForm({
                 />
               </Field>
             ) : (
-              <div className="product-supplier-list is-full">
-                <span className="field-label">Suppliers</span>
+              <div className="product-supplier-list [display:grid] [gap:6px] is-full">
+                <span className="field-label [font-size:12px] [font-weight:600] [color:var(--sub)]">Suppliers</span>
                 {activeSuppliers.length === 0 ? (
-                  <p className="product-note">No active lots. Suppliers show here when a lot still has quantity.</p>
+                  <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">No active lots. Suppliers show here when a lot still has quantity.</p>
                 ) : (
-                  <div className="ui-chip-row">
+                  <div className="ui-chip-row [display:flex] [flex-wrap:wrap] [gap:6px]">
                     {activeSuppliers.map((s) => (
-                      <span key={s.id} className="ui-chip">
-                        <span className="ui-chip-label">{s.name}</span>
-                        <span className="ui-chip-value">{s.lots.join(", ")}</span>
+                      <span key={s.id} className="ui-chip [display:inline-flex] [align-items:center] [gap:6px] [height:26px] [padding:0_8px_0_10px] [border:1px_solid_color-mix(in_srgb,_var(--accent)_28%,_transparent)] [border-radius:999px] [background:var(--accent-bg)] [color:var(--accent-deep)] [font-size:11px] [font-weight:650] [cursor:pointer]">
+                        <span className="ui-chip-label [opacity:0.75]">{s.name}</span>
+                        <span className="ui-chip-value [max-width:140px] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]">{s.lots.join(", ")}</span>
                       </span>
                     ))}
                   </div>
@@ -582,14 +583,14 @@ export function ProductForm({
             </Field>
               </>
             ) : (
-              <div className="product-fifo is-full">
+              <div className="product-fifo [display:grid] [gap:8px] is-full">
                 {sellingLot ? (
                   <>
-                    <p className="product-note">
+                    <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
                       <strong>{sellingLot.lotNumber} · FIFO selling now</strong>
                       <span>Received {sellingLot.receivedAt}</span>
                     </p>
-                    <div className="product-fifo-meta">
+                    <div className="product-fifo-meta [display:grid] [grid-template-columns:1fr_1fr] [gap:10px_14px]">
                       <Field label="Current price">
                         <TextInput
                           disabled
@@ -600,8 +601,8 @@ export function ProductForm({
                         <TextInput disabled value={supplierName(sellingLot.supplierId) || "—"} />
                       </Field>
                     </div>
-                    <div className="product-fifo-table">
-                      <div className="product-fifo-row is-head">
+                    <div className="product-fifo-table [border:1px_solid_var(--line)] [border-radius:8px] [overflow:hidden] [background:var(--paper)]">
+                      <div className="product-fifo-row [display:grid] [grid-template-columns:minmax(64px,_1fr)_repeat(4,_minmax(52px,_1fr))] [gap:4px] [padding:7px_8px] [font-size:11px] [font-variant-numeric:tabular-nums] is-head">
                         <span>Unit</span>
                         <span>Cost</span>
                         <span>Min</span>
@@ -609,7 +610,7 @@ export function ProductForm({
                         <span>Retail</span>
                       </div>
                       {sellUnits.map((row) => (
-                        <div key={row.id} className="product-fifo-row">
+                        <div key={row.id} className="product-fifo-row [display:grid] [grid-template-columns:minmax(64px,_1fr)_repeat(4,_minmax(52px,_1fr))] [gap:4px] [padding:7px_8px] [font-size:11px] [font-variant-numeric:tabular-nums]">
                           <span>{row.name || unitLabel(row.symbol || product.unit)}</span>
                           <span>{money(priceFromStock(sellUnits, stockSymbol, sellingLot.purchasePrice, row))}</span>
                           <span>{money(row.min)}</span>
@@ -619,7 +620,7 @@ export function ProductForm({
                       ))}
                     </div>
                     {queuedLots.length > 0 ? (
-                      <p className="product-note">
+                      <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
                         <span>
                           Next {queuedLots.map((l) => `${l.lotNumber} ${money(l.purchasePrice)}/${unitLabel(stockSymbol)}`).join(" · ")}
                         </span>
@@ -627,7 +628,7 @@ export function ProductForm({
                     ) : null}
                   </>
                 ) : (
-                  <p className="product-note">
+                  <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
                     <strong>FIFO prices</strong>
                     <span>No open lot. Receive stock to set the selling cost.</span>
                   </p>
@@ -652,7 +653,7 @@ export function ProductForm({
       ) : null}
 
       {section === "units" ? (
-        <div className="product-form-pane">
+        <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
           {!isNew && openPriceLots.length > 0 ? (
             <Field label="Lot">
               <SearchableSelect
@@ -669,22 +670,22 @@ export function ProductForm({
             </Field>
           ) : null}
           {priceLot ? (
-            <p className="product-note">
+            <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
               <strong>{priceLot.lotNumber}</strong>
               <span>Supplier {supplierName(priceLot.supplierId) || "—"}. Cost is this lot’s buy price. Min / wholesale / retail are sell prices.</span>
             </p>
           ) : (
-            <p className="product-note">
+            <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
               <strong>Units & prices</strong>
               <span>Add a pack or another unit if you need it. Extra prices fill in from the product unit.</span>
             </p>
           )}
-          <div className="product-small-list">
+          <div className="product-small-list [display:grid] [gap:10px]">
             {sellUnits.map((row) => {
               const isBase = row.kind === "base";
               return (
-                <div key={row.id} className={isBase ? "product-small-card is-base" : "product-small-card"}>
-                  <div className="product-small-top">
+                <div key={row.id} className={isBase ? "product-small-card [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:#f8fafc] is-base" : "product-small-card [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:#f8fafc]"}>
+                  <div className="product-small-top [display:grid] [grid-template-columns:minmax(0,_1.1fr)_minmax(90px,_1fr)_36px] [gap:8px] [align-items:end]">
                     <Field label={isBase ? "Product unit" : "Sell as"}>
                       <SearchableSelect
                         value={row.symbol ?? ""}
@@ -728,7 +729,7 @@ export function ProductForm({
                       </Button>
                     )}
                   </div>
-                  <div className="product-small-prices">
+                  <div className="product-small-prices [display:grid] [grid-template-columns:1fr_1fr] [gap:8px_10px]">
                     {(
                       [
                         ["cost", "Cost"],
@@ -751,43 +752,47 @@ export function ProductForm({
             })}
           </div>
           <Button
-            className="product-inline-add"
+            className="product-inline-add [align-self:flex-start]"
             icon={<Plus size={14} />}
             onClick={() => setUnits([...sellUnits, newExtraUnit()])}
           >
             Add unit
-            <kbd className="ui-kbd">Ctrl+N</kbd>
+            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Ctrl+N</kbd>
           </Button>
         </div>
       ) : null}
 
       {section === "recipe" ? (
-        <div className="product-form-pane">
-          <p className="product-note">Components used to make this product. Quantity is in each component’s base unit.</p>
-          <div className="product-unit-table is-recipe">
-            <div className="product-unit-head">
+        <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
+          <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">Components used to make this product. Quantity is in each component’s base unit.</p>
+          <div className="product-unit-table [display:grid] [gap:6px] [min-height:0] [overflow:auto] is-recipe">
+            <div className="product-unit-head [display:grid] [grid-template-columns:minmax(0,_1.4fr)_110px_150px_36px] [gap:8px] [align-items:center] [padding:0_2px] [font-size:11px] [font-weight:700] [color:var(--sub)]">
               <span>Component</span>
               <span>Quantity</span>
               <span>Unit</span>
               <span />
             </div>
             {product.components.length === 0 ? (
-              <p className="product-note">No components yet.</p>
+              <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">No components yet.</p>
             ) : (
               product.components.map((line) => {
                 const part = catalog.find((r) => r.id === line.productId);
                 return (
-                  <div key={line.id} className="product-unit-row">
-                    <SearchableSelect
+                  <div key={line.id} className="product-unit-row [display:grid] [grid-template-columns:minmax(0,_1.4fr)_110px_150px_36px] [gap:8px] [align-items:center]">
+                    <ProductSearch
+                      products={catalog.filter((row) => row.id !== product.id)}
                       value={line.productId}
-                      onChange={(v) =>
+                      onChange={(selected) =>
                         patch({
-                          components: product.components.map((c) => (c.id === line.id ? { ...c, productId: v } : c)),
+                          components: product.components.map((component) =>
+                            component.id === line.id
+                              ? { ...component, productId: selected?.id ?? "" }
+                              : component,
+                          ),
                         })
                       }
-                      placeholder="Choose item"
-                      searchPlaceholder="Type to search"
-                      options={catalog.filter((r) => r.id !== product.id).map((r) => ({ value: r.id, label: r.name }))}
+                      placeholder="Search component"
+                      clearable
                     />
                     <TextInput
                       inputMode="decimal"
@@ -816,27 +821,27 @@ export function ProductForm({
             )}
           </div>
           <Button
-            className="product-inline-add"
+            className="product-inline-add [align-self:flex-start]"
             icon={<Plus size={14} />}
             onClick={() =>
               patch({ components: [...product.components, { id: crypto.randomUUID(), productId: "", quantity: 1 }] })
             }
           >
             Add component
-            <kbd className="ui-kbd">Ctrl+N</kbd>
+            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Ctrl+N</kbd>
           </Button>
         </div>
       ) : null}
 
       {section === "lots" ? (
-        <div className="product-form-pane">
-          <p className="product-note">
+        <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
+          <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
             <strong>Open lots</strong>
             <span>Each lot has its own cost. Qty and damage can be Pack, Meter, Gaz — they convert to stock.</span>
           </p>
-          <div className="product-small-list">
+          <div className="product-small-list [display:grid] [gap:10px]">
             {lotDraft.filter((l) => l.remainingQuantity > 0 || l.damagedQuantity > 0).length === 0 ? (
-              <p className="product-note">No open lots. Receive stock from Products → Lots.</p>
+              <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">No open lots. Receive stock from Products → Lots.</p>
             ) : (
               lotDraft
                 .filter((l) => l.remainingQuantity > 0 || l.damagedQuantity > 0)
@@ -844,8 +849,8 @@ export function ProductForm({
                   const opened = lotOpened[lot.id] ?? lot.remainingQuantity;
                   const changed = Math.abs(lot.remainingQuantity - opened) > 1e-6;
                   return (
-                  <div key={lot.id} className="product-small-card">
-                    <div className="product-lot-head">
+                  <div key={lot.id} className="product-small-card [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:#f8fafc]">
+                    <div className="product-lot-head [display:flex] [align-items:baseline] [justify-content:space-between] [gap:8px]">
                       <strong>{lot.lotNumber}</strong>
                       <span>{supplierName(lot.supplierId) || "No supplier"}</span>
                     </div>
@@ -871,7 +876,7 @@ export function ProductForm({
                       }
                     />
                     {changed ? (
-                      <p className="product-lot-adjusted">
+                      <p className="product-lot-adjusted [margin:0] [font-size:11px] [font-weight:600] [color:var(--teal,_#0f766e)]">
                         Adjusted {formatMixedQty(product, opened)} → {formatMixedQty(product, lot.remainingQuantity)}
                       </p>
                     ) : null}
@@ -893,8 +898,8 @@ export function ProductForm({
       ) : null}
 
       {section === "warranty" ? (
-        <div className="product-form-pane">
-          <div className="product-flag">
+        <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
+          <div className="product-flag [display:flex] [align-items:center] [padding:8px_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:#f8fafc]">
             <Toggle
               checked={Boolean(product.warrantyEnabled)}
               onChange={(v) => patch({ warrantyEnabled: v, warrantyQty: v ? product.warrantyQty || 12 : 0 })}
@@ -902,7 +907,7 @@ export function ProductForm({
             />
           </div>
           {product.warrantyEnabled ? (
-            <div className="product-form-grid">
+            <div className="product-form-grid [display:grid] [grid-template-columns:1fr_1fr] [gap:10px_14px]">
               <Field label="Duration">
                 <TextInput
                   inputMode="numeric"
@@ -935,14 +940,14 @@ export function ProductForm({
               </Field>
             </div>
           ) : (
-            <p className="product-note">Turn warranty on only when this product is covered.</p>
+            <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">Turn warranty on only when this product is covered.</p>
           )}
         </div>
       ) : null}
 
-      <div className="product-form-foot">
+      <div className="product-form-foot [display:flex] [align-items:center] [justify-content:space-between] [flex-wrap:wrap] [gap:10px] [padding:10px_16px] [border-top:1px_solid_var(--line)] [background:var(--paper)] [flex-shrink:0] [position:relative] [z-index:1] [min-width:0]">
         {isNew ? (
-          <label className="product-keep">
+          <label className="product-keep [display:flex] [align-items:flex-start] [gap:8px] [min-width:0] [cursor:pointer]">
             <Checkbox checked={keepAdding} onChange={(e) => setKeep(e.target.checked)} />
             <span>
               <strong>Keep adding after save</strong>
@@ -952,14 +957,14 @@ export function ProductForm({
         ) : (
           <span />
         )}
-        <div className="product-form-actions">
+        <div className="product-form-actions [display:flex] [gap:8px] [flex-shrink:0]">
           <Button onClick={onClose}>
             Cancel
-            <kbd className="ui-kbd">Esc</kbd>
+            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Esc</kbd>
           </Button>
           <Button variant="primary" onClick={save}>
             Save product
-            <kbd className="ui-kbd">F12</kbd>
+            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">F12</kbd>
           </Button>
         </div>
       </div>

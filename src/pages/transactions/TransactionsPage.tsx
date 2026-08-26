@@ -26,12 +26,12 @@ export function TransactionsPage() {
   const out = seed.filter((t) => t.direction === "OUT").reduce((s, t) => s + t.amount, 0);
 
   return (
-    <div className="ui-stack">
+    <div className="ui-stack [display:grid] [gap:12px]">
       <PageHead title="Transactions" />
-      <p className="ui-note">
+      <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
         Real money only. Invoice credit does not appear here until someone pays. Types: SALE_PAYMENT, CUSTOMER_PAYMENT, REFUND, EXPENSE, COMMISSION.
       </p>
-      <div className="ui-kpi-row">
+      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
         <KpiCard label="In" value={money(inn)} hint="Cash / bank received" tone="ok" />
         <KpiCard label="Out" value={money(out)} hint="Refunds, bills, commission" tone="danger" />
         <KpiCard label="Net" value={money(inn - out)} hint="Drawer" tone={inn - out >= 0 ? "ok" : "warn"} />

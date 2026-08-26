@@ -18,7 +18,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "ui-btn",
+        "ui-btn [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [height:32px] [padding:0_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [color:var(--ink)] [font-size:12px] [font-weight:600] [white-space:nowrap] [cursor:pointer]",
         variant !== "outline" && `is-${variant}`,
         size === "sm" && "is-sm",
         size === "icon" && "is-icon",

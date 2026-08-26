@@ -74,12 +74,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className="ui-toast-stack" aria-live="polite">
+      <div className="ui-toast-stack [position:fixed] [top:16px] [right:16px] [z-index:90] [display:grid] [gap:8px] [width:min(340px,_calc(100vw_-_32px))] [pointer-events:none]" aria-live="polite">
         {items.map((item) => (
-          <div key={item.id} className={cn("ui-toast", `is-${item.kind}`)} role="status">
-            <span className="ui-toast-icon">{icons[item.kind]}</span>
-            <span className="ui-toast-text">{item.text}</span>
-            <button type="button" className="ui-toast-close" onClick={() => dismiss(item.id)} aria-label="Dismiss">
+          <div key={item.id} className={cn("ui-toast [display:flex] [align-items:flex-start] [gap:10px] [padding:12px_12px_12px_14px] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)] [box-shadow:0_12px_28px_rgba(15,_23,_42,_0.14)] [pointer-events:auto] [animation:ui-toast-in_0.18s_ease]", `is-${item.kind}`)} role="status">
+            <span className="ui-toast-icon [display:grid] [place-items:center] [margin-top:1px] [color:var(--accent)]">{icons[item.kind]}</span>
+            <span className="ui-toast-text [flex:1] [font-size:13px] [font-weight:600] [color:var(--ink)] [line-height:1.35]">{item.text}</span>
+            <button type="button" className="ui-toast-close [display:grid] [place-items:center] [width:24px] [height:24px] [border:0] [border-radius:6px] [background:transparent] [color:var(--muted)] [cursor:pointer]" onClick={() => dismiss(item.id)} aria-label="Dismiss">
               <X size={14} />
             </button>
           </div>

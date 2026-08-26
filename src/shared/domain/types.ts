@@ -100,6 +100,9 @@ export interface ProductLotRow {
   supplierId: string;
   lotNumber: string;
   purchasePrice: number;
+  minimumPrice: number;
+  wholesalePrice: number;
+  retailPrice: number;
   originalQuantity: number;
   remainingQuantity: number;
   damagedQuantity: number;

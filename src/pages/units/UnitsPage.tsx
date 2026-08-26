@@ -8,6 +8,7 @@ import {
   ConfirmDialog,
   Drawer,
   EmptyRow,
+  HubChart,
   Field,
   Menu,
   MenuItem,
@@ -20,9 +21,10 @@ import {
   Th,
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
-import { HubToolbar } from "@/pages/products/HubToolbar";
+import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { units as seed } from "@/shared/domain/mock";
+import { products as catalog } from "@/shared/mock";
 import type { UnitRow } from "@/shared/domain/types";
 
 const PAGE_SIZE = 10;
@@ -40,6 +42,7 @@ export function UnitsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
+  const [view, setView] = useState<HubView>("table");
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<UnitRow | null>(null);
   const [remove, setRemove] = useState<UnitRow | null>(null);
@@ -72,10 +75,13 @@ export function UnitsPage() {
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
   const shown = pageSize === PAGE_SIZE_ALL ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
+  const chartData = filtered
+    .map((row) => ({ id: row.id, label: row.name, value: catalog.filter((product) => product.unit === row.symbol).length }))
+    .sort((a, b) => b.value - a.value);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
   return (
-    <div className="products-hub-panel">
+    <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
         toolbar={
           <HubToolbar
@@ -105,6 +111,8 @@ export function UnitsPage() {
               setPage(1);
             }}
             searchPlaceholder="Search units"
+            view={view}
+            onView={setView}
             trailing={
               selected.length > 0 ? (
                 <BulkActions count={selected.length}>
@@ -123,6 +131,7 @@ export function UnitsPage() {
             }
           />
         }
+        body={view !== "table" ? <HubChart type={view} title="Products by base unit" data={chartData} /> : undefined}
         footer={
           <Pagination
             page={Math.min(page, pages)}
@@ -203,7 +212,7 @@ export function UnitsPage() {
         }
       >
         {edit ? (
-          <div className="ui-stack">
+          <div className="ui-stack [display:grid] [gap:12px]">
             <Field label="Name">
               <TextInput value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="Meter" />
             </Field>

@@ -22,13 +22,13 @@ export function TableRowsSkeleton({
         <tr key={row} className="is-skeleton">
           {selectable ? (
             <td>
-              <Skeleton className="ui-skeleton-box" />
+              <Skeleton className="ui-skeleton-box [width:16px] [height:16px] [margin:0_auto]" />
             </td>
           ) : null}
           {Array.from({ length: columnCount }, (_, col) => (
             <td key={col}>
               <Skeleton
-                className="ui-skeleton-line"
+                className="ui-skeleton-line [height:12px]"
                 style={{
                   width: widths[(row + col) % widths.length],
                   animationDelay: `${row * 35 + col * 15}ms`,
@@ -38,7 +38,7 @@ export function TableRowsSkeleton({
           ))}
           {hasActions ? (
             <td>
-              <Skeleton className="ui-skeleton-action" />
+              <Skeleton className="ui-skeleton-action [width:28px] [height:28px] [margin:0_auto] [border-radius:8px]" />
             </td>
           ) : null}
         </tr>

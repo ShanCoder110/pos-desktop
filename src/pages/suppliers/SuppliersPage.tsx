@@ -49,14 +49,14 @@ export function SuppliersPage() {
   const shown = filtered.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div className="ui-stack">
+    <div className="ui-stack [display:grid] [gap:12px]">
       <PageHead title="Suppliers">
         <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}>
           Add supplier
         </Button>
       </PageHead>
-      <p className="ui-note">No supplier ledger in V1. Receiving stock creates a ProductLot with this supplier_id.</p>
-      <div className="ui-kpi-row">
+      <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">No supplier ledger in V1. Receiving stock creates a ProductLot with this supplier_id.</p>
+      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
         <KpiCard label="Active" value={rows.filter((r) => r.isActive).length} hint="Can receive lots" tone="ok" />
         <KpiCard label="Inactive" value={rows.filter((r) => !r.isActive).length} hint="Hidden on receive" tone="stale" />
       </div>
@@ -138,7 +138,7 @@ export function SuppliersPage() {
         }
       >
         {edit ? (
-          <div className="ui-stack">
+          <div className="ui-stack [display:grid] [gap:12px]">
             <Field label="Name">
               <TextInput value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
             </Field>

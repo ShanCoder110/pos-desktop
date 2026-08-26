@@ -36,11 +36,11 @@ export function ColumnPicker({
         </Button>
       }
     >
-      <div className="ui-pop-list">
+      <div className="ui-pop-list [display:grid] [max-height:240px] [overflow:auto]">
         {columns.map((col) => {
           const on = draft.includes(col.id) || col.locked;
           return (
-            <label key={col.id} className={on ? "ui-pop-item is-on" : "ui-pop-item"}>
+            <label key={col.id} className={on ? "ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer] is-on" : "ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"}>
               <Checkbox
                 checked={on}
                 disabled={col.locked}
@@ -56,7 +56,7 @@ export function ColumnPicker({
           );
         })}
       </div>
-      <div className="ui-pop-foot">
+      <div className="ui-pop-foot [display:flex] [justify-content:flex-end] [gap:8px] [padding-top:8px] [margin-top:8px] [border-top:1px_solid_var(--line)]">
         <Button variant="ghost" size="sm" onClick={() => setDraft(columns.map((c) => c.id))}>
           Reset
         </Button>

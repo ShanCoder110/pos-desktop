@@ -89,7 +89,7 @@ export function Tooltip({
   return (
     <>
       <span
-        className={cn("ui-tooltip-trigger", className)}
+        className={cn("ui-tooltip-trigger [display:inline-flex] [max-width:100%] [min-width:0]", className)}
         tabIndex={0}
         onMouseEnter={show}
         onMouseMove={(e) => {
@@ -104,7 +104,7 @@ export function Tooltip({
       </span>
       {open
         ? createPortal(
-            <div ref={tipRef} role="tooltip" style={style} className="ui-tooltip">
+            <div ref={tipRef} role="tooltip" style={style} className="ui-tooltip [max-width:min(280px,_calc(100vw_-_16px))] [padding:8px_10px] [border-radius:8px] [background:var(--header)] [color:#fff] [font-size:12px] [font-weight:600] [line-height:1.35] [box-shadow:0_8px_20px_rgba(15,_23,_42,_0.2)] [pointer-events:none] [white-space:normal]">
               {content}
             </div>,
             document.body,
@@ -117,7 +117,7 @@ export function Tooltip({
 export function TruncatedTooltip({ text, className }: { text: string; className?: string }) {
   return (
     <Tooltip content={text}>
-      <span className={cn("ui-truncate", className)}>{text || "—"}</span>
+      <span className={cn("ui-truncate [display:block] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [max-width:100%]", className)}>{text || "—"}</span>
     </Tooltip>
   );
 }

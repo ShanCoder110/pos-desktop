@@ -17,16 +17,16 @@ export function FilterChips({
 }) {
   if (!items.length) return null;
   return (
-    <div className="ui-chip-row">
+    <div className="ui-chip-row [display:flex] [flex-wrap:wrap] [gap:6px]">
       {items.map((item) => (
-        <button key={item.field} type="button" className="ui-chip" onClick={() => onRemove(item.field)}>
-          <span className="ui-chip-label">{item.label}:</span>
-          <span className="ui-chip-value">{item.value}</span>
+        <button key={item.field} type="button" className="ui-chip [display:inline-flex] [align-items:center] [gap:6px] [height:26px] [padding:0_8px_0_10px] [border:1px_solid_color-mix(in_srgb,_var(--accent)_28%,_transparent)] [border-radius:999px] [background:var(--accent-bg)] [color:var(--accent-deep)] [font-size:11px] [font-weight:650] [cursor:pointer]" onClick={() => onRemove(item.field)}>
+          <span className="ui-chip-label [opacity:0.75]">{item.label}:</span>
+          <span className="ui-chip-value [max-width:140px] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]">{item.value}</span>
           <X size={11} />
         </button>
       ))}
       {items.length >= 2 && onClearAll ? (
-        <button type="button" className="ui-chip-clear" onClick={onClearAll}>
+        <button type="button" className="ui-chip-clear [border:0] [background:transparent] [color:var(--danger)] [font-size:11px] [font-weight:700] [cursor:pointer] [text-decoration:underline] [text-underline-offset:2px]" onClick={onClearAll}>
           Clear all
         </button>
       ) : null}
@@ -84,7 +84,7 @@ export function FilterPicker({
     >
       {current ? (
         <>
-          <div className="ui-pop-head">
+          <div className="ui-pop-head [display:flex] [align-items:center] [gap:8px] [padding:4px_4px_8px] [margin-bottom:6px] [border-bottom:1px_solid_var(--line)] [font-size:13px] [font-weight:700] [color:var(--ink)]">
             <button
               type="button"
               onClick={() => {
@@ -101,7 +101,7 @@ export function FilterPicker({
           {current.options ? (
             <>
               {(current.searchable || current.options.length > 8) && (
-                <div className="ui-pop-search">
+                <div className="ui-pop-search [padding:4px_4px_8px]">
                   <TextInput
                     autoFocus
                     value={optQ}
@@ -110,15 +110,15 @@ export function FilterPicker({
                   />
                 </div>
               )}
-              <div className="ui-pop-list">
+              <div className="ui-pop-list [display:grid] [max-height:240px] [overflow:auto]">
                 {options.length === 0 ? (
-                  <div className="ui-pop-empty">No matches</div>
+                  <div className="ui-pop-empty [padding:16px_10px] [text-align:center] [font-size:12px] [color:var(--muted)]">No matches</div>
                 ) : (
                   options.map((opt) => (
                     <button
                       key={opt}
                       type="button"
-                      className={value === opt ? "ui-pop-item is-on" : "ui-pop-item"}
+                      className={value === opt ? "ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer] is-on" : "ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"}
                       onClick={() => setValue(opt)}
                     >
                       {opt}
@@ -128,7 +128,7 @@ export function FilterPicker({
               </div>
             </>
           ) : (
-            <div className="ui-pop-search">
+            <div className="ui-pop-search [padding:4px_4px_8px]">
               <TextInput
                 autoFocus
                 className="is-lg"
@@ -145,7 +145,7 @@ export function FilterPicker({
               />
             </div>
           )}
-          <div className="ui-pop-foot">
+          <div className="ui-pop-foot [display:flex] [justify-content:flex-end] [gap:8px] [padding-top:8px] [margin-top:8px] [border-top:1px_solid_var(--line)]">
             <Button
               variant="soft"
               size="sm"
@@ -160,12 +160,12 @@ export function FilterPicker({
           </div>
         </>
       ) : (
-        <div className="ui-pop-list">
+        <div className="ui-pop-list [display:grid] [max-height:240px] [overflow:auto]">
           {fields.map((item) => (
             <button
               key={item.id}
               type="button"
-              className="ui-pop-item"
+              className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"
               onClick={() => {
                 setField(item.id);
                 setValue(chips.find((c) => c.field === item.id)?.value ?? "");
@@ -173,7 +173,7 @@ export function FilterPicker({
               }}
             >
               <span>{item.label}</span>
-              {chips.some((c) => c.field === item.id) ? <span className="ui-pop-dot" /> : null}
+              {chips.some((c) => c.field === item.id) ? <span className="ui-pop-dot [width:6px] [height:6px] [margin-left:auto] [border-radius:99px] [background:var(--accent)]" /> : null}
             </button>
           ))}
         </div>

@@ -41,7 +41,7 @@ export function ClaimsPage() {
   const shown = rows.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div className="products-hub-panel">
+    <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Search name, SKU, category" />}
         footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
@@ -84,7 +84,7 @@ export function ClaimsPage() {
         footer={<Button onClick={() => setOpen(null)}>Close</Button>}
       >
         {open ? (
-          <dl className="ui-kv">
+          <dl className="ui-kv [display:grid] [grid-template-columns:118px_1fr] [gap:8px_12px] [font-size:13px]">
             <dt>SKU</dt>
             <dd>{open.sku || "—"}</dd>
             <dt>Category</dt>

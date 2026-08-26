@@ -43,10 +43,10 @@ function PageSizeMenu({
   ];
 
   return (
-    <div className="ui-page-size" ref={root}>
+    <div className="ui-page-size [position:relative]" ref={root}>
       <button
         type="button"
-        className={cn("ui-page-size-btn", open && "is-open")}
+        className={cn("ui-page-size-btn [display:inline-flex] [align-items:center] [justify-content:space-between] [gap:6px] [min-width:72px] [height:30px] [padding:0_8px_0_10px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [color:var(--ink)] [font-size:12px] [font-weight:650] [cursor:pointer]", open && "is-open")}
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -55,14 +55,14 @@ function PageSizeMenu({
         <ChevronDown size={13} />
       </button>
       {open ? (
-        <div className="ui-page-size-menu" role="listbox">
+        <div className="ui-page-size-menu [position:absolute] [bottom:calc(100%_+_6px)] [left:0] [z-index:30] [min-width:100%] [padding:4px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [box-shadow:0_-8px_24px_rgba(15,_23,_42,_0.12)]" role="listbox">
           {items.map((item) => (
             <button
               key={item.value}
               type="button"
               role="option"
               aria-selected={item.value === value}
-              className={cn("ui-page-size-item", item.value === value && "is-on")}
+              className={cn("ui-page-size-item [display:flex] [align-items:center] [justify-content:space-between] [gap:10px] [width:100%] [min-height:30px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:600] [text-align:left] [cursor:pointer] [white-space:nowrap]", item.value === value && "is-on")}
               onClick={() => {
                 onChange(item.value);
                 setOpen(false);
@@ -105,11 +105,11 @@ export function Pagination({
   }
 
   return (
-    <div className="ui-page-foot">
-      <div className="ui-page-btns">
+    <div className="ui-page-foot [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [padding:10px_12px] [border-top:1px_solid_var(--line)] [flex-shrink:0] [flex-wrap:wrap]">
+      <div className="ui-page-btns [display:flex] [align-items:center] [gap:8px] [min-width:0]">
         {onPageSize && pageSize !== undefined ? (
           <>
-            <span className="ui-page-meta">Rows per page</span>
+            <span className="ui-page-meta [font-size:12px] [color:var(--muted)] [white-space:nowrap]">Rows per page</span>
             <PageSizeMenu
               value={pageSize}
               total={total}
@@ -119,18 +119,18 @@ export function Pagination({
                 onChange(1);
               }}
             />
-            <span className="ui-page-meta ui-page-total">{total} total</span>
+            <span className="ui-page-meta [font-size:12px] [color:var(--muted)] [white-space:nowrap] ui-page-total [margin-left:4px]">{total} total</span>
           </>
         ) : (
-          <span className="ui-page-meta">{total} total</span>
+          <span className="ui-page-meta [font-size:12px] [color:var(--muted)] [white-space:nowrap]">{total} total</span>
         )}
       </div>
 
-      <div className="ui-page-btns">
-        <span className="ui-page-meta">
+      <div className="ui-page-btns [display:flex] [align-items:center] [gap:8px] [min-width:0]">
+        <span className="ui-page-meta [font-size:12px] [color:var(--muted)] [white-space:nowrap]">
           Page {current} of {totalPages}
         </span>
-        <div className="ui-page-nav">
+        <div className="ui-page-nav [display:flex] [align-items:center] [gap:4px]">
           <Button
             size="icon"
             disabled={!hasPrev}

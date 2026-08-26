@@ -43,7 +43,7 @@ export function ReturnsPage() {
   const shown = rows.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div className="products-hub-panel">
+    <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Invoice, customer, reason" />}
         footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
@@ -83,9 +83,9 @@ export function ReturnsPage() {
 
       <Drawer open={Boolean(open)} title={open?.type ?? "Return"} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
         {open ? (
-          <div className="ui-stack">
-            <p className="ui-note">{open.notes}</p>
-            <p className="ui-page-title" style={{ fontSize: 14 }}>Coming back</p>
+          <div className="ui-stack [display:grid] [gap:12px]">
+            <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">{open.notes}</p>
+            <p className="ui-page-title [font-size:22px] [font-weight:800] [letter-spacing:-0.03em] [color:var(--ink)] [min-width:0]" style={{ fontSize: 14 }}>Coming back</p>
             <Table>
               <THead>
                 <tr>
@@ -114,7 +114,7 @@ export function ReturnsPage() {
             </Table>
             {open.replacementItems.length ? (
               <>
-                <p className="ui-page-title" style={{ fontSize: 14 }}>Given instead</p>
+                <p className="ui-page-title [font-size:22px] [font-weight:800] [letter-spacing:-0.03em] [color:var(--ink)] [min-width:0]" style={{ fontSize: 14 }}>Given instead</p>
                 <Table>
                   <THead>
                     <tr>
@@ -137,7 +137,7 @@ export function ReturnsPage() {
                 </Table>
               </>
             ) : (
-              <p className="ui-note">No replacement line. Money out is a Transaction REFUND.</p>
+              <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">No replacement line. Money out is a Transaction REFUND.</p>
             )}
           </div>
         ) : null}

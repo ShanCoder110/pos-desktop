@@ -73,14 +73,31 @@ export function unitKind(unit: ProductSellUnit): "base" | "bigger" | "smaller" {
 
 export function productSellUnits(product: Product): ProductSellUnit[] {
   if (product.sellUnits?.length) return product.sellUnits;
+  const base: ProductSellUnit = {
+    id: `${product.id}-u`,
+    name: unitLabel(product.unit),
+    symbol: product.unit,
+    kind: "base",
+    contains: 1,
+    cost: product.cost,
+    min: product.min,
+    wholesale: product.wholesale,
+    price: product.retail,
+    barcode: product.barcode ?? "",
+  };
+  if (!product.packQty || product.packQty <= 1) return [base];
   return [
+    base,
     {
-      id: `${product.id}-u`,
-      name: unitLabel(product.unit),
-      symbol: product.unit,
-      kind: "base",
-      contains: 1,
-      ...emptyPrices(),
+      id: `${product.id}-pack`,
+      name: "Pack",
+      symbol: "pk",
+      kind: "bigger",
+      contains: product.packQty,
+      cost: roundMoney(product.cost * product.packQty),
+      min: roundMoney(product.min * product.packQty),
+      wholesale: roundMoney(product.wholesale * product.packQty),
+      price: product.packPrice || roundMoney(product.retail * product.packQty),
       barcode: "",
     },
   ];

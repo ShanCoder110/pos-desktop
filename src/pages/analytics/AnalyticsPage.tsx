@@ -9,10 +9,10 @@ export function AnalyticsPage() {
   const owed = domainCustomers.filter((c) => c.currentBalance > 0);
 
   return (
-    <div className="ui-stack">
+    <div className="ui-stack [display:grid] [gap:12px]">
       <PageHead title="Reports" />
-      <p className="ui-note">Read-only picture of invoices, FIFO movements, and khata. Live app will filter by date and branch.</p>
-      <div className="ui-kpi-row">
+      <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">Read-only picture of invoices, FIFO movements, and khata. Live app will filter by date and branch.</p>
+      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
         <KpiCard label="Billed" value={money(sold.reduce((s, i) => s + i.total, 0))} hint="Completed invoices" tone="ok" />
         <KpiCard label="Collected" value={money(sold.reduce((s, i) => s + i.paidAmount, 0))} hint="Paid amount" tone="ok" />
         <KpiCard label="Udhaar" value={money(owed.reduce((s, c) => s + c.currentBalance, 0))} hint="Still to collect" tone="warn" />

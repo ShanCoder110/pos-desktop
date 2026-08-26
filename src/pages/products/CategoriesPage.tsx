@@ -8,6 +8,7 @@ import {
   ConfirmDialog,
   Drawer,
   EmptyRow,
+  HubChart,
   Field,
   Menu,
   MenuItem,
@@ -20,7 +21,7 @@ import {
   Th,
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
-import { HubToolbar } from "@/pages/products/HubToolbar";
+import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { productCategories, products as catalog } from "@/shared/mock";
 
@@ -45,6 +46,7 @@ export function CategoriesPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
+  const [view, setView] = useState<HubView>("table");
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<CategoryRow | null>(null);
   const [remove, setRemove] = useState<CategoryRow | null>(null);
@@ -77,10 +79,13 @@ export function CategoriesPage() {
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
   const shown = pageSize === PAGE_SIZE_ALL ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
+  const chartData = filtered
+    .map((row) => ({ id: row.id, label: row.name, value: catalog.filter((product) => product.category === row.name).length }))
+    .sort((a, b) => b.value - a.value);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
   return (
-    <div className="products-hub-panel">
+    <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
         toolbar={
           <HubToolbar
@@ -107,6 +112,8 @@ export function CategoriesPage() {
               setPage(1);
             }}
             searchPlaceholder="Search categories"
+            view={view}
+            onView={setView}
             trailing={
               selected.length > 0 ? (
                 <BulkActions count={selected.length}>
@@ -125,6 +132,7 @@ export function CategoriesPage() {
             }
           />
         }
+        body={view !== "table" ? <HubChart type={view} title="Products by category" data={chartData} /> : undefined}
         footer={
           <Pagination
             page={Math.min(page, pages)}

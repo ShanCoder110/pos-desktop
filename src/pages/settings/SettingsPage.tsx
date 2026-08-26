@@ -18,11 +18,11 @@ export function SettingsPage() {
   const [paper, setPaper] = useState("thermal");
 
   return (
-    <div className="ui-stack">
+    <div className="ui-stack [display:grid] [gap:12px]">
       <PageHead title="Settings">
         <Button variant="primary">Save</Button>
       </PageHead>
-      <p className="ui-note">AppSetting is shop-wide. InvoiceSetting is the slip. PrinterSetting and Device are per computer. SyncLog is the last pull/push.</p>
+      <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">AppSetting is shop-wide. InvoiceSetting is the slip. PrinterSetting and Device are per computer. SyncLog is the last pull/push.</p>
       <TabSheet
         tabs={
           <Tabs
@@ -38,11 +38,11 @@ export function SettingsPage() {
         }
       >
       {tab === "business" ? (
-        <div className="ui-sheet-panel">
-        <div className="ui-form-grid">
+        <div className="ui-sheet-panel [flex:1] [min-height:0] [overflow:auto] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:0_10px_10px_10px] [padding:16px]">
+        <div className="ui-form-grid [display:grid] [grid-template-columns:1fr_1fr] [gap:12px] [min-height:0] [overflow:hidden]">
           <section className="settings-card">
-            <h2 className="panel-title">AppSetting</h2>
-            <div className="ui-stack" style={{ marginTop: 12 }}>
+            <h2 className="panel-title [font-size:13px] [font-weight:700] [color:var(--ink)]">AppSetting</h2>
+            <div className="ui-stack [display:grid] [gap:12px]" style={{ marginTop: 12 }}>
               <Field label="Business name">
                 <TextInput value={name} onChange={(e) => setName(e.target.value)} />
               </Field>
@@ -58,8 +58,8 @@ export function SettingsPage() {
             </div>
           </section>
           <section className="settings-card">
-            <h2 className="panel-title">Defaults</h2>
-            <div className="ui-stack" style={{ marginTop: 12 }}>
+            <h2 className="panel-title [font-size:13px] [font-weight:700] [color:var(--ink)]">Defaults</h2>
+            <div className="ui-stack [display:grid] [gap:12px]" style={{ marginTop: 12 }}>
               <Toggle
                 checked={settings.autoSku}
                 onChange={(v) => setSettings({ ...settings, autoSku: v })}
@@ -67,18 +67,18 @@ export function SettingsPage() {
               />
               <Toggle checked={lot} onChange={setLot} label="branch_lot_enabled (shop default)" />
               <Toggle checked={neg} onChange={setNeg} label="allow_negative_stock (shop default)" />
-              <p className="ui-note">SKU stays optional unless this is on. Each branch can override lot and stock rules on Branches.</p>
+              <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">SKU stays optional unless this is on. Each branch can override lot and stock rules on Branches.</p>
             </div>
           </section>
         </div>
         </div>
       ) : null}
       {tab === "invoice" ? (
-        <div className="ui-sheet-panel">
-        <div className="ui-form-grid">
+        <div className="ui-sheet-panel [flex:1] [min-height:0] [overflow:auto] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:0_10px_10px_10px] [padding:16px]">
+        <div className="ui-form-grid [display:grid] [grid-template-columns:1fr_1fr] [gap:12px] [min-height:0] [overflow:hidden]">
           <section className="settings-card">
-            <h2 className="panel-title">InvoiceSetting</h2>
-            <div className="ui-stack" style={{ marginTop: 12 }}>
+            <h2 className="panel-title [font-size:13px] [font-weight:700] [color:var(--ink)]">InvoiceSetting</h2>
+            <div className="ui-stack [display:grid] [gap:12px]" style={{ marginTop: 12 }}>
               <Field label="Invoice prefix">
                 <TextInput value={prefix} onChange={(e) => setPrefix(e.target.value)} />
               </Field>
@@ -89,8 +89,8 @@ export function SettingsPage() {
             </div>
           </section>
           <section className="settings-card">
-            <h2 className="panel-title">Paper</h2>
-            <div className="ui-stack" style={{ marginTop: 12 }}>
+            <h2 className="panel-title [font-size:13px] [font-weight:700] [color:var(--ink)]">Paper</h2>
+            <div className="ui-stack [display:grid] [gap:12px]" style={{ marginTop: 12 }}>
               <Field label="Paper size">
                 <SelectInput value={paper} onChange={(e) => setPaper(e.target.value)}>
                   <option value="thermal">Thermal 80mm</option>
@@ -105,10 +105,10 @@ export function SettingsPage() {
         </div>
       ) : null}
       {tab === "printer" ? (
-        <div className="ui-sheet-panel">
+        <div className="ui-sheet-panel [flex:1] [min-height:0] [overflow:auto] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:0_10px_10px_10px] [padding:16px]">
         <section className="settings-card">
-          <h2 className="panel-title">PrinterSetting for this device</h2>
-          <div className="ui-stack" style={{ marginTop: 12, maxWidth: 420 }}>
+          <h2 className="panel-title [font-size:13px] [font-weight:700] [color:var(--ink)]">PrinterSetting for this device</h2>
+          <div className="ui-stack [display:grid] [gap:12px]" style={{ marginTop: 12, maxWidth: 420 }}>
             <Field label="Printer name">
               <TextInput defaultValue="XP-80C" />
             </Field>
@@ -149,7 +149,7 @@ export function SettingsPage() {
                   </Td>
                   <Td>
                     {log ? <Badge tone={log.status === "SUCCESS" ? "ok" : "danger"}>{log.status}</Badge> : "—"}
-                    {log?.errorMessage ? <span className="ui-note"> {log.errorMessage}</span> : null}
+                    {log?.errorMessage ? <span className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]"> {log.errorMessage}</span> : null}
                   </Td>
                 </tr>
               );

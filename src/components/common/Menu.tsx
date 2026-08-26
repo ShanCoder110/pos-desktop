@@ -20,7 +20,7 @@ export function Menu({ children }: { children: ReactNode }) {
         <MoreVertical size={15} />
       </Button>
       {open ? (
-        <div className="ui-menu" onClick={() => setOpen(false)}>
+        <div className="ui-menu [position:absolute] [top:calc(100%_+_4px)] [right:0] [z-index:20] [min-width:168px] [padding:6px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [box-shadow:0_10px_28px_rgba(15,_23,_42,_0.12)]" onClick={() => setOpen(false)}>
           {children}
         </div>
       ) : null}

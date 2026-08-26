@@ -6,6 +6,7 @@ import {
   Checkbox,
   Drawer,
   EmptyRow,
+  HubChart,
   PAGE_SIZE_ALL,
   Pagination,
   Table,
@@ -14,7 +15,7 @@ import {
   Th,
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
-import { HubToolbar } from "@/pages/products/HubToolbar";
+import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { catalog as seed, stockMovements, branchName, lotNumber, userName } from "@/shared/domain/mock";
 import type { CatalogProduct } from "@/shared/domain/types";
@@ -37,6 +38,7 @@ export function StockPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
+  const [view, setView] = useState<HubView>("table");
   const [selected, setSelected] = useState<string[]>([]);
   const [open, setOpen] = useState<CatalogProduct | null>(null);
 
@@ -62,12 +64,15 @@ export function StockPage() {
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(rows.length / pageSize));
   const shown = pageSize === PAGE_SIZE_ALL ? rows : rows.slice((page - 1) * pageSize, page * pageSize);
+  const chartData = rows
+    .map((row) => ({ id: row.id, label: row.name, value: row.onHand }))
+    .sort((a, b) => b.value - a.value);
   const moves = open ? stockMovements.filter((m) => m.productId === open.id) : [];
   const show = (id: string) => cols.includes(id);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
   return (
-    <div className="products-hub-panel">
+    <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
         toolbar={
           <HubToolbar
@@ -94,8 +99,11 @@ export function StockPage() {
               setPage(1);
             }}
             searchPlaceholder="Search stock"
+            view={view}
+            onView={setView}
           />
         }
+        body={view !== "table" ? <HubChart type={view} title="On-hand stock by product" data={chartData} /> : undefined}
         footer={
           <Pagination
             page={Math.min(page, pages)}
@@ -171,7 +179,7 @@ export function StockPage() {
 
       <Drawer open={Boolean(open)} title={open ? `${open.name} movements` : "Movements"} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
         {open ? (
-          <div className="ui-stack">
+          <div className="ui-stack [display:grid] [gap:12px]">
             <Table>
               <THead>
                 <tr>

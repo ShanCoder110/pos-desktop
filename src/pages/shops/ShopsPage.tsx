@@ -31,16 +31,16 @@ export function ShopsPage() {
   const setting = (id: string) => branchSettings.find((s) => s.branchId === id);
 
   return (
-    <div className="ui-stack">
+    <div className="ui-stack [display:grid] [gap:12px]">
       <PageHead title="Branches">
         <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(seed[0])}>
           Add branch
         </Button>
       </PageHead>
-      <p className="ui-note">
+      <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
         STORE sells. WAREHOUSE holds bulk lots. REPAIR and PRODUCTION consume components. BranchSetting controls lot tracking and negative stock per location.
       </p>
-      <div className="ui-kpi-row">
+      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
         <KpiCard label="Active" value={seed.filter((b) => b.isActive).length} hint="In use" tone="ok" />
         <KpiCard label="Stores" value={seed.filter((b) => b.type === "STORE").length} hint="POS counters" tone="ok" />
         <KpiCard label="Lot tracking" value={branchSettings.filter((s) => s.branchLotEnabled).length} hint="BranchLot rows" tone="warn" />
@@ -104,7 +104,7 @@ export function ShopsPage() {
         }
       >
         {open ? (
-          <div className="ui-stack">
+          <div className="ui-stack [display:grid] [gap:12px]">
             <Field label="Name">
               <TextInput defaultValue={open.name} />
             </Field>
@@ -127,7 +127,7 @@ export function ShopsPage() {
             </Field>
             <Toggle checked={Boolean(setting(open.id)?.branchLotEnabled)} onChange={() => undefined} label="Branch lot tracking" />
             <Toggle checked={Boolean(setting(open.id)?.allowNegativeStock)} onChange={() => undefined} label="Allow negative stock" />
-            <p className="ui-note">Lot tracking writes BranchLot allocations. Negative stock is for the repair bench only in this shop.</p>
+            <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">Lot tracking writes BranchLot allocations. Negative stock is for the repair bench only in this shop.</p>
           </div>
         ) : null}
       </Drawer>

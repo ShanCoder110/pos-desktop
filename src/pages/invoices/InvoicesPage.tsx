@@ -51,7 +51,7 @@ export function InvoicesPage() {
   const shown = rows.slice((page - 1) * PAGE, page * PAGE);
 
   return (
-    <div className="products-hub-panel">
+    <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Search number or customer" />}
         footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
@@ -104,11 +104,11 @@ export function InvoicesPage() {
         footer={<Button onClick={() => setOpen(null)}>Close</Button>}
       >
         {open ? (
-          <div className="ui-stack">
-            <p className="ui-note">
+          <div className="ui-stack [display:grid] [gap:12px]">
+            <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
               Cashier {userName(open.createdBy)} · Discount {money(open.discount)}. Cancelled bills do not reverse stock in this demo.
             </p>
-            <dl className="ui-kv">
+            <dl className="ui-kv [display:grid] [grid-template-columns:118px_1fr] [gap:8px_12px] [font-size:13px]">
               <dt>Customer</dt>
               <dd>{customerName(open.customerId)}</dd>
               <dt>Payment</dt>
@@ -144,7 +144,7 @@ export function InvoicesPage() {
                 ))}
               </tbody>
             </Table>
-            <p className="ui-note">Example: 1 × 90m Roll stores quantity 1 and base_quantity 90. Lot consumption is a StockMovement SALE.</p>
+            <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">Example: 1 × 90m Roll stores quantity 1 and base_quantity 90. Lot consumption is a StockMovement SALE.</p>
           </div>
         ) : null}
       </Drawer>
