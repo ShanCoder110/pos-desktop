@@ -65,6 +65,8 @@ export interface BomLine {
   id: string;
   productId: string;
   quantity: number;
+  unitId?: string;
+  baseQuantity?: number;
 }
 
 export interface ProductSellUnit {

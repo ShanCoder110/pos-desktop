@@ -2,16 +2,10 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Ban, CheckCircle2, Clock, Gift, Package, Receipt, RotateCcw, Wallet } from "lucide-react";
 import { KpiCard, TabSheet, Tabs } from "@/components/common";
-import { routes } from "@/shared/constants/routes";
+import { SALES_SECTION_TABS } from "@/shared/constants/sales";
 import { invoices, returns } from "@/shared/domain/mock";
-import { products } from "@/shared/mock";
+import { products, repairJobs } from "@/shared/mock";
 import { money } from "@/utils/format";
-
-export const SALES_SECTION_TABS = [
-  { id: "invoices", to: routes.sales, label: "Invoices", end: true },
-  { id: "returns", to: routes.salesReturns, label: "Returns" },
-  { id: "claims", to: routes.salesClaims, label: "Claims" },
-] as const;
 
 type HubCtx = {
   sectionKpi: string | null;
@@ -94,10 +88,44 @@ function ClaimKpis() {
   );
 }
 
+function ProductSalesKpis() {
+  const completed = invoices.filter((invoice) => invoice.status === "COMPLETED");
+  const totals = completed.reduce((summary, invoice) => {
+    invoice.items.forEach((item) => {
+      const product = products.find((row) => row.id === item.productId);
+      summary.sales += item.total;
+      summary.quantity += item.baseQuantity;
+      summary.profit += item.total - item.baseQuantity * (product?.cost ?? 0);
+      summary.products.add(item.productId);
+    });
+    return summary;
+  }, { sales: 0, profit: 0, quantity: 0, products: new Set<string>() });
+  repairJobs.forEach((job) => job.parts.forEach((part) => {
+    const product = products.find((row) => row.id === part.productId);
+    const sales = part.qty * part.price;
+    totals.sales += sales;
+    totals.quantity += part.qty;
+    totals.profit += sales - part.qty * (product?.cost ?? 0);
+    totals.products.add(part.productId);
+  }));
+  const margin = totals.sales > 0 ? (totals.profit / totals.sales) * 100 : 0;
+
+  return (
+    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
+      <KpiCard label="Sales" value={money(totals.sales)} hint="Invoices + repair parts" tone="ok" icon={<Wallet size={16} />} />
+      <KpiCard label="Profit" value={money(totals.profit)} hint="Sales minus cost" tone="ok" icon={<Wallet size={16} />} />
+      <KpiCard label="Margin" value={`${margin.toFixed(1)}%`} hint="Gross margin" tone="phantom" icon={<Receipt size={16} />} />
+      <KpiCard label="Qty sold" value={totals.quantity} hint="Base units" tone="warn" icon={<Package size={16} />} />
+      <KpiCard label="Products sold" value={totals.products.size} hint="Distinct products" tone="stale" icon={<Package size={16} />} />
+    </div>
+  );
+}
+
 function SalesHubKpis() {
   const { pathname } = useLocation();
   if (pathname.endsWith("/returns")) return <ReturnKpis />;
   if (pathname.endsWith("/claims")) return <ClaimKpis />;
+  if (pathname.endsWith("/products")) return <ProductSalesKpis />;
   return <InvoiceKpis />;
 }
 

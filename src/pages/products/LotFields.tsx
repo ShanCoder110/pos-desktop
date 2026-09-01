@@ -38,7 +38,7 @@ export function UnitQtyFields({
   onChange?: (stockQty: number) => void;
   disabled?: boolean;
 }) {
-  const ordered = units;
+  const ordered = qtyUnits(units);
   const key = `${stockSymbol}:${ordered.map((u) => `${u.id}:${u.contains}`).join()}`;
   const [parts, setParts] = useState(() => splitStockQty(units, stockSymbol, value));
   const partsRef = useRef(parts);

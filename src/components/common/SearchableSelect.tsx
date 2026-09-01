@@ -18,6 +18,7 @@ export function SearchableSelect({
   name,
   onCreate,
   createLabel = "Add",
+  searchable = true,
 }: {
   options: SelectOption[];
   value: string;
@@ -32,6 +33,7 @@ export function SearchableSelect({
   name?: string;
   onCreate?: (label: string) => void;
   createLabel?: string;
+  searchable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -82,14 +84,54 @@ export function SearchableSelect({
 
   function openMenu(query = "") {
     if (disabled) return;
-    setQ(query);
+    setQ(searchable ? query : "");
     setOpen(true);
+  }
+
+  function onControlKeyDown(e: React.KeyboardEvent<HTMLInputElement | HTMLButtonElement>) {
+    if (disabled) return;
+    if (e.key === "Escape") {
+      if (open) {
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(false);
+        setQ("");
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!open) openMenu("");
+      else setHi((i) => Math.min(filtered.length - 1 + (canCreate ? 1 : 0), i + 1));
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (open) setHi((i) => Math.max(0, i - 1));
+      return;
+    }
+    if (e.key === "Enter") {
+      if (!open) {
+        if (!searchable) openMenu("");
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      if (canCreate && hi === filtered.length) {
+        create();
+        return;
+      }
+      const hit = filtered[hi] ?? filtered[0];
+      if (hit) pick(hit.value);
+    }
   }
 
   return (
     <div className={cn("ui-combo [position:relative] [width:100%]", className)} ref={root}>
       <div className={cn("ui-combo-field [display:flex] [align-items:center] [gap:4px] [width:100%] [height:38px] [padding:0_8px_0_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [transition:border-color_0.15s,_box-shadow_0.15s,_background_0.15s]", open && "is-open", disabled && "is-disabled", invalid && "is-invalid")}>
-        <input
+        {searchable ? <input
           ref={inputRef}
           className="ui-combo-input [flex:1] [min-width:0] [height:100%] [margin:0] [padding:0] [border:0] [border-radius:0] [background:transparent] [box-shadow:none] [outline:none] [font-size:13.5px] [color:var(--ink)]"
           disabled={disabled}
@@ -103,43 +145,21 @@ export function SearchableSelect({
           onClick={() => {
             if (!open) openMenu("");
           }}
-          onKeyDown={(e) => {
-            if (disabled) return;
-            if (e.key === "Escape") {
-              if (open) {
-                e.preventDefault();
-                e.stopPropagation();
-                setOpen(false);
-                setQ("");
-              }
-              return;
-            }
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              e.stopPropagation();
-              if (!open) openMenu("");
-              else setHi((i) => Math.min(filtered.length - 1 + (canCreate ? 1 : 0), i + 1));
-              return;
-            }
-            if (e.key === "ArrowUp") {
-              e.preventDefault();
-              e.stopPropagation();
-              if (open) setHi((i) => Math.max(0, i - 1));
-              return;
-            }
-            if (e.key === "Enter") {
-              if (!open) return;
-              e.preventDefault();
-              e.stopPropagation();
-              if (canCreate && hi === filtered.length) {
-                create();
-                return;
-              }
-              const hit = filtered[hi] ?? filtered[0];
-              if (hit) pick(hit.value);
-            }
-          }}
-        />
+          onKeyDown={onControlKeyDown}
+        /> : (
+          <button
+            type="button"
+            className="ui-combo-input flex h-full min-w-0 flex-1 items-center border-0 bg-transparent p-0 text-left text-[13.5px] text-ink outline-none"
+            disabled={disabled}
+            data-field={name}
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            onClick={() => open ? setOpen(false) : openMenu("")}
+            onKeyDown={onControlKeyDown}
+          >
+            <span className={cn("truncate", !selected && "text-muted")}>{selected?.label ?? placeholder}</span>
+          </button>
+        )}
         <span className="ui-combo-actions [display:inline-flex] [align-items:center] [gap:2px] [color:var(--muted)] [flex-shrink:0]">
           {clearable && value && !open ? (
             <span

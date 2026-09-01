@@ -72,7 +72,7 @@ export function unitKind(unit: ProductSellUnit): "base" | "bigger" | "smaller" {
 }
 
 export function productSellUnits(product: Product): ProductSellUnit[] {
-  if (product.sellUnits?.length) return product.sellUnits;
+  if (product.sellUnits?.length) return qtyUnits(product.sellUnits);
   const base: ProductSellUnit = {
     id: `${product.id}-u`,
     name: unitLabel(product.unit),
@@ -104,9 +104,13 @@ export function productSellUnits(product: Product): ProductSellUnit[] {
 }
 
 export function qtyUnits(units: ProductSellUnit[]) {
-  const bigger = units.filter((u) => unitKind(u) === "bigger");
+  const bigger = units
+    .filter((u) => unitKind(u) === "bigger")
+    .sort((a, b) => (b.contains || 1) - (a.contains || 1));
   const base = units.filter((u) => unitKind(u) === "base");
-  const smaller = units.filter((u) => unitKind(u) === "smaller");
+  const smaller = units
+    .filter((u) => unitKind(u) === "smaller")
+    .sort((a, b) => (a.contains || 1) - (b.contains || 1));
   return [...bigger, ...base, ...smaller];
 }
 

@@ -1769,6 +1769,127 @@ input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin
   width: 260px;
 }
 
+.ui-date-range-panel {
+  left: auto;
+  right: 0;
+  width: min(420px, calc(100vw - 24px));
+  padding: 0;
+  overflow: hidden;
+}
+
+.ui-date-range-layout {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.ui-date-range-presets {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+  padding: 8px;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.ui-date-range-presets button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sub);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ui-date-range-presets button:hover {
+  background: color-mix(in srgb, var(--accent-bg) 55%, var(--paper));
+}
+
+.ui-date-range-presets button.is-on {
+  background: var(--accent-bg);
+  color: var(--accent-deep);
+  font-weight: 700;
+}
+
+.ui-date-range-main {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px 14px;
+}
+
+.ui-date-range-head strong {
+  display: block;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.ui-date-range-head span {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.ui-date-range-empty {
+  display: grid;
+  min-height: 96px;
+  place-items: center;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.ui-date-range-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr);
+  gap: 8px;
+  align-items: end;
+  min-width: 0;
+}
+
+.ui-date-range-fields .field {
+  gap: 4px;
+  min-width: 0;
+}
+
+.ui-date-range-fields .field-label,
+.ui-date-range-fields label > span:first-child {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.ui-date-range-fields .field-input {
+  width: 100%;
+  min-width: 0;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.ui-date-range-fields .ui-date-range-arrow {
+  display: grid;
+  place-items: center;
+  height: 38px;
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.ui-date-range-panel .ui-pop-foot {
+  margin-top: 4px;
+  padding-top: 12px;
+}
+
 .ui-pop-head button {
   display: grid;
   place-items: center;
@@ -2604,4 +2725,14 @@ textarea {
 
 .auth-link:hover {
   text-decoration: underline;
+}
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }

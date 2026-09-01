@@ -1,8 +1,9 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Check, Package, Search, X } from "lucide-react";
+import { AlertTriangle, Check, Package, Search, X } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
 import type { Product } from "@/shared/types";
-import { cn } from "@/utils/format";
+import { money, cn } from "@/utils/format";
+import { toaster } from "@/components/common/Toast";
 
 export function ProductSearch({
   products,
@@ -15,6 +16,11 @@ export function ProductSearch({
   clearable = false,
   name = "product",
   maxResults = 8,
+  showInventory = false,
+  showCost = false,
+  blockOutOfStock = false,
+  compact = false,
+  className,
 }: {
   products: Product[];
   value: string;
@@ -26,6 +32,11 @@ export function ProductSearch({
   clearable?: boolean;
   name?: string;
   maxResults?: number;
+  showInventory?: boolean;
+  showCost?: boolean;
+  blockOutOfStock?: boolean;
+  compact?: boolean;
+  className?: string;
 }) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -68,6 +79,10 @@ export function ProductSearch({
   }
 
   function pick(product: Product) {
+    if (blockOutOfStock && product.stock <= 0) {
+      toaster.warn(`${product.name} is out of stock`);
+      return;
+    }
     onChange(product);
     close();
   }
@@ -75,12 +90,13 @@ export function ProductSearch({
   return (
     <div
       ref={rootRef}
-      className={cn("product-search relative w-full", open && "is-open")}
+      className={cn("product-search relative w-full", open && "is-open", className)}
       onClick={(event) => event.stopPropagation()}
     >
       <div
         className={cn(
-          "product-search-field flex h-11 w-full items-center gap-2 rounded-lg border bg-paper px-3 transition-[border-color,box-shadow]",
+          "product-search-field flex w-full items-center gap-2 rounded-lg border bg-paper px-3 transition-[border-color,box-shadow]",
+          compact ? "h-8" : "h-11",
           open ? "border-accent shadow-[0_0_0_3px_var(--accent-ring)]" : "border-line",
           invalid && "!border-danger shadow-[0_0_0_3px_rgba(220,38,38,0.12)]",
           disabled && "cursor-not-allowed bg-slate-100 opacity-70",
@@ -143,16 +159,20 @@ export function ProductSearch({
             }
             if (event.key === "Tab" && open && query.trim()) {
               const product = results[highlighted] ?? results[0];
-              if (product) {
-                onChange(product);
-                close();
-              }
+              if (product) pick(product);
             }
           }}
         />
         {selected && !open ? (
-          <span className="hidden shrink-0 rounded-md bg-accent-bg px-2 py-1 text-[10px] font-bold text-accent-deep sm:inline">
-            {selected.category}
+          <span className={cn(
+            "hidden shrink-0 rounded-md px-2 py-1 text-[10px] font-bold sm:inline",
+            showInventory && selected.stock <= 0
+              ? "bg-red-50 text-danger"
+              : showInventory && isLowStock(selected)
+                ? "bg-amber-50 text-amber-700"
+                : "bg-accent-bg text-accent-deep",
+          )}>
+            {showInventory ? `${selected.stock} ${unitLabelForProduct(selected)}` : selected.category}
           </span>
         ) : null}
         {clearable && selected && !open ? (
@@ -176,11 +196,17 @@ export function ProductSearch({
         <div
           id={listId}
           role="listbox"
-          className="absolute top-[calc(100%+6px)] right-0 left-0 z-40 overflow-hidden rounded-xl border border-line bg-paper p-1.5 shadow-[0_16px_36px_rgba(15,23,42,0.16)]"
+          className={cn(
+            "absolute top-[calc(100%+6px)] right-0 left-0 z-40 overflow-hidden rounded-xl border border-line bg-paper p-1.5 shadow-[0_16px_36px_rgba(15,23,42,0.16)]",
+            (showInventory || showCost) && "min-w-[420px]",
+          )}
         >
           {results.length ? (
             <div className="grid max-h-[304px] gap-0.5 overflow-y-auto">
-              {results.map((product, index) => (
+              {results.map((product, index) => {
+                const out = product.stock <= 0;
+                const low = !out && isLowStock(product);
+                return (
                 <button
                   id={`${listId}-${product.id}`}
                   key={product.id}
@@ -191,6 +217,7 @@ export function ProductSearch({
                   className={cn(
                     "flex min-h-12 w-full items-center gap-3 rounded-lg border-0 px-2.5 py-2 text-left",
                     index === highlighted ? "bg-accent-bg" : "bg-transparent hover:bg-bg",
+                    blockOutOfStock && out && "opacity-65",
                   )}
                   onMouseEnter={() => setHighlighted(index)}
                   onMouseDown={(event) => event.preventDefault()}
@@ -202,12 +229,26 @@ export function ProductSearch({
                   <span className="min-w-0 flex-1">
                     <strong className="block truncate text-[12px] font-bold text-ink">{product.name}</strong>
                     <small className="mt-0.5 block truncate text-[10px] text-muted">
-                      {product.sku} · {product.category} · {product.stock} {unitLabelForProduct(product)}
+                      {product.sku} · {product.category}
+                      {showCost ? ` · Cost ${money(product.cost)}` : ""}
                     </small>
                   </span>
+                  {showInventory ? (
+                    <span className={cn(
+                      "grid shrink-0 justify-items-end gap-0.5 text-[10px] font-bold",
+                      out ? "text-danger" : low ? "text-amber-700" : "text-accent-deep",
+                    )}>
+                      <span className="inline-flex items-center gap-1">
+                        {(out || low) ? <AlertTriangle size={11} /> : null}
+                        {out ? "Out of stock" : low ? "Low stock" : "Available"}
+                      </span>
+                      <small className="font-semibold text-muted">{product.stock} {unitLabelForProduct(product)}</small>
+                    </span>
+                  ) : null}
                   {product.id === value ? <Check className="shrink-0 text-accent" size={15} /> : null}
                 </button>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="grid place-items-center gap-1 px-3 py-7 text-center">
@@ -227,4 +268,8 @@ export function ProductSearch({
 
 function unitLabelForProduct(product: Product) {
   return product.unit || "unit";
+}
+
+function isLowStock(product: Product) {
+  return product.stock > 0 && product.stock < (product.minimumStock ?? 20);
 }

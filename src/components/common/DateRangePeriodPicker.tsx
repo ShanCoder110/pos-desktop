@@ -4,17 +4,10 @@ import { Button } from "@/components/common/Button";
 import { Popover } from "@/components/common/Popover";
 import { TextInput } from "@/components/common/fields";
 import { cn } from "@/utils/format";
+import { DATE_PERIOD_PRESETS } from "@/shared/constants/charts";
 
 export type DatePeriod = "all" | "today" | "7d" | "30d" | "custom";
 export type DateRangeFilter = { period: DatePeriod; from: string; to: string };
-
-const PRESETS: { id: DatePeriod; label: string }[] = [
-  { id: "all", label: "All time" },
-  { id: "today", label: "Today" },
-  { id: "7d", label: "Last 7 days" },
-  { id: "30d", label: "Last 30 days" },
-  { id: "custom", label: "Custom range" },
-];
 
 function localDate(date: Date) {
   const offset = date.getTimezoneOffset() * 60_000;
@@ -55,7 +48,7 @@ export function DateRangePeriodPicker({
   const [draft, setDraft] = useState(value);
   const label = useMemo(() => {
     if (value.period === "custom") return `${prettyDate(value.from)} – ${prettyDate(value.to || value.from)}`;
-    return PRESETS.find((preset) => preset.id === value.period)?.label ?? "All time";
+    return DATE_PERIOD_PRESETS.find((preset) => preset.id === value.period)?.label ?? "All time";
   }, [value]);
 
   function openPicker() {
@@ -76,53 +69,48 @@ export function DateRangePeriodPicker({
     <Popover
       open={open}
       onOpenChange={setOpen}
-      panelClassName="!w-[430px] !p-0"
+      panelClassName="ui-date-range-panel"
       trigger={
-        <Button className="gap-1.5" onClick={openPicker} aria-label="Filter by date">
+        <Button className="h-8 min-h-8 gap-1.5 rounded-lg px-3" onClick={openPicker} aria-label="Filter by date">
           <CalendarDays size={14} className="text-muted" />
           <span>{label}</span>
           <ChevronDown size={13} className="text-muted" />
         </Button>
       }
     >
-      <div className="grid grid-cols-[130px_1fr]">
-        <aside className="border-r border-line p-2">
-          {PRESETS.map((preset) => (
+      <div className="ui-date-range-layout">
+        <aside className="ui-date-range-presets">
+          {DATE_PERIOD_PRESETS.map((preset) => (
             <button
               key={preset.id}
               type="button"
-              className={cn(
-                "min-h-8 w-full rounded-md border-0 bg-transparent px-2.5 text-left text-[11px] text-sub hover:bg-bg",
-                draft.period === preset.id && "bg-accent-bg font-bold text-accent-deep",
-              )}
+              className={cn(draft.period === preset.id && "is-on")}
               onClick={() => selectPeriod(preset.id)}
             >
               {preset.label}
             </button>
           ))}
         </aside>
-        <div className="grid content-start gap-3 p-3">
-          <div>
-            <strong className="block text-[12px] text-ink">Date range</strong>
-            <span className="text-[10px] text-muted">Applied to the table and graphs</span>
+        <div className="ui-date-range-main">
+          <div className="ui-date-range-head">
+            <strong>Date range</strong>
+            <span>Applied to the table and graphs</span>
           </div>
           {draft.period === "all" ? (
-            <div className="grid min-h-24 place-items-center rounded-lg bg-bg text-[11px] text-muted">
-              Showing records from all dates
-            </div>
+            <div className="ui-date-range-empty">Showing records from all dates</div>
           ) : (
-            <div className="grid grid-cols-[1fr_16px_1fr] items-end gap-2">
-              <label className="grid gap-1 text-[10px] font-bold text-muted">
-                From
+            <div className="ui-date-range-fields">
+              <label className="field">
+                <span className="field-label">From</span>
                 <TextInput
                   type="date"
                   value={draft.from}
                   onChange={(event) => setDraft({ ...draft, period: "custom", from: event.target.value })}
                 />
               </label>
-              <ArrowRight className="mb-3 text-muted" size={14} />
-              <label className="grid gap-1 text-[10px] font-bold text-muted">
-                To
+              <ArrowRight className="ui-date-range-arrow" size={14} aria-hidden />
+              <label className="field">
+                <span className="field-label">To</span>
                 <TextInput
                   type="date"
                   value={draft.to}
@@ -131,15 +119,19 @@ export function DateRangePeriodPicker({
               </label>
             </div>
           )}
-          <div className="mt-1 flex justify-end gap-2 border-t border-line pt-3">
-            <Button onClick={() => setOpen(false)}>Cancel</Button>
+          <div className="ui-pop-foot [display:flex] [justify-content:flex-end] [gap:8px] [border-top:1px_solid_var(--line)]">
+            <Button size="sm" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
             <Button
               variant="primary"
+              size="sm"
               disabled={draft.period === "custom" && (!draft.from || !draft.to)}
               onClick={() => {
-                const normalized = draft.from && draft.to && draft.from > draft.to
-                  ? { ...draft, from: draft.to, to: draft.from }
-                  : draft;
+                const normalized =
+                  draft.from && draft.to && draft.from > draft.to
+                    ? { ...draft, from: draft.to, to: draft.from }
+                    : draft;
                 onChange(normalized);
                 setOpen(false);
               }}

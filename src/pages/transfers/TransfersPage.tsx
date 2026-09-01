@@ -25,17 +25,9 @@ import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { transfers as seed, branchName, lotNumber, productName, userName, branches, productLots } from "@/shared/domain/mock";
 import type { StockTransferRow, TransferStatus } from "@/shared/domain/types";
+import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import { TRANSFER_TABLE_COLUMNS } from "@/shared/constants/products";
 
-const PAGE_SIZE = 10;
-const COLUMNS = [
-  { id: "from", label: "From", locked: true },
-  { id: "to", label: "To" },
-  { id: "status", label: "Status" },
-  { id: "items", label: "Items" },
-  { id: "created", label: "Created" },
-  { id: "completed", label: "Completed" },
-  { id: "by", label: "By" },
-];
 
 function tone(s: TransferStatus) {
   if (s === "COMPLETED") return "ok" as const;
@@ -48,8 +40,8 @@ export function TransfersPage() {
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [cols, setCols] = useState(TRANSFER_TABLE_COLUMNS.map((c) => c.id));
   const [view, setView] = useState<HubView>("table");
   const [dateRange, setDateRange] = useState<DateRangeFilter>(() => rangeForPeriod("all"));
   const [selected, setSelected] = useState<string[]>([]);
@@ -100,7 +92,7 @@ export function TransfersPage() {
       <Table
         toolbar={
           <HubToolbar
-            columns={COLUMNS}
+            columns={TRANSFER_TABLE_COLUMNS}
             cols={cols}
             onCols={setCols}
             chips={chips}
@@ -133,9 +125,9 @@ export function TransfersPage() {
           />
         }
         body={
-          view !== "table" ? (
+          view === "insights" ? (
             <HubChart
-              type={view}
+              type="donut"
               title="Transferred items by status"
               subtitle={`${rows.length} transfers after search, status, and date filters`}
               data={chartData}

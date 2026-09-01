@@ -6,12 +6,15 @@ export function SearchInput({
   onChange,
   placeholder,
   className,
+  searchable = true,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   className?: string;
+  searchable?: boolean;
 }) {
+  if (!searchable) return null;
   const hasValue = value.trim().length > 0;
 
   return (

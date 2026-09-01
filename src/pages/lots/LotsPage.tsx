@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import {
   Badge,
@@ -30,21 +31,11 @@ import { nextLotNumber, syncProductStock } from "@/pages/products/productLots";
 import { formatMixedQty, formatStockQty, unitLabel } from "@/pages/products/productQty";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { suppliers as initialSuppliers, userName } from "@/shared/domain/mock";
+import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import { LOT_TABLE_COLUMNS } from "@/shared/constants/products";
 import type { ProductLotRow, SupplierRow } from "@/shared/domain/types";
 import { money } from "@/utils/format";
 
-const PAGE_SIZE = 10;
-const COLUMNS = [
-  { id: "lot", label: "Lot", locked: true },
-  { id: "product", label: "Product" },
-  { id: "supplier", label: "Supplier" },
-  { id: "received", label: "Received" },
-  { id: "cost", label: "Cost" },
-  { id: "original", label: "Original" },
-  { id: "left", label: "Left" },
-  { id: "damaged", label: "Damaged" },
-  { id: "by", label: "By" },
-];
 
 function newLot(rows: ProductLotRow[]): ProductLotRow {
   return {
@@ -66,18 +57,43 @@ function newLot(rows: ProductLotRow[]): ProductLotRow {
 }
 
 export function LotsPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { setActions, sectionKpi, lots: rows, setLots: setRows, products, setProducts } = useProductsHub();
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [cols, setCols] = useState(LOT_TABLE_COLUMNS.map((c) => c.id));
   const [view, setView] = useState<HubView>("table");
   const [dateRange, setDateRange] = useState<DateRangeFilter>(() => rangeForPeriod("all"));
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<ProductLotRow | null>(null);
   const [remove, setRemove] = useState<ProductLotRow | null>(null);
   const [supplierRows, setSupplierRows] = useState<SupplierRow[]>(() => initialSuppliers);
+
+  function newLotForProduct(productId: string) {
+    const product = products.find((item) => item.id === productId);
+    const previous = [...rows]
+      .filter((lot) => lot.productId === productId)
+      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))[0];
+    return {
+      ...newLot(rows),
+      productId,
+      supplierId: previous?.supplierId ?? product?.supplierId ?? "",
+      purchasePrice: previous?.purchasePrice ?? product?.cost ?? 0,
+      minimumPrice: previous?.minimumPrice ?? product?.min ?? 0,
+      wholesalePrice: previous?.wholesalePrice ?? product?.wholesale ?? 0,
+      retailPrice: previous?.retailPrice ?? product?.retail ?? 0,
+    };
+  }
+
+  useEffect(() => {
+    const productId = (location.state as { addLotProductId?: string } | null)?.addLotProductId;
+    if (!productId) return;
+    setEdit(newLotForProduct(productId));
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state]);
 
   function productOf(id: string) {
     return products.find((p) => p.id === id);
@@ -232,7 +248,7 @@ export function LotsPage() {
       <Table
         toolbar={
           <HubToolbar
-            columns={COLUMNS}
+            columns={LOT_TABLE_COLUMNS}
             cols={cols}
             onCols={setCols}
             chips={chips}
@@ -290,9 +306,9 @@ export function LotsPage() {
           />
         }
         body={
-          view !== "table" ? (
+          view === "insights" ? (
             <HubChart
-              type={view}
+              type="bar"
               title="Stock value by product"
               subtitle={`${filtered.length} lots after search, status, and date filters`}
               data={chartData}

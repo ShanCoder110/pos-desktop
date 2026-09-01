@@ -8,11 +8,10 @@ import {
   Check,
 } from "lucide-react";
 import { Button } from "@/components/common/Button";
+import { PAGE_SIZE_ALL, PAGE_SIZE_OPTIONS } from "@/shared/constants/config";
 import { cn } from "@/utils/format";
 
-export const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
-/** Sentinel: show every row on one page */
-export const PAGE_SIZE_ALL = 0;
+export { PAGE_SIZE_ALL, PAGE_SIZE_OPTIONS } from "@/shared/constants/config";
 
 function PageSizeMenu({
   value,

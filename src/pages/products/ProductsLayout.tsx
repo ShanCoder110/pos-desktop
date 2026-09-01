@@ -17,43 +17,18 @@ import {
   XCircle,
 } from "lucide-react";
 import { KpiCard, TabSheet, Tabs } from "@/components/common";
-import { routes } from "@/shared/constants/routes";
+import { PRODUCT_SECTION_TABS, type ProductHealth } from "@/shared/constants/products";
 import { productLots as seedLots, productUnits, transfers, units } from "@/shared/domain/mock";
 import type { ProductLotRow } from "@/shared/domain/types";
 import { productCategories, products as catalog } from "@/shared/mock";
 import type { Product } from "@/shared/types";
 import { money } from "@/utils/format";
 
-export const PRODUCT_SECTION_TABS = [
-  { id: "all", to: routes.products, label: "All products", end: true },
-  { id: "lots", to: routes.lots, label: "Lots" },
-  { id: "units", to: routes.units, label: "Units" },
-  { id: "categories", to: routes.productsCategories, label: "Categories" },
-  { id: "transfers", to: routes.transfers, label: "Transfers" },
-  { id: "low", to: routes.productsLow, label: "Low stock" },
-  { id: "sold", to: routes.productsSold, label: "Most sold" },
-] as const;
+export type HubSection = "catalog" | "lots" | "units" | "categories" | "transfers" | "low";
 
-export type HealthKpi = "healthy" | "risk" | "dead" | "phantom";
-export type HubSection = "catalog" | "lots" | "units" | "categories" | "transfers" | "low" | "sold";
-
-export const HEALTH_LABEL: Record<HealthKpi, string> = {
-  healthy: "Healthy",
-  risk: "At risk",
-  dead: "Dead",
-  phantom: "Phantom",
-};
-
-export const HEALTH_FROM_LABEL: Record<string, HealthKpi> = {
-  Healthy: "healthy",
-  "At risk": "risk",
-  Dead: "dead",
-  Phantom: "phantom",
-};
-
-export function matchesHealth(row: Product, kpi: HealthKpi) {
-  if (kpi === "healthy") return row.stock >= 20;
-  if (kpi === "risk") return row.stock > 0 && row.stock < 20;
+export function matchesHealth(row: Product, kpi: ProductHealth) {
+  if (kpi === "healthy") return row.stock >= (row.minimumStock ?? 20);
+  if (kpi === "risk") return row.stock > 0 && row.stock < (row.minimumStock ?? 20);
   if (kpi === "dead") return row.stock <= 0;
   return row.isLinear;
 }
@@ -64,14 +39,13 @@ export function hubSection(pathname: string): HubSection {
   if (pathname.endsWith("/categories")) return "categories";
   if (pathname.endsWith("/transfers")) return "transfers";
   if (pathname.endsWith("/low")) return "low";
-  if (pathname.endsWith("/sold")) return "sold";
   return "catalog";
 }
 
 type HubCtx = {
   setActions: (node: ReactNode) => void;
-  health: HealthKpi | null;
-  setHealth: (value: HealthKpi | null) => void;
+  health: ProductHealth | null;
+  setHealth: (value: ProductHealth | null) => void;
   sectionKpi: string | null;
   setSectionKpi: (value: string | null) => void;
   lots: ProductLotRow[];
@@ -99,14 +73,14 @@ export function useProductsHub() {
 function CatalogKpis() {
   const { health, setHealth, products } = useProductsHub();
   const productCost = products.reduce((total, product) => total + product.cost * product.stock, 0);
-  const counts: Record<HealthKpi, number> = {
+  const counts: Record<ProductHealth, number> = {
     healthy: products.filter((r) => matchesHealth(r, "healthy")).length,
     risk: products.filter((r) => matchesHealth(r, "risk")).length,
     dead: products.filter((r) => matchesHealth(r, "dead")).length,
     phantom: products.filter((r) => matchesHealth(r, "phantom")).length,
   };
 
-  function toggle(id: HealthKpi) {
+  function toggle(id: ProductHealth) {
     setHealth(health === id ? null : id);
   }
 
@@ -211,9 +185,13 @@ function CategoriesKpis() {
 
 function LowStockKpis() {
   const { sectionKpi, setSectionKpi, products } = useProductsHub();
-  const below = products.filter((r) => r.stock > 0 && r.stock < 20).length;
+  const below = products.filter((r) => r.stock > 0 && r.stock < (r.minimumStock ?? 20)).length;
   const out = products.filter((r) => r.stock <= 0).length;
-  const ok = products.filter((r) => r.stock >= 20).length;
+  const ok = products.filter((r) => r.stock >= (r.minimumStock ?? 20)).length;
+  const orderQty = products.reduce((sum, row) => {
+    const minimum = row.minimumStock ?? 20;
+    return sum + (row.stock < minimum ? Math.max(0, minimum * 2 - row.stock) : 0);
+  }, 0);
 
   function toggle(id: string) {
     setSectionKpi(sectionKpi === id ? null : id);
@@ -221,11 +199,11 @@ function LowStockKpis() {
 
   return (
     <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
-      <KpiCard label="Low stock" value={below + out} hint="Needs attention" tone="warn" icon={<AlertTriangle size={16} />} active={sectionKpi === null} onClick={() => setSectionKpi(null)} />
+      <KpiCard label="To reorder" value={below + out} hint="Needs attention" tone="warn" icon={<AlertTriangle size={16} />} active={sectionKpi === null} onClick={() => setSectionKpi(null)} />
       <KpiCard label="Below min" value={below} hint="Still on shelf" tone="warn" icon={<AlertTriangle size={16} />} active={sectionKpi === "below"} onClick={() => toggle("below")} />
       <KpiCard label="Out" value={out} hint="Zero remaining" tone="danger" icon={<Trash2 size={16} />} active={sectionKpi === "out"} onClick={() => toggle("out")} />
-      <KpiCard label="Healthy" value={ok} hint="At or above 20" tone="ok" icon={<ShieldCheck size={16} />} />
-      <KpiCard label="SKUs" value={products.length} hint="Catalog" tone="phantom" icon={<Package size={16} />} />
+      <KpiCard label="Healthy" value={ok} hint="At or above minimum" tone="ok" icon={<ShieldCheck size={16} />} />
+      <KpiCard label="Suggested qty" value={orderQty} hint="Restore to 2× minimum" tone="phantom" icon={<Package size={16} />} />
     </div>
   );
 }
@@ -244,7 +222,7 @@ function ProductHubKpis() {
 export function ProductsLayout() {
   const { pathname } = useLocation();
   const [actions, setActions] = useState<ReactNode>(null);
-  const [health, setHealth] = useState<HealthKpi | null>(null);
+  const [health, setHealth] = useState<ProductHealth | null>(null);
   const [sectionKpi, setSectionKpi] = useState<string | null>(null);
   const [lots, setLots] = useState(seedLots);
   const [products, setProducts] = useState(catalog);

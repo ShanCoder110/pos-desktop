@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
-import { BarChart3, ChartPie, LineChart, Table2 } from "lucide-react";
+import { BarChart3, Table2 } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { ColumnPicker, type ColumnOption } from "@/components/common/ColumnPicker";
 import { DateRangePeriodPicker, type DateRangeFilter } from "@/components/common/DateRangePeriodPicker";
 import { FilterChips, FilterPicker, type FilterChip } from "@/components/common/FilterPicker";
 import { SearchInput } from "@/components/common/SearchInput";
 
-export type HubView = "table" | "bar" | "line" | "donut";
+export type HubView = "table" | "insights";
 
 export function HubToolbar({
   columns,
@@ -20,10 +20,12 @@ export function HubToolbar({
   search,
   onSearch,
   searchPlaceholder,
+  searchable = true,
   view = "table",
   onView,
   dateRange,
   onDateRange,
+  insightControls,
   trailing,
 }: {
   columns: ColumnOption[];
@@ -37,10 +39,12 @@ export function HubToolbar({
   search: string;
   onSearch: (value: string) => void;
   searchPlaceholder: string;
+  searchable?: boolean;
   view?: HubView;
   onView?: (view: HubView) => void;
   dateRange?: DateRangeFilter;
   onDateRange?: (range: DateRangeFilter) => void;
+  insightControls?: ReactNode;
   trailing?: ReactNode;
 }) {
   return (
@@ -60,21 +64,20 @@ export function HubToolbar({
               >
                 <Table2 size={15} />
               </Button>
-              <Button size="icon" className={view === "bar" ? "is-on" : undefined} aria-label="Bar chart" aria-pressed={view === "bar"} onClick={() => onView("bar")}>
+              <Button size="icon" className={view === "insights" ? "is-on" : undefined} aria-label="Insights" aria-pressed={view === "insights"} onClick={() => onView("insights")}>
                 <BarChart3 size={15} />
-              </Button>
-              <Button size="icon" className={view === "line" ? "is-on" : undefined} aria-label="Line chart" aria-pressed={view === "line"} onClick={() => onView("line")}>
-                <LineChart size={15} />
-              </Button>
-              <Button size="icon" className={view === "donut" ? "is-on" : undefined} aria-label="Donut chart" aria-pressed={view === "donut"} onClick={() => onView("donut")}>
-                <ChartPie size={15} />
               </Button>
             </div>
           ) : null}
           {dateRange && onDateRange ? <DateRangePeriodPicker value={dateRange} onChange={onDateRange} /> : null}
-          <SearchInput value={search} onChange={onSearch} placeholder={searchPlaceholder} />
+          <SearchInput searchable={searchable} value={search} onChange={onSearch} placeholder={searchPlaceholder} />
         </div>
-        {trailing ? <div className="ui-toolbar-right [display:flex] [align-items:center] [gap:8px] [min-width:0] [flex-shrink:0]">{trailing}</div> : null}
+        {(view === "insights" && insightControls) || trailing ? (
+          <div className="ui-toolbar-right [display:flex] [align-items:center] [gap:8px] [min-width:0] [flex-shrink:0]">
+            {view === "insights" ? insightControls : null}
+            {trailing}
+          </div>
+        ) : null}
       </div>
       <FilterChips items={chips} onRemove={onRemove} onClearAll={onClear} />
     </>

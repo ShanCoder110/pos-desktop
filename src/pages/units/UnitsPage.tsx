@@ -26,12 +26,9 @@ import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { units as seed } from "@/shared/domain/mock";
 import { products as catalog } from "@/shared/mock";
 import type { UnitRow } from "@/shared/domain/types";
+import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import { UNIT_TABLE_COLUMNS } from "@/shared/constants/products";
 
-const PAGE_SIZE = 10;
-const COLUMNS = [
-  { id: "name", label: "Name", locked: true },
-  { id: "symbol", label: "Symbol" },
-];
 const blank: UnitRow = { id: "", name: "", symbol: "" };
 
 export function UnitsPage() {
@@ -40,8 +37,8 @@ export function UnitsPage() {
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [cols, setCols] = useState(UNIT_TABLE_COLUMNS.map((c) => c.id));
   const [view, setView] = useState<HubView>("table");
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<UnitRow | null>(null);
@@ -85,7 +82,7 @@ export function UnitsPage() {
       <Table
         toolbar={
           <HubToolbar
-            columns={COLUMNS}
+            columns={UNIT_TABLE_COLUMNS}
             cols={cols}
             onCols={setCols}
             chips={chips}
@@ -131,7 +128,7 @@ export function UnitsPage() {
             }
           />
         }
-        body={view !== "table" ? <HubChart type={view} title="Products by base unit" data={chartData} /> : undefined}
+        body={view === "insights" ? <HubChart type="donut" title="Products by base unit" data={chartData} /> : undefined}
         footer={
           <Pagination
             page={Math.min(page, pages)}

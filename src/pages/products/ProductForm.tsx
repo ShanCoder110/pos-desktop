@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2 } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Factory, Package, Check, Plus, Trash2 } from "lucide-react";
 import {
   Button,
   Checkbox,
   Field,
   MoneyInput,
-  ProductSearch,
+  ProductQuantityPicker,
   SearchableSelect,
   Tabs,
   TextArea,
@@ -14,6 +14,8 @@ import {
   toaster,
 } from "@/components/common";
 import { units as unitRows, suppliers, supplierName } from "@/shared/domain/mock";
+import { STORAGE_KEYS } from "@/shared/constants/config";
+import { PRODUCT_FORM_SECTIONS, type ProductFormSection } from "@/shared/constants/products";
 import { productCategories } from "@/shared/mock";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { warrantyDaysOf, money } from "@/utils/format";
@@ -32,13 +34,13 @@ import {
   isBiggerSymbol,
   priceFromStock,
   pricePerStock,
+  productSellUnits,
+  qtyUnits,
+  unitInStock,
   unitLabel,
 } from "@/pages/products/productQty";
 
-const SECTIONS = ["details", "units", "lots", "recipe", "warranty"] as const;
-type Section = (typeof SECTIONS)[number];
 type PriceKey = "cost" | "min" | "wholesale" | "price";
-const KEEP_KEY = "pos.keepAddingProducts";
 
 function numVal(raw: string) {
   const n = Number(raw);
@@ -142,17 +144,21 @@ export function ProductForm({
   onClose: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const [section, setSection] = useState<Section>("details");
+  const [section, setSection] = useState<ProductFormSection>("details");
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState(false);
-  const [keepAdding, setKeepAdding] = useState(() => sessionStorage.getItem(KEEP_KEY) === "1");
+  const [keepAdding, setKeepAdding] = useState(() => sessionStorage.getItem(STORAGE_KEYS.keepAddingProducts) === "1");
   const focusPane = useRef(false);
+  const unitCards = useRef<Record<string, HTMLDivElement | null>>({});
+  const unitPositions = useRef(new Map<string, DOMRect>());
+  const changedUnitId = useRef<string | null>(null);
   const isNew = !catalog.some((r) => r.id === product.id);
   const { lots, setLots } = useProductsHub();
   const [lotDraft, setLotDraft] = useState(() => lots.filter((l) => l.productId === product.id));
   const [priceLotId, setPriceLotId] = useState("");
   const [lotOpened, setLotOpened] = useState<Record<string, number>>({});
-  const sellUnits = defaultSellUnits(product);
+  const sellUnits = qtyUnits(defaultSellUnits(product));
+  const unitLayoutKey = sellUnits.map((unit) => `${unit.id}:${unit.kind}:${unit.contains}`).join("|");
   const base = baseUnit(sellUnits) ?? sellUnits[0];
   const pack = biggerUnit(sellUnits);
   const extras = extraUnits(sellUnits);
@@ -171,7 +177,7 @@ export function ProductForm({
   const queuedLots = fifoLots(lotDraft).slice(1);
   const sections = useMemo(
     () =>
-      SECTIONS.filter((id) => {
+      PRODUCT_FORM_SECTIONS.filter((id) => {
         if (id === "recipe") return product.isManufactured;
         if (id === "lots") return !isNew;
         return true;
@@ -211,6 +217,41 @@ export function ProductForm({
     if (!sections.includes(section)) setSection("details");
   }, [sections, section]);
 
+  useLayoutEffect(() => {
+    if (section !== "units") {
+      unitPositions.current.clear();
+      return;
+    }
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const nextPositions = new Map<string, DOMRect>();
+    sellUnits.forEach((unit) => {
+      const element = unitCards.current[unit.id];
+      if (!element) return;
+      const next = element.getBoundingClientRect();
+      nextPositions.set(unit.id, next);
+      const previous = unitPositions.current.get(unit.id);
+      if (!previous || reducedMotion) return;
+      const deltaY = previous.top - next.top;
+      if (Math.abs(deltaY) < 1) return;
+      const changed = changedUnitId.current === unit.id;
+      element.animate(
+        [
+          {
+            transform: `translateY(${deltaY}px)`,
+            boxShadow: changed ? "0 0 0 2px var(--accent), 0 10px 24px rgba(15, 159, 143, 0.18)" : "none",
+          },
+          {
+            transform: "translateY(0)",
+            boxShadow: changed ? "0 0 0 0 transparent, 0 0 0 transparent" : "none",
+          },
+        ],
+        { duration: changed ? 360 : 300, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+      );
+    });
+    unitPositions.current = nextPositions;
+    changedUnitId.current = null;
+  }, [section, unitLayoutKey]);
+
   useEffect(() => {
     if (!flash) return;
     const t = window.setTimeout(() => setFlash(false), 1400);
@@ -223,7 +264,7 @@ export function ProductForm({
 
   function setKeep(value: boolean) {
     setKeepAdding(value);
-    sessionStorage.setItem(KEEP_KEY, value ? "1" : "0");
+    sessionStorage.setItem(STORAGE_KEYS.keepAddingProducts, value ? "1" : "0");
   }
 
   function setUnits(next: ProductSellUnit[]) {
@@ -244,6 +285,7 @@ export function ProductForm({
   }
 
   function setExtraField(id: string, patchRow: Partial<ProductSellUnit>, manual?: PriceKey) {
+    if (patchRow.kind || patchRow.symbol || patchRow.contains !== undefined) changedUnitId.current = id;
     setUnits(
       sellUnits.map((u) =>
         u.id === id
@@ -287,11 +329,24 @@ export function ProductForm({
     const field = validate();
     if (field) {
       setError(field);
-      const jump: Record<string, Section> = { name: "details", category: "details", unit: "details" };
+      const jump: Record<string, ProductFormSection> = { name: "details", category: "details", unit: "details" };
       setSection(jump[field] ?? "details");
       requestAnimationFrame(() => {
         if (rootRef.current) focusField(rootRef.current, field);
       });
+      return;
+    }
+    const insufficient = product.components.find((line) => {
+      const component = catalog.find((row) => row.id === line.productId);
+      if (!component) return false;
+      const units = productSellUnits(component);
+      const selectedUnit = units.find((unit) => unit.id === line.unitId) ?? units.find((unit) => unit.symbol === component.unit) ?? units[0];
+      return !selectedUnit || line.quantity * unitInStock(units, component.unit, selectedUnit) > component.stock + 1e-6;
+    });
+    if (insufficient) {
+      const component = catalog.find((row) => row.id === insufficient.productId);
+      setSection("recipe");
+      toaster.warn(`${component?.name ?? "Component"} does not have enough stock`);
       return;
     }
     const smaller = extras.filter((u) => u.kind === "smaller");
@@ -397,7 +452,12 @@ export function ProductForm({
       const isEnter = e.key === "Enter" && !e.altKey && !e.ctrlKey && !e.metaKey;
       if (!isEnter) return;
       const target = e.target as HTMLElement;
-      if (target.closest("textarea") || target.closest(".ui-combo-field.is-open") || target.closest(".ui-combo-menu")) return;
+      if (
+        target.closest("textarea") ||
+        target.closest(".product-search.is-open") ||
+        target.closest(".ui-combo-field.is-open") ||
+        target.closest(".ui-combo-menu")
+      ) return;
       if (target.tagName === "BUTTON") return;
 
       const root = rootRef.current?.querySelector<HTMLElement>(".product-form-pane");
@@ -440,10 +500,11 @@ export function ProductForm({
           value={section}
           onChange={(id) => {
             if (id !== section) focusPane.current = true;
-            setSection(id as Section);
+            setSection(id as ProductFormSection);
           }}
           items={sections.map((id) => ({
             id,
+            tone: id === "recipe" ? "recipe" as const : undefined,
             label:
               id === "details"
                 ? "Details"
@@ -531,7 +592,7 @@ export function ProductForm({
                 />
               </Field>
             ) : (
-              <div className="product-supplier-list [display:grid] [gap:6px] is-full">
+              <div className="product-supplier-list [display:grid] [gap:6px]">
                 <span className="field-label [font-size:12px] [font-weight:600] [color:var(--sub)]">Suppliers</span>
                 {activeSuppliers.length === 0 ? (
                   <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">No active lots. Suppliers show here when a lot still has quantity.</p>
@@ -547,41 +608,75 @@ export function ProductForm({
                 )}
               </div>
             )}
+            <Field label="Product type">
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Product type">
+                {([
+                  { id: "standard", label: "Standard", icon: Package },
+                  { id: "manufactured", label: "Manufactured", icon: Factory },
+                ] as const).map((option) => {
+                  const selected = typeValue === option.id;
+                  const Icon = option.icon;
+                  const selectedStyle = option.id === "manufactured"
+                    ? "border-violet-500 bg-violet-50 text-violet-700 ring-violet-500/10"
+                    : "border-accent bg-accent-bg text-accent-deep ring-accent/10";
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      className={selected
+                        ? `grid h-[38px] grid-cols-[14px_minmax(0,1fr)_12px] items-center gap-1.5 rounded-lg border px-2 text-[11px] font-bold ring-2 ${selectedStyle}`
+                        : "grid h-[38px] grid-cols-[14px_minmax(0,1fr)_12px] items-center gap-1.5 rounded-lg border border-line bg-paper px-2 text-[11px] font-semibold text-sub hover:border-accent/50 hover:bg-bg"
+                      }
+                      onClick={() => patch({
+                        isManufactured: option.id === "manufactured",
+                        components: option.id === "manufactured" ? product.components : [],
+                      })}
+                    >
+                      <Icon size={14} />
+                      <span className="text-center">{option.label}</span>
+                      <Check size={12} className={selected ? "visible" : "invisible"} />
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
             {isNew ? (
-              <>
-            <Field label="Purchase cost">
-              <MoneyInput
-                data-field="cost"
-                placeholder="0.00"
-                value={numStr(base?.cost ?? product.cost)}
-                onChange={(e) => setBaseField("cost", numVal(e.target.value))}
-              />
-            </Field>
-            <Field label="Min price">
-              <MoneyInput
-                data-field="min"
-                placeholder="0.00"
-                value={numStr(base?.min ?? product.min)}
-                onChange={(e) => setBaseField("min", numVal(e.target.value))}
-              />
-            </Field>
-            <Field label="Wholesale price">
-              <MoneyInput
-                data-field="wholesale"
-                placeholder="0.00"
-                value={numStr(base?.wholesale ?? product.wholesale)}
-                onChange={(e) => setBaseField("wholesale", numVal(e.target.value))}
-              />
-            </Field>
-            <Field label="Retail price">
-              <MoneyInput
-                data-field="retail"
-                placeholder="0.00"
-                value={numStr(base?.price ?? product.retail)}
-                onChange={(e) => setBaseField("price", numVal(e.target.value))}
-              />
-            </Field>
-              </>
+              <div className="is-full grid grid-cols-2 gap-x-3.5 gap-y-2.5">
+                <Field label="Purchase cost">
+                  <MoneyInput
+                    data-field="cost"
+                    placeholder="0.00"
+                    value={numStr(base?.cost ?? product.cost)}
+                    onChange={(e) => setBaseField("cost", numVal(e.target.value))}
+                  />
+                </Field>
+                <Field label="Min price">
+                  <MoneyInput
+                    data-field="min"
+                    placeholder="0.00"
+                    value={numStr(base?.min ?? product.min)}
+                    onChange={(e) => setBaseField("min", numVal(e.target.value))}
+                  />
+                </Field>
+                <Field label="Wholesale price">
+                  <MoneyInput
+                    data-field="wholesale"
+                    placeholder="0.00"
+                    value={numStr(base?.wholesale ?? product.wholesale)}
+                    onChange={(e) => setBaseField("wholesale", numVal(e.target.value))}
+                  />
+                </Field>
+                <Field label="Retail price">
+                  <MoneyInput
+                    data-field="retail"
+                    placeholder="0.00"
+                    value={numStr(base?.price ?? product.retail)}
+                    onChange={(e) => setBaseField("price", numVal(e.target.value))}
+                  />
+                </Field>
+              </div>
             ) : (
               <div className="product-fifo [display:grid] [gap:8px] is-full">
                 {sellingLot ? (
@@ -635,19 +730,6 @@ export function ProductForm({
                 )}
               </div>
             )}
-            <Field label="Product type">
-              <SearchableSelect
-                value={typeValue}
-                onChange={(v) => patch({ isManufactured: v === "manufactured", components: v === "manufactured" ? product.components : [] })}
-                placeholder="Standard"
-                searchPlaceholder="Type to search"
-                options={[
-                  { value: "standard", label: "Standard" },
-                  { value: "manufactured", label: "Manufactured" },
-                ]}
-                clearable={false}
-              />
-            </Field>
           </div>
         </div>
       ) : null}
@@ -684,7 +766,11 @@ export function ProductForm({
             {sellUnits.map((row) => {
               const isBase = row.kind === "base";
               return (
-                <div key={row.id} className={isBase ? "product-small-card [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:#f8fafc] is-base" : "product-small-card [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:#f8fafc]"}>
+                <div
+                  key={row.id}
+                  ref={(element) => { unitCards.current[row.id] = element; }}
+                  className={isBase ? "product-small-card relative [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:#f8fafc] is-base" : "product-small-card relative [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:#f8fafc]"}
+                >
                   <div className="product-small-top [display:grid] [grid-template-columns:minmax(0,_1.1fr)_minmax(90px,_1fr)_36px] [gap:8px] [align-items:end]">
                     <Field label={isBase ? "Product unit" : "Sell as"}>
                       <SearchableSelect
@@ -764,60 +850,23 @@ export function ProductForm({
 
       {section === "recipe" ? (
         <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
-          <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">Components used to make this product. Quantity is in each component’s base unit.</p>
-          <div className="product-unit-table [display:grid] [gap:6px] [min-height:0] [overflow:auto] is-recipe">
-            <div className="product-unit-head [display:grid] [grid-template-columns:minmax(0,_1.4fr)_110px_150px_36px] [gap:8px] [align-items:center] [padding:0_2px] [font-size:11px] [font-weight:700] [color:var(--sub)]">
-              <span>Component</span>
-              <span>Quantity</span>
-              <span>Unit</span>
-              <span />
-            </div>
+          <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">Select a component, choose its unit when needed, then enter the quantity.</p>
+          <div className="product-unit-table relative grid gap-2 overflow-visible is-recipe">
             {product.components.length === 0 ? (
               <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">No components yet.</p>
             ) : (
-              product.components.map((line) => {
-                const part = catalog.find((r) => r.id === line.productId);
-                return (
-                  <div key={line.id} className="product-unit-row [display:grid] [grid-template-columns:minmax(0,_1.4fr)_110px_150px_36px] [gap:8px] [align-items:center]">
-                    <ProductSearch
-                      products={catalog.filter((row) => row.id !== product.id)}
-                      value={line.productId}
-                      onChange={(selected) =>
-                        patch({
-                          components: product.components.map((component) =>
-                            component.id === line.id
-                              ? { ...component, productId: selected?.id ?? "" }
-                              : component,
-                          ),
-                        })
-                      }
-                      placeholder="Search component"
-                      clearable
-                    />
-                    <TextInput
-                      inputMode="decimal"
-                      placeholder="1"
-                      value={numStr(line.quantity)}
-                      onChange={(e) =>
-                        patch({
-                          components: product.components.map((c) =>
-                            c.id === line.id ? { ...c, quantity: numVal(e.target.value) } : c,
-                          ),
-                        })
-                      }
-                    />
-                    <TextInput value={part ? unitLabel(part.unit) : "—"} disabled />
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label="Remove component"
-                      onClick={() => patch({ components: product.components.filter((c) => c.id !== line.id) })}
-                    >
-                      <Trash2 size={14} />
-                    </Button>
-                  </div>
-                );
-              })
+              product.components.map((line) => (
+                <ProductQuantityPicker
+                  key={line.id}
+                  products={catalog.filter((row) => row.id !== product.id)}
+                  value={line}
+                  onChange={(next) => patch({
+                    components: product.components.map((component) => component.id === line.id ? { ...component, ...next } : component),
+                  })}
+                  onRemove={() => patch({ components: product.components.filter((component) => component.id !== line.id) })}
+                  recipeTone
+                />
+              ))
             )}
           </div>
           <Button

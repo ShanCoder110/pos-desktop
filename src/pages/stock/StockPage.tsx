@@ -20,24 +20,17 @@ import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { catalog as seed, stockMovements, branchName, lotNumber, userName } from "@/shared/domain/mock";
 import type { CatalogProduct } from "@/shared/domain/types";
 import { qty } from "@/utils/format";
+import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import { STOCK_TABLE_COLUMNS } from "@/shared/constants/products";
 
-const PAGE_SIZE = 10;
-const COLUMNS = [
-  { id: "product", label: "Product", locked: true },
-  { id: "sku", label: "SKU" },
-  { id: "unit", label: "Base unit" },
-  { id: "onHand", label: "On hand" },
-  { id: "minimum", label: "Minimum" },
-  { id: "status", label: "Status" },
-];
 
 export function StockPage() {
   const { sectionKpi } = useProductsHub();
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [cols, setCols] = useState(STOCK_TABLE_COLUMNS.map((c) => c.id));
   const [view, setView] = useState<HubView>("table");
   const [selected, setSelected] = useState<string[]>([]);
   const [open, setOpen] = useState<CatalogProduct | null>(null);
@@ -76,7 +69,7 @@ export function StockPage() {
       <Table
         toolbar={
           <HubToolbar
-            columns={COLUMNS}
+            columns={STOCK_TABLE_COLUMNS}
             cols={cols}
             onCols={setCols}
             chips={chips}
@@ -103,7 +96,7 @@ export function StockPage() {
             onView={setView}
           />
         }
-        body={view !== "table" ? <HubChart type={view} title="On-hand stock by product" data={chartData} /> : undefined}
+        body={view === "insights" ? <HubChart type="bar" title="On-hand stock by product" data={chartData} /> : undefined}
         footer={
           <Pagination
             page={Math.min(page, pages)}

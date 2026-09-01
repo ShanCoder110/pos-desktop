@@ -1,7 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronDown,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   FileSpreadsheet,
   FileText,
   Pencil,
@@ -10,6 +13,7 @@ import {
   Receipt,
   Tags,
   Trash2,
+  X,
 } from "lucide-react";
 import {
   Badge,
@@ -25,6 +29,7 @@ import {
   PAGE_SIZE_ALL,
   Pagination,
   Popover,
+  SearchableSelect,
   Table,
   TableRowsSkeleton,
   Td,
@@ -36,21 +41,20 @@ import {
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { ProductForm } from "@/pages/products/ProductForm";
+import { useDebounce } from "@/hooks/useDebounce";
 import { blankProduct, lotTotals, openingLot } from "@/pages/products/productLots";
-import { formatStockQty, stockBreakdown, unitLabel } from "@/pages/products/productQty";
-import {
-  HEALTH_FROM_LABEL,
-  HEALTH_LABEL,
-  matchesHealth,
-  useProductsHub,
-} from "@/pages/products/ProductsLayout";
+import { formatStockQty, qtyUnits, stockBreakdown, unitLabel } from "@/pages/products/productQty";
+import { matchesHealth, useProductsHub } from "@/pages/products/ProductsLayout";
 import { productCategories, topSelling } from "@/shared/mock";
+import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import { DEFAULT_PRODUCT_COLUMNS, DEFAULT_REORDER_COLUMNS, PRODUCT_HEALTH_FROM_LABEL, PRODUCT_HEALTH_LABEL, PRODUCT_TABLE_COLUMNS, REORDER_PRODUCT_COLUMNS } from "@/shared/constants/products";
+import { routes } from "@/shared/constants/routes";
+import { supplierName } from "@/shared/domain/mock";
 import { useSettings } from "@/shared/settings";
 import type { Product } from "@/shared/types";
+import { searchAllProducts } from "@/services/products";
 import { exportProductsCsv, exportProductsExcel, printProducts } from "@/utils/exportFile";
 import { money } from "@/utils/format";
-
-const PAGE_SIZE = 10;
 
 function nextSku(existing: Product[]) {
   const used = new Set(existing.map((r) => r.sku));
@@ -63,28 +67,11 @@ function nextSku(existing: Product[]) {
   return sku;
 }
 
-const COLUMNS = [
-  { id: "name", label: "Name", locked: true },
-  { id: "sku", label: "SKU" },
-  { id: "category", label: "Category" },
-  { id: "cost", label: "Cost" },
-  { id: "wholesale", label: "Wholesale" },
-  { id: "min", label: "Minimum" },
-  { id: "retail", label: "Retail" },
-  { id: "margin", label: "Margin" },
-  { id: "sales", label: "Total sales" },
-  { id: "profit", label: "Profit" },
-  { id: "stock", label: "Qty" },
-  { id: "status", label: "Status" },
-];
-
-const DEFAULT_COLS = ["name", "category", "cost", "wholesale", "min", "margin", "sales", "profit", "stock", "status"];
-
 type PriceField = "cost" | "min" | "wholesale" | "retail";
 
 function unitPrices(row: Product, field: PriceField) {
   if (row.sellUnits?.length) {
-    return row.sellUnits.map((unit) => ({
+    return qtyUnits(row.sellUnits).map((unit) => ({
       id: unit.id,
       name: unit.name || unitLabel(unit.symbol || row.unit),
       value: field === "retail" ? unit.price : unit[field],
@@ -99,12 +86,12 @@ function unitPrices(row: Product, field: PriceField) {
   if (!row.packQty || row.packQty <= 1) return [base];
 
   return [
-    base,
     {
       id: `${row.id}-pack`,
       name: "Pack",
       value: field === "retail" && row.packPrice > 0 ? row.packPrice : row[field] * row.packQty,
     },
+    base,
   ];
 }
 
@@ -127,13 +114,13 @@ function marginPct(row: Product) {
 
 function stockTone(row: Product): "ok" | "warn" | "danger" {
   if (row.stock <= 0) return "danger";
-  if (row.stock < 20) return "warn";
+  if (row.stock < (row.minimumStock ?? 20)) return "warn";
   return "ok";
 }
 
 function stockLabel(row: Product) {
   if (row.stock <= 0) return "Out of stock";
-  if (row.stock < 20) return "Low stock";
+  if (row.stock < (row.minimumStock ?? 20)) return "Low stock";
   return "In stock";
 }
 
@@ -196,22 +183,38 @@ export function ProductsPage() {
   const { settings } = useSettings();
   const { setActions, health, setHealth, sectionKpi, lots, setLots, products: rows, setProducts: setRows } = useProductsHub();
   const location = useLocation();
-  const tab = location.pathname.endsWith("/sold")
-    ? "sold"
-    : location.pathname.endsWith("/low")
-      ? "low"
-      : "all";
+  const navigate = useNavigate();
+  const tab = location.pathname.endsWith("/low") ? "low" : "all";
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [cols, setCols] = useState(DEFAULT_COLS);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [cols, setCols] = useState<string[]>(tab === "low" ? DEFAULT_REORDER_COLUMNS : DEFAULT_PRODUCT_COLUMNS);
   const [view, setView] = useState<HubView>("table");
+  const [chartLimit, setChartLimit] = useState<"10" | "20" | "50" | "all">("10");
+  const [chartProductId, setChartProductId] = useState("");
+  const [remoteRows, setRemoteRows] = useState<Product[]>([]);
+  const [profitSort, setProfitSort] = useState<"asc" | "desc" | null>(null);
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<Product | null>(null);
   const [remove, setRemove] = useState<Product | null>(null);
   const [blocked, setBlocked] = useState(false);
+  const debouncedGlobalQuery = useDebounce(q.trim(), 320);
+
+  useEffect(() => {
+    if (debouncedGlobalQuery.length < 2) {
+      setRemoteRows([]);
+      return;
+    }
+    const controller = new AbortController();
+    searchAllProducts(debouncedGlobalQuery, controller.signal)
+      .then(setRemoteRows)
+      .catch((error: unknown) => {
+        if ((error as { name?: string })?.name !== "AbortError") setRemoteRows([]);
+      });
+    return () => controller.abort();
+  }, [debouncedGlobalQuery]);
 
   useEffect(() => {
     const t = window.setTimeout(() => setLoading(false), 450);
@@ -224,21 +227,32 @@ export function ProductsPage() {
   }, [tab, sectionKpi]);
 
   useEffect(() => {
+    setCols(tab === "low" ? DEFAULT_REORDER_COLUMNS : DEFAULT_PRODUCT_COLUMNS);
+  }, [tab]);
+
+  useEffect(() => {
     setChips((prev) => {
       const without = prev.filter((c) => c.field !== "health");
       if (!health) return without;
-      return [...without, { field: "health", label: "Health", value: HEALTH_LABEL[health] }];
+      return [...without, { field: "health", label: "Health", value: PRODUCT_HEALTH_LABEL[health] }];
     });
     setPage(1);
   }, [health]);
 
+  const searchRows = useMemo(() => {
+    if (!q.trim() || !remoteRows.length) return rows;
+    const merged = new Map(rows.map((product) => [product.id, product]));
+    remoteRows.forEach((product) => merged.set(product.id, product));
+    return [...merged.values()];
+  }, [q, remoteRows, rows]);
+
   const filtered = useMemo(() => {
-    const list = rows.filter((r) => {
+    const list = searchRows.filter((r) => {
       const text = `${r.name} ${r.sku} ${r.category}`.toLowerCase();
       if (q && !text.includes(q.toLowerCase())) return false;
       for (const chip of chips) {
         if (chip.field === "health") {
-          const key = HEALTH_FROM_LABEL[chip.value];
+          const key = PRODUCT_HEALTH_FROM_LABEL[chip.value];
           if (!key || !matchesHealth(r, key)) return false;
         }
         if (chip.field === "name" && !r.name.toLowerCase().includes(chip.value.toLowerCase())) return false;
@@ -250,6 +264,13 @@ export function ProductsPage() {
         if (chip.field === "profit") {
           if (profitOf(r) < minAmount(chip.value)) return false;
         }
+        if (chip.field === "cost" && r.cost < minAmount(chip.value)) return false;
+        if (chip.field === "minimumPrice" && r.min < minAmount(chip.value)) return false;
+        if (chip.field === "wholesale" && r.wholesale < minAmount(chip.value)) return false;
+        if (chip.field === "retail" && r.retail < minAmount(chip.value)) return false;
+        if (chip.field === "stockQty" && r.stock < minAmount(chip.value)) return false;
+        if (chip.field === "stockValue" && r.stock * r.cost < minAmount(chip.value)) return false;
+        if (chip.field === "margin" && marginPct(r) < minAmount(chip.value)) return false;
         if (chip.field === "stock") {
           const tone = stockTone(r);
           if (chip.value === "In stock" && tone !== "ok") return false;
@@ -257,36 +278,49 @@ export function ProductsPage() {
           if (chip.value === "Out of stock" && tone !== "danger") return false;
         }
       }
-      if (tab === "sold") return soldQty(r.id) > 0;
       if (tab === "low") {
-        if (sectionKpi === "below") return r.stock > 0 && r.stock < 20;
+        const minimum = r.minimumStock ?? 20;
+        if (sectionKpi === "below") return r.stock > 0 && r.stock < minimum;
         if (sectionKpi === "out") return r.stock <= 0;
-        return r.stock < 20;
+        return r.stock < minimum;
       }
       return true;
     });
-    if (tab === "sold") {
-      return [...list].sort((a, b) => soldQty(b.id) - soldQty(a.id));
-    }
     return list;
-  }, [rows, q, tab, chips, sectionKpi]);
+  }, [searchRows, q, tab, chips, sectionKpi]);
 
-  const pageCount = pageSize === PAGE_SIZE_ALL ? Math.max(filtered.length, 1) : pageSize;
-  const pages = Math.max(1, Math.ceil(filtered.length / pageCount));
+  const ordered = useMemo(() => {
+    if (!profitSort) return filtered;
+    return [...filtered].sort((a, b) => profitSort === "asc" ? profitOf(a) - profitOf(b) : profitOf(b) - profitOf(a));
+  }, [filtered, profitSort]);
+
+  const pageCount = pageSize === PAGE_SIZE_ALL ? Math.max(ordered.length, 1) : pageSize;
+  const pages = Math.max(1, Math.ceil(ordered.length / pageCount));
   const shown =
     pageSize === PAGE_SIZE_ALL
-      ? filtered
-      : filtered.slice((page - 1) * pageSize, page * pageSize);
-  const chartData = useMemo(
-    () => filtered
-      .map((row) => ({
-        id: row.id,
-        label: row.name,
-        value: tab === "sold" ? salesAmount(row.id) : tab === "low" ? row.stock : row.stock * row.cost,
-      }))
-      .sort((a, b) => b.value - a.value),
-    [filtered, tab],
-  );
+      ? ordered
+      : ordered.slice((page - 1) * pageSize, page * pageSize);
+  const chartData = useMemo(() => {
+    return filtered.map((product) => {
+      const stockValue = product.stock * product.cost;
+      return {
+        id: product.id,
+        label: product.name,
+        value: stockValue,
+        details: [
+          { label: "Stock value", value: money(stockValue) },
+          { label: "Quantity remaining", value: `${formatStockQty(product.stock)} ${unitLabel(product.unit)}` },
+          { label: "Cost price", value: money(product.cost) },
+          { label: "Retail price", value: money(product.retail) },
+        ],
+      };
+    });
+  }, [filtered]);
+  const chartProduct = searchRows.find((product) => product.id === chartProductId);
+  const chartProductPoint = chartData.find((point) => point.id === chartProductId);
+  const latestLot = (productId: string) => [...lots]
+    .filter((lot) => lot.productId === productId)
+    .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))[0];
   const show = (id: string) => cols.includes(id);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
@@ -369,7 +403,7 @@ export function ProductsPage() {
       <Table
         toolbar={
           <HubToolbar
-            columns={COLUMNS}
+            columns={tab === "low" ? REORDER_PRODUCT_COLUMNS : PRODUCT_TABLE_COLUMNS}
             cols={cols}
             onCols={setCols}
             chips={chips}
@@ -387,7 +421,14 @@ export function ProductsPage() {
               { id: "category", label: "Category", options: productCategories, searchable: true },
               { id: "sales", label: "Total sales", placeholder: "Min amount e.g. 5000", numeric: true },
               { id: "profit", label: "Profit", placeholder: "Min amount e.g. 1000", numeric: true },
-              { id: "stock", label: "Qty", options: ["In stock", "Low stock", "Out of stock"] },
+              { id: "stock", label: "Stock status", options: ["In stock", "Low stock", "Out of stock"] },
+              { id: "stockQty", label: "Stock quantity", placeholder: "Minimum quantity", numeric: true },
+              { id: "stockValue", label: "Stock value", placeholder: "Minimum stock value", numeric: true },
+              { id: "cost", label: "Cost price", placeholder: "Minimum cost", numeric: true },
+              { id: "minimumPrice", label: "Minimum price", placeholder: "Minimum amount", numeric: true },
+              { id: "wholesale", label: "Wholesale price", placeholder: "Minimum wholesale", numeric: true },
+              { id: "retail", label: "Retail price", placeholder: "Minimum retail", numeric: true },
+              { id: "margin", label: "Margin %", placeholder: "Minimum margin percentage", numeric: true },
             ]}
             search={q}
             onSearch={(v) => {
@@ -427,13 +468,66 @@ export function ProductsPage() {
           />
         }
         body={
-          view !== "table" ? (
+          view === "insights" ? (
             <HubChart
-              type={view}
-              title={tab === "sold" ? "Sales by product" : tab === "low" ? "Low-stock quantities" : "Inventory value by product"}
-              subtitle={`${filtered.length} products after search and field filters`}
+              type="bar"
+              title="Inventory value by product"
+              subtitle={`${chartLimit === "all" ? "All" : chartLimit} of ${filtered.length} matching products · click a bar for details`}
               data={chartData}
-              formatValue={tab === "low" ? formatStockQty : money}
+              maxItems={chartLimit === "all" ? null : Number(chartLimit)}
+              formatValue={money}
+              selectedId={chartProductId}
+              onPointClick={(point) => setChartProductId(point.id ?? "")}
+              controls={
+                <div className="flex items-center gap-2">
+                  <SearchableSelect
+                    className="w-[130px] [&_.ui-combo-field]:h-8 [&_.ui-combo-input]:text-[11px]"
+                    value={chartLimit}
+                    options={[
+                      { value: "10", label: "10 products" },
+                      { value: "20", label: "20 products" },
+                      { value: "50", label: "50 products" },
+                      { value: "all", label: "All products" },
+                    ]}
+                    onChange={(value) => setChartLimit(value as "10" | "20" | "50" | "all")}
+                    clearable={false}
+                    searchable={false}
+                    placeholder="Products"
+                  />
+                </div>
+              }
+              sidePanel={chartProduct ? (
+                <aside key={chartProduct.id} className="w-[320px] shrink-0 animate-[slideInRight_.2s_ease-out] bg-bg/20 p-4">
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-accent-deep">Product details</span>
+                      <h3 className="mt-1 truncate text-[16px] font-extrabold text-ink">{chartProduct.name}</h3>
+                      <p className="mt-1 text-[10px] text-muted">{chartProduct.sku} · {chartProduct.category}</p>
+                    </div>
+                    <Button size="icon" variant="ghost" aria-label="Close product details" onClick={() => setChartProductId("")}><X size={15} /></Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(chartProductPoint?.details ?? []).map((detail) => (
+                      <div key={detail.label} className="rounded-lg border border-line bg-bg/50 p-2.5">
+                        <span className="block text-[9px] font-semibold text-muted">{detail.label}</span>
+                        <strong className="mt-1 block text-[12px] tabular-nums text-ink">{detail.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 rounded-xl border border-line p-3">
+                    <h4 className="mb-3 text-[11px] font-bold text-ink">Pricing</h4>
+                    <div className="grid gap-2 text-[10px]">
+                      {[['Cost', chartProduct.cost], ['Minimum', chartProduct.min], ['Wholesale', chartProduct.wholesale], ['Retail', chartProduct.retail]].map(([label, value]) => (
+                        <div key={String(label)} className="flex justify-between gap-4"><span className="text-muted">{label}</span><b className="tabular-nums text-ink">{money(Number(value))}</b></div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-xl border border-line p-3 text-[10px]">
+                    <div className="flex justify-between gap-4"><span className="text-muted">Status</span><Badge tone={stockTone(chartProduct)}>{stockLabel(chartProduct)}</Badge></div>
+                    <div className="mt-2 flex justify-between gap-4"><span className="text-muted">Minimum stock</span><b>{formatStockQty(chartProduct.minimumStock ?? 20)}</b></div>
+                  </div>
+                </aside>
+              ) : null}
             />
           ) : undefined
         }
@@ -465,14 +559,31 @@ export function ProductsPage() {
             <Th>Name</Th>
             {show("sku") ? <Th>SKU</Th> : null}
             {show("category") ? <Th>Category</Th> : null}
+            {show("supplier") ? <Th>Last supplier</Th> : null}
             {show("cost") ? <Th>Cost</Th> : null}
-            {show("wholesale") ? <Th>Wholesale</Th> : null}
             {show("min") ? <Th>Minimum</Th> : null}
+            {show("wholesale") ? <Th>Wholesale</Th> : null}
             {show("retail") ? <Th>Retail</Th> : null}
             {show("margin") ? <Th>Margin</Th> : null}
             {show("sales") ? <Th>Total sales</Th> : null}
-            {show("profit") ? <Th>Profit</Th> : null}
+            {show("profit") ? (
+              <Th>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 border-0 bg-transparent p-0 font:inherit text-inherit"
+                  aria-label="Sort by profit"
+                  aria-pressed={Boolean(profitSort)}
+                  onClick={() => setProfitSort((current) => current === null ? "desc" : current === "desc" ? "asc" : null)}
+                >
+                  Profit
+                  {profitSort === "desc" ? <ArrowDown size={12} /> : profitSort === "asc" ? <ArrowUp size={12} /> : <ArrowUpDown size={12} />}
+                </button>
+              </Th>
+            ) : null}
             {show("stock") ? <Th>Qty</Th> : null}
+            {show("minStock") ? <Th>Minimum qty</Th> : null}
+            {show("recommended") ? <Th>Recommended order</Th> : null}
+            {show("lastCost") ? <Th>Last cost</Th> : null}
             {show("status") ? <Th>Status</Th> : null}
             <Th>Actions</Th>
           </tr>
@@ -489,6 +600,9 @@ export function ProductsPage() {
             shown.map((row) => {
             const tone = stockTone(row);
             const pct = marginPct(row);
+            const lastLot = latestLot(row.id);
+            const minimumStock = row.minimumStock ?? 20;
+            const recommended = Math.max(0, minimumStock * 2 - row.stock);
             return (
               <tr key={row.id} className={`is-${tone}`}>
                 <Td className="ui-check-col">
@@ -506,9 +620,10 @@ export function ProductsPage() {
                 </Td>
                 {show("sku") ? <Td>{row.sku || "—"}</Td> : null}
                 {show("category") ? <Td>{row.category}</Td> : null}
+                {show("supplier") ? <Td>{lastLot ? supplierName(lastLot.supplierId) || "—" : "—"}</Td> : null}
                 {show("cost") ? <Td numeric><UnitPrice row={row} field="cost" /></Td> : null}
-                {show("wholesale") ? <Td numeric><UnitPrice row={row} field="wholesale" /></Td> : null}
                 {show("min") ? <Td numeric><UnitPrice row={row} field="min" /></Td> : null}
+                {show("wholesale") ? <Td numeric><UnitPrice row={row} field="wholesale" /></Td> : null}
                 {show("retail") ? <Td numeric><UnitPrice row={row} field="retail" /></Td> : null}
                 {show("margin") ? (
                   <Td numeric>
@@ -537,13 +652,18 @@ export function ProductsPage() {
                     </div>
                   </Td>
                 ) : null}
+                {show("minStock") ? <Td numeric>{formatStockQty(minimumStock)}</Td> : null}
+                {show("recommended") ? <Td numeric><strong>{formatStockQty(recommended)}</strong></Td> : null}
+                {show("lastCost") ? <Td numeric>{lastLot ? money(lastLot.purchasePrice) : money(row.cost)}</Td> : null}
                 {show("status") ? (
                   <Td>
                     <Badge tone={tone}>{stockLabel(row)}</Badge>
                   </Td>
                 ) : null}
                 <Td>
-                  <Menu>
+                  {tab === "low" ? (
+                    <Button size="sm" variant="primary" onClick={() => navigate(routes.lots, { state: { addLotProductId: row.id } })}>Add lot</Button>
+                  ) : <Menu>
                     <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
                       Edit
                     </MenuItem>
@@ -557,7 +677,7 @@ export function ProductsPage() {
                     >
                       Delete
                     </MenuItem>
-                  </Menu>
+                  </Menu>}
                 </Td>
               </tr>
             );

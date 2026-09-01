@@ -5,6 +5,7 @@ import { cn } from "@/utils/format";
 export type TabItem = {
   id: string;
   label: string;
+  tone?: "recipe";
   kbd?: string;
   to?: string;
   end?: boolean;
@@ -55,7 +56,11 @@ export function Tabs({
             role="tab"
             aria-selected={on}
             tabIndex={skipTabOrder ? -1 : on ? 0 : -1}
-            className={on ? "ui-tab [position:relative] [display:inline-flex] [align-items:center] [gap:6px] [height:36px] [padding:0] [border:0] [background:transparent] [color:var(--ink)] [font-size:13px] [font-weight:600] [cursor:pointer] [text-decoration:none] [white-space:nowrap] is-on" : "ui-tab [position:relative] [display:inline-flex] [align-items:center] [gap:6px] [height:36px] [padding:0] [border:0] [background:transparent] [color:var(--ink)] [font-size:13px] [font-weight:600] [cursor:pointer] [text-decoration:none] [white-space:nowrap]"}
+            className={cn(
+              "ui-tab [position:relative] [display:inline-flex] [align-items:center] [gap:6px] [height:36px] [padding:0] [border:0] [background:transparent] [color:var(--ink)] [font-size:13px] [font-weight:600] [cursor:pointer] [text-decoration:none] [white-space:nowrap]",
+              on && "is-on",
+              item.tone === "recipe" && (on ? "!text-violet-700 !shadow-[inset_0_-2px_0_#7c3aed]" : "!text-violet-500"),
+            )}
             onClick={() => onChange?.(item.id)}
           >
             {label}

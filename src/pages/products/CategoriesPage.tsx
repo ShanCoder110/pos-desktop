@@ -24,14 +24,11 @@ import type { FilterChip } from "@/components/common/FilterPicker";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { productCategories, products as catalog } from "@/shared/mock";
+import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import { CATEGORY_TABLE_COLUMNS } from "@/shared/constants/products";
 
 type CategoryRow = { id: string; name: string };
 
-const PAGE_SIZE = 10;
-const COLUMNS = [
-  { id: "name", label: "Name", locked: true },
-  { id: "products", label: "Products" },
-];
 const blank: CategoryRow = { id: "", name: "" };
 
 function seedRows(): CategoryRow[] {
@@ -44,8 +41,8 @@ export function CategoriesPage() {
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [cols, setCols] = useState(CATEGORY_TABLE_COLUMNS.map((c) => c.id));
   const [view, setView] = useState<HubView>("table");
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<CategoryRow | null>(null);
@@ -89,7 +86,7 @@ export function CategoriesPage() {
       <Table
         toolbar={
           <HubToolbar
-            columns={COLUMNS}
+            columns={CATEGORY_TABLE_COLUMNS}
             cols={cols}
             onCols={setCols}
             chips={chips}
@@ -132,7 +129,7 @@ export function CategoriesPage() {
             }
           />
         }
-        body={view !== "table" ? <HubChart type={view} title="Products by category" data={chartData} /> : undefined}
+        body={view === "insights" ? <HubChart type="donut" title="Products by category" data={chartData} /> : undefined}
         footer={
           <Pagination
             page={Math.min(page, pages)}

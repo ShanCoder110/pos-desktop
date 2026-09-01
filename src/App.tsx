@@ -19,6 +19,7 @@ import { ProductsLayout } from "@/pages/products/ProductsLayout";
 import { ProductsPage } from "@/pages/products/ProductsPage";
 import { RepairPage } from "@/pages/repair/RepairPage";
 import { ClaimsPage } from "@/pages/sales/ClaimsPage";
+import { ProductSalesPage } from "@/pages/sales/ProductSalesPage";
 import { SalesLayout } from "@/pages/sales/SalesLayout";
 import { ReturnsPage } from "@/pages/returns/ReturnsPage";
 import { SettingsPage } from "@/pages/settings/SettingsPage";
@@ -50,6 +51,7 @@ export default function App() {
                   <Route index element={<InvoicesPage />} />
                   <Route path="returns" element={<ReturnsPage />} />
                   <Route path="claims" element={<ClaimsPage />} />
+                  <Route path="products" element={<ProductSalesPage />} />
                 </Route>
                 <Route path={routes.invoices} element={<Navigate to={routes.sales} replace />} />
                 <Route path={routes.credit} element={<CreditSalesPage />} />
@@ -63,7 +65,7 @@ export default function App() {
                   <Route path="categories" element={<CategoriesPage />} />
                   <Route path="transfers" element={<TransfersPage />} />
                   <Route path="low" element={<ProductsPage />} />
-                  <Route path="sold" element={<ProductsPage />} />
+                  <Route path="sold" element={<Navigate to={routes.products} replace />} />
                 </Route>
                 <Route path="/stock" element={<Navigate to={routes.products} replace />} />
                 <Route path="/lots" element={<Navigate to={routes.lots} replace />} />
