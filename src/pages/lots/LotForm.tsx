@@ -3,54 +3,47 @@ import { CheckCircle2, History } from "lucide-react";
 import {
   Button,
   Field,
-  MoneyInput,
   ProductSearch,
   SearchableSelect,
-  SelectInput,
   TextInput,
 } from "@/components/common";
-import { UnitQtyFields } from "@/pages/products/LotFields";
-import {
-  formatStockQty,
-  priceFromStock,
-  pricePerStock,
-  productSellUnits,
-  unitLabel,
-} from "@/pages/products/productQty";
-import { staffUsers } from "@/shared/domain/mock";
+import { LotUnitLines } from "@/pages/products/LotFields";
+import { productSellUnits } from "@/pages/products/productQty";
 import type { ProductLotRow, SupplierRow } from "@/shared/domain/types";
 import type { Product } from "@/shared/types";
 
 type ErrorField = "product" | "supplier" | "lot" | "quantity" | null;
-
-function numberValue(raw: string) {
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : 0;
-}
-
-function numberText(value: number) {
-  return value ? String(value) : "";
-}
 
 function focusableElements(root: HTMLElement) {
   return [...root.querySelectorAll<HTMLElement>("input:not([disabled]), select:not([disabled]), textarea:not([disabled])")]
     .filter((element) => element.offsetParent !== null);
 }
 
-function previousSupplierLot(lots: ProductLotRow[], lot: ProductLotRow) {
-  if (!lot.productId || !lot.supplierId) return null;
+function latestLot(
+  lots: ProductLotRow[],
+  lot: ProductLotRow,
+  match: (candidate: ProductLotRow) => boolean,
+) {
   return lots
-    .filter(
-      (candidate) =>
-        candidate.id !== lot.id &&
-        candidate.productId === lot.productId &&
-        candidate.supplierId === lot.supplierId,
-    )
+    .filter((candidate) => candidate.id !== lot.id && match(candidate))
     .slice()
     .sort(
       (a, b) =>
         b.receivedAt.localeCompare(a.receivedAt) || b.lotNumber.localeCompare(a.lotNumber),
     )[0] ?? null;
+}
+
+function previousSupplierLot(lots: ProductLotRow[], lot: ProductLotRow) {
+  if (!lot.productId || !lot.supplierId) return null;
+  return latestLot(
+    lots,
+    lot,
+    (candidate) => candidate.productId === lot.productId && candidate.supplierId === lot.supplierId,
+  );
+}
+
+function lastProductLot(lots: ProductLotRow[], lot: ProductLotRow, productId: string) {
+  return latestLot(lots, lot, (candidate) => candidate.productId === productId);
 }
 
 function productPrices(product: Product | undefined) {
@@ -95,12 +88,9 @@ export function LotForm({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<ErrorField>(null);
-  const [priceUnitId, setPriceUnitId] = useState("");
   const product = products.find((item) => item.id === lot.productId);
   const units = product ? productSellUnits(product) : [];
   const stockSymbol = product?.unit ?? "pc";
-  const unitKey = units.map((unit) => `${unit.id}:${unit.contains}`).join("|");
-  const priceUnit = units.find((unit) => unit.id === priceUnitId) ?? units.find((unit) => unit.symbol === stockSymbol) ?? units[0];
   const previous = useMemo(
     () => previousSupplierLot(lots, lot),
     [lot.id, lot.productId, lot.supplierId, lots],
@@ -116,9 +106,10 @@ export function LotForm({
       patch({ productId: "" });
       return;
     }
-    const candidate = { ...lot, productId: nextProduct.id };
+    const supplierId = lot.supplierId || lastProductLot(lots, lot, nextProduct.id)?.supplierId || "";
+    const candidate = { ...lot, productId: nextProduct.id, supplierId };
     const history = previousSupplierLot(lots, candidate);
-    patch({ productId: nextProduct.id, ...historicalPrices(history, nextProduct) });
+    patch({ productId: nextProduct.id, supplierId, ...historicalPrices(history, nextProduct) });
   }
 
   function applySupplier(supplierId: string) {
@@ -130,24 +121,6 @@ export function LotForm({
   function createSupplier(name: string) {
     applySupplier(onCreateSupplier(name));
   }
-
-  function displayedPrice(value: number) {
-    return priceUnit ? priceFromStock(units, stockSymbol, value, priceUnit) : value;
-  }
-
-  function stockPrice(value: number) {
-    return priceUnit ? pricePerStock(units, stockSymbol, value, priceUnit) : value;
-  }
-
-  useEffect(() => {
-    if (!units.length) {
-      setPriceUnitId("");
-      return;
-    }
-    if (!units.some((unit) => unit.id === priceUnitId)) {
-      setPriceUnitId(units.find((unit) => unit.symbol === stockSymbol)?.id ?? units[0].id);
-    }
-  }, [lot.productId, priceUnitId, stockSymbol, unitKey]);
 
   function save() {
     if (!lot.productId) {
@@ -170,7 +143,12 @@ export function LotForm({
       rootRef.current?.querySelector<HTMLElement>(".lot-quantity input")?.focus();
       return;
     }
-    onSave(lot);
+    onSave({
+      ...lot,
+      receivedAt: lot.receivedAt || new Date().toISOString().slice(0, 10),
+      expiryDate: null,
+      createdBy: lot.createdBy || "u1",
+    });
   }
 
   useEffect(() => {
@@ -212,7 +190,7 @@ export function LotForm({
 
   return (
     <div ref={rootRef} className="lot-form flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="lot-form-pane grid min-h-0 flex-1 content-start gap-3 overflow-hidden px-4 py-3">
+      <div className="lot-form-pane grid min-h-0 flex-1 content-start gap-3 overflow-y-auto overflow-x-hidden px-4 py-3">
         <Field
           label="Product"
           error={error === "product" ? "Select a product" : undefined}
@@ -255,72 +233,30 @@ export function LotForm({
           </Field>
         </div>
 
-        <section className="grid gap-3 rounded-xl border border-line bg-[#f8fafc] p-3">
-          <div className="flex min-h-5 items-center justify-between gap-3">
-            <strong className="text-[12px] font-bold text-ink">Units &amp; prices</strong>
-            {previous ? (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-accent-deep">
-                <History size={12} /> From {previous.lotNumber} · {previous.receivedAt}
-              </span>
-            ) : product ? (
-              <span className="inline-flex items-center gap-1 text-[10px] text-muted">
-                <CheckCircle2 size={12} /> Current product prices
-              </span>
-            ) : null}
-          </div>
-          {product && priceUnit ? (
-            <div className="grid grid-cols-[minmax(0,1fr)_130px] gap-3">
-              <Field label="Product unit">
-                <SelectInput value={priceUnit.id} onChange={(event) => setPriceUnitId(event.target.value)}>
-                  {units.map((unit) => (
-                    <option key={unit.id} value={unit.id}>
-                      {unit.name || unitLabel(unit.symbol || stockSymbol)}
-                    </option>
-                  ))}
-                </SelectInput>
-              </Field>
-              <Field label="Contains">
-                <TextInput disabled value={formatStockQty(priceUnit.contains || 1)} />
-              </Field>
-            </div>
-          ) : null}
-          <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-            <Field label="Cost">
-              <MoneyInput
-                value={numberText(displayedPrice(lot.purchasePrice))}
-                onChange={(event) => patch({ purchasePrice: stockPrice(numberValue(event.target.value)) })}
-              />
-            </Field>
-            <Field label="Minimum">
-              <MoneyInput
-                value={numberText(displayedPrice(lot.minimumPrice))}
-                onChange={(event) => patch({ minimumPrice: stockPrice(numberValue(event.target.value)) })}
-              />
-            </Field>
-            <Field label="Wholesale">
-              <MoneyInput
-                value={numberText(displayedPrice(lot.wholesalePrice))}
-                onChange={(event) => patch({ wholesalePrice: stockPrice(numberValue(event.target.value)) })}
-              />
-            </Field>
-            <Field label="Retail">
-              <MoneyInput
-                value={numberText(displayedPrice(lot.retailPrice))}
-                onChange={(event) => patch({ retailPrice: stockPrice(numberValue(event.target.value)) })}
-              />
-            </Field>
-          </div>
-        </section>
-
         {product && units.length ? (
-          <div className="grid gap-3">
-            <div className={error === "quantity" ? "lot-quantity rounded-lg ring-2 ring-danger/20" : "lot-quantity"}>
-              <UnitQtyFields
-                label="Quantity received"
+          <section className="grid gap-3">
+            <div className="flex min-h-5 items-center justify-between gap-3">
+              <strong className="text-[12px] font-bold text-ink">Units &amp; prices</strong>
+              {previous ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-accent-deep">
+                  <History size={12} /> From {previous.lotNumber}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[10px] text-muted">
+                  <CheckCircle2 size={12} /> Current product prices
+                </span>
+              )}
+            </div>
+            <div className={error === "quantity" ? "lot-quantity" : undefined}>
+              <LotUnitLines
                 units={units}
                 stockSymbol={stockSymbol}
-                value={lot.originalQuantity}
-                onChange={(quantity) =>
+                seedKey={`${lot.productId}:${lot.supplierId}:${previous?.id ?? "catalog"}`}
+                received={lot.originalQuantity}
+                left={lot.remainingQuantity}
+                damaged={lot.damagedQuantity}
+                showLeft={!isNew}
+                onReceived={(quantity) =>
                   patch({
                     originalQuantity: quantity,
                     remainingQuantity: isNew
@@ -328,24 +264,8 @@ export function LotForm({
                       : lot.remainingQuantity,
                   })
                 }
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              {!isNew ? (
-                <UnitQtyFields
-                  label="Quantity left"
-                  units={units}
-                  stockSymbol={stockSymbol}
-                  value={lot.remainingQuantity}
-                  onChange={(quantity) => patch({ remainingQuantity: quantity })}
-                />
-              ) : <span />}
-              <UnitQtyFields
-                label="Damaged"
-                units={units}
-                stockSymbol={stockSymbol}
-                value={lot.damagedQuantity}
-                onChange={(quantity) =>
+                onLeft={(quantity) => patch({ remainingQuantity: quantity })}
+                onDamaged={(quantity) =>
                   patch({
                     damagedQuantity: quantity,
                     remainingQuantity: isNew
@@ -353,37 +273,20 @@ export function LotForm({
                       : lot.remainingQuantity,
                   })
                 }
+                cost={lot.purchasePrice}
+                min={lot.minimumPrice}
+                wholesale={lot.wholesalePrice}
+                retail={lot.retailPrice}
+                onCost={(price) => patch({ purchasePrice: price })}
+                onMin={(price) => patch({ minimumPrice: price })}
+                onWholesale={(price) => patch({ wholesalePrice: price })}
+                onRetail={(price) => patch({ retailPrice: price })}
               />
             </div>
-          </div>
-        ) : null}
-
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Received date">
-            <TextInput
-              type="date"
-              value={lot.receivedAt}
-              onChange={(event) => patch({ receivedAt: event.target.value })}
-            />
-          </Field>
-          <Field label="Expiry date" hint="Optional">
-            <TextInput
-              type="date"
-              value={lot.expiryDate ?? ""}
-              onChange={(event) => patch({ expiryDate: event.target.value || null })}
-            />
-          </Field>
-          <Field label="Received by">
-            <SelectInput
-              value={lot.createdBy}
-              onChange={(event) => patch({ createdBy: event.target.value })}
-            >
-              {staffUsers.map((user) => (
-                <option key={user.id} value={user.id}>{user.name}</option>
-              ))}
-            </SelectInput>
-          </Field>
-        </div>
+          </section>
+        ) : (
+          <p className="m-0 text-[11px] text-muted">Select a product to load units and prices.</p>
+        )}
       </div>
 
       <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line bg-paper px-4 py-2.5">

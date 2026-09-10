@@ -17,11 +17,13 @@ function PageSizeMenu({
   value,
   total,
   options = [...PAGE_SIZE_OPTIONS],
+  showAll = true,
   onChange,
 }: {
   value: number;
   total: number;
   options?: number[];
+  showAll?: boolean;
   onChange: (size: number) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -38,7 +40,7 @@ function PageSizeMenu({
 
   const items = [
     ...options.map((n) => ({ value: n, label: String(n) })),
-    { value: PAGE_SIZE_ALL, label: total ? `All (${total})` : "All" },
+    ...(showAll ? [{ value: PAGE_SIZE_ALL, label: total ? `All (${total})` : "All" }] : []),
   ];
 
   return (
@@ -85,6 +87,7 @@ export function Pagination({
   onPageSize,
   onChange,
   pageSizeOptions = [...PAGE_SIZE_OPTIONS],
+  showAll = true,
 }: {
   page: number;
   pages: number;
@@ -93,11 +96,13 @@ export function Pagination({
   onPageSize?: (size: number) => void;
   onChange: (page: number) => void;
   pageSizeOptions?: number[];
+  showAll?: boolean;
 }) {
   const totalPages = Math.max(pages, 1);
   const current = Math.min(Math.max(page, 1), totalPages);
   const hasPrev = current > 1;
   const hasNext = current < totalPages;
+  const showNavigation = totalPages > 1;
 
   function go(next: number) {
     onChange(Math.min(Math.max(1, next), totalPages));
@@ -113,6 +118,7 @@ export function Pagination({
               value={pageSize}
               total={total}
               options={pageSizeOptions}
+              showAll={showAll}
               onChange={(size) => {
                 onPageSize(size);
                 onChange(1);
@@ -125,7 +131,7 @@ export function Pagination({
         )}
       </div>
 
-      <div className="ui-page-btns [display:flex] [align-items:center] [gap:8px] [min-width:0]">
+      {showNavigation ? <div className="ui-page-btns [display:flex] [align-items:center] [gap:8px] [min-width:0]">
         <span className="ui-page-meta [font-size:12px] [color:var(--muted)] [white-space:nowrap]">
           Page {current} of {totalPages}
         </span>
@@ -167,7 +173,7 @@ export function Pagination({
             <ChevronsRight size={14} />
           </Button>
         </div>
-      </div>
+      </div> : null}
     </div>
   );
 }

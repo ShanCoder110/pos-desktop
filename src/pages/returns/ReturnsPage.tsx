@@ -13,34 +13,35 @@ import {
   Th,
 } from "@/components/common";
 import { useSalesHub } from "@/pages/sales/SalesLayout";
-import { returns as seed, customerName, invoiceNumber, lotNumber, productName } from "@/shared/domain/mock";
+import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import type { ReturnRow } from "@/shared/domain/types";
 import { money } from "@/utils/format";
 
-const PAGE = 10;
-
 export function ReturnsPage() {
-  const { sectionKpi } = useSalesHub();
+  const { sectionKpi, returns, invoices, products } = useSalesHub();
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<ReturnRow | null>(null);
+
+  const invoiceLabel = (id: string) => invoices.find((row) => row.id === id)?.invoiceNumber ?? id;
+  const productLabel = (id: string) => products.find((row) => row.id === id)?.name ?? id;
 
   useEffect(() => {
     setPage(1);
   }, [sectionKpi]);
 
   const rows = useMemo(() => {
-    return seed.filter((r) => {
-      const text = `${invoiceNumber(r.invoiceId)} ${customerName(r.customerId)} ${r.reason}`.toLowerCase();
+    return returns.filter((r) => {
+      const text = `${invoiceLabel(r.invoiceId)} ${r.customerId ?? ""} ${r.reason}`.toLowerCase();
       if (q && !text.includes(q.toLowerCase())) return false;
       if (sectionKpi === "refund") return r.type === "REFUND";
       if (sectionKpi === "replace") return r.type === "REPLACEMENT";
       return true;
     });
-  }, [q, sectionKpi]);
+  }, [returns, q, sectionKpi, invoices]);
 
-  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
-  const shown = rows.slice((page - 1) * PAGE, page * PAGE);
+  const pages = Math.max(1, Math.ceil(rows.length / DEFAULT_PAGE_SIZE));
+  const shown = rows.slice((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE);
 
   return (
     <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
@@ -64,8 +65,8 @@ export function ReturnsPage() {
           {shown.map((row) => (
             <tr key={row.id}>
               <Td>{row.createdAt}</Td>
-              <Td>{invoiceNumber(row.invoiceId)}</Td>
-              <Td>{customerName(row.customerId)}</Td>
+              <Td>{invoiceLabel(row.invoiceId)}</Td>
+              <Td>{row.customerId || "Walk-in"}</Td>
               <Td>
                 <Badge tone={row.type === "REFUND" ? "warn" : "info"}>{row.type}</Badge>
               </Td>
@@ -85,7 +86,7 @@ export function ReturnsPage() {
         {open ? (
           <div className="ui-stack [display:grid] [gap:12px]">
             <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">{open.notes}</p>
-            <p className="ui-page-title [font-size:22px] [font-weight:800] [letter-spacing:-0.03em] [color:var(--ink)] [min-width:0]" style={{ fontSize: 14 }}>Coming back</p>
+            <p className="text-[14px] font-extrabold tracking-tight text-ink">Coming back</p>
             <Table>
               <THead>
                 <tr>
@@ -99,8 +100,8 @@ export function ReturnsPage() {
               <tbody>
                 {open.returnItems.map((item, i) => (
                   <tr key={i}>
-                    <Td>{productName(item.productId)}</Td>
-                    <Td>{lotNumber(item.lotId)}</Td>
+                    <Td>{productLabel(item.productId)}</Td>
+                    <Td>{item.lotId || "—"}</Td>
                     <Td numeric>{item.baseQuantity}</Td>
                     <Td>
                       <Badge tone={item.condition === "GOOD" ? "ok" : item.condition === "DAMAGED" ? "danger" : "warn"}>
@@ -114,7 +115,7 @@ export function ReturnsPage() {
             </Table>
             {open.replacementItems.length ? (
               <>
-                <p className="ui-page-title [font-size:22px] [font-weight:800] [letter-spacing:-0.03em] [color:var(--ink)] [min-width:0]" style={{ fontSize: 14 }}>Given instead</p>
+                <p className="text-[14px] font-extrabold tracking-tight text-ink">Given instead</p>
                 <Table>
                   <THead>
                     <tr>
@@ -127,7 +128,7 @@ export function ReturnsPage() {
                   <tbody>
                     {open.replacementItems.map((item, i) => (
                       <tr key={i}>
-                        <Td>{productName(item.productId)}</Td>
+                        <Td>{productLabel(item.productId)}</Td>
                         <Td>{item.unitName}</Td>
                         <Td numeric>{item.quantity}</Td>
                         <Td numeric>{item.baseQuantity}</Td>

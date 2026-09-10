@@ -13,10 +13,8 @@ import {
   Toggle,
   toaster,
 } from "@/components/common";
-import { units as unitRows, suppliers, supplierName } from "@/shared/domain/mock";
-import { STORAGE_KEYS } from "@/shared/constants/config";
+import { STORAGE_KEYS, MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { PRODUCT_FORM_SECTIONS, type ProductFormSection } from "@/shared/constants/products";
-import { productCategories } from "@/shared/mock";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { warrantyDaysOf, money } from "@/utils/format";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
@@ -39,6 +37,7 @@ import {
   unitInStock,
   unitLabel,
 } from "@/pages/products/productQty";
+import { listMasterRecords } from "@/services/masters";
 
 type PriceKey = "cost" | "min" | "wholesale" | "price";
 
@@ -153,7 +152,42 @@ export function ProductForm({
   const unitPositions = useRef(new Map<string, DOMRect>());
   const changedUnitId = useRef<string | null>(null);
   const isNew = !catalog.some((r) => r.id === product.id);
-  const { lots, setLots } = useProductsHub();
+  const {
+    lots,
+    setLots,
+    categories: hubCategories,
+    units: hubUnits,
+    suppliers: hubSuppliers,
+  } = useProductsHub();
+  const [localCategories, setLocalCategories] = useState<{ id: string; name: string }[]>([]);
+  const [localUnits, setLocalUnits] = useState<{ id: string; name: string; symbol: string }[]>([]);
+  const [localSuppliers, setLocalSuppliers] = useState<{ id: string; name: string; isActive: boolean }[]>([]);
+  const categoryOptions = hubCategories.length
+    ? hubCategories.map((c) => c.name)
+    : localCategories.map((c) => c.name);
+  const unitRows = hubUnits.length ? hubUnits : localUnits;
+  const suppliers = hubSuppliers.length ? hubSuppliers : localSuppliers;
+  const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.name ?? "";
+
+  useEffect(() => {
+    if (hubCategories.length && hubUnits.length && hubSuppliers.length) return;
+    const controller = new AbortController();
+    void Promise.all([
+      listMasterRecords("categories", { perPage: MAX_PAGE_SIZE, isActive: true }, controller.signal)
+        .then((r) => setLocalCategories(r.data.map(({ id, name }) => ({ id, name }))))
+        .catch(() => undefined),
+      listMasterRecords("units", { perPage: MAX_PAGE_SIZE, isActive: true }, controller.signal)
+        .then((r) => setLocalUnits(r.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" }))))
+        .catch(() => undefined),
+      listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, controller.signal)
+        .then((r) =>
+          setLocalSuppliers(r.data.map(({ id, name, isActive }) => ({ id, name, isActive }))),
+        )
+        .catch(() => undefined),
+    ]);
+    return () => controller.abort();
+  }, [hubCategories.length, hubUnits.length, hubSuppliers.length]);
+
   const [lotDraft, setLotDraft] = useState(() => lots.filter((l) => l.productId === product.id));
   const [priceLotId, setPriceLotId] = useState("");
   const [lotOpened, setLotOpened] = useState<Record<string, number>>({});
@@ -171,7 +205,7 @@ export function ProductForm({
       name: supplierName(id) || id,
       lots: lotDraft.filter((l) => l.supplierId === id && l.remainingQuantity > 0).map((l) => l.lotNumber),
     }));
-  }, [lotDraft]);
+  }, [lotDraft, suppliers]);
   const openPriceLots = lotDraft.filter((l) => l.remainingQuantity > 0 || l.damagedQuantity > 0);
   const sellingLot = fifoLot(lotDraft);
   const queuedLots = fifoLots(lotDraft).slice(1);
@@ -545,7 +579,7 @@ export function ProductForm({
                 onChange={(v) => patch({ category: v })}
                 placeholder="Choose category"
                 searchPlaceholder="Type to search"
-                options={productCategories.map((c) => ({ value: c, label: c }))}
+                options={categoryOptions.map((c) => ({ value: c, label: c }))}
                 clearable={false}
               />
             </Field>
@@ -683,7 +717,6 @@ export function ProductForm({
                   <>
                     <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
                       <strong>{sellingLot.lotNumber} · FIFO selling now</strong>
-                      <span>Received {sellingLot.receivedAt}</span>
                     </p>
                     <div className="product-fifo-meta [display:grid] [grid-template-columns:1fr_1fr] [gap:10px_14px]">
                       <Field label="Current price">

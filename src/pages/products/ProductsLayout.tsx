@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import {
   AlertTriangle,
@@ -18,11 +18,15 @@ import {
 } from "lucide-react";
 import { KpiCard, TabSheet, Tabs } from "@/components/common";
 import { PRODUCT_SECTION_TABS, type ProductHealth } from "@/shared/constants/products";
-import { productLots as seedLots, productUnits, transfers, units } from "@/shared/domain/mock";
 import type { ProductLotRow } from "@/shared/domain/types";
-import { productCategories, products as catalog } from "@/shared/mock";
 import type { Product } from "@/shared/types";
 import { money } from "@/utils/format";
+import { ensureSession } from "@/services/auth";
+import { listAllProducts } from "@/services/products";
+import { listAllLots } from "@/services/lots";
+import { listAllTransfers } from "@/services/transfers";
+import { listMasterRecords } from "@/services/masters";
+import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 
 export type HubSection = "catalog" | "lots" | "units" | "categories" | "transfers" | "low";
 
@@ -52,6 +56,13 @@ type HubCtx = {
   setLots: Dispatch<SetStateAction<ProductLotRow[]>>;
   products: Product[];
   setProducts: Dispatch<SetStateAction<Product[]>>;
+  categories: { id: string; name: string }[];
+  units: { id: string; name: string; symbol: string }[];
+  suppliers: { id: string; name: string; isActive: boolean }[];
+  transfers: { id: string; status: string; items: unknown[] }[];
+  refreshHub: () => Promise<void>;
+  refreshLots: () => Promise<void>;
+  refreshProducts: () => Promise<void>;
 };
 
 const ProductsHubContext = createContext<HubCtx>({
@@ -64,6 +75,13 @@ const ProductsHubContext = createContext<HubCtx>({
   setLots: () => undefined,
   products: [],
   setProducts: () => undefined,
+  categories: [],
+  units: [],
+  suppliers: [],
+  transfers: [],
+  refreshHub: async () => undefined,
+  refreshLots: async () => undefined,
+  refreshProducts: async () => undefined,
 });
 
 export function useProductsHub() {
@@ -118,9 +136,10 @@ function LotsKpis() {
 }
 
 function UnitsKpis() {
-  const { sectionKpi, setSectionKpi } = useProductsHub();
+  const { sectionKpi, setSectionKpi, units, products } = useProductsHub();
   const packs = units.filter((u) => u.symbol === "pk" || u.symbol === "box").length;
-  const defaults = productUnits.filter((u) => u.isDefault).length;
+  const sellUnits = products.reduce((n, p) => n + (p.sellUnits?.length ?? 0), 0);
+  const defaults = products.filter((p) => p.sellUnits?.some((u) => u.kind === "base")).length;
 
   function toggle(id: string) {
     setSectionKpi(sectionKpi === id ? null : id);
@@ -129,7 +148,7 @@ function UnitsKpis() {
   return (
     <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
       <KpiCard label="Base units" value={units.length} hint="Stock unit" tone="ok" icon={<Ruler size={16} />} active={sectionKpi === null} onClick={() => setSectionKpi(null)} />
-      <KpiCard label="Sell units" value={productUnits.length} hint="POS sell options" tone="phantom" icon={<Package size={16} />} />
+      <KpiCard label="Sell units" value={sellUnits} hint="POS sell options" tone="phantom" icon={<Package size={16} />} />
       <KpiCard label="Packs" value={packs} hint="Conversion over 1" tone="warn" icon={<Box size={16} />} active={sectionKpi === "pack"} onClick={() => toggle("pack")} />
       <KpiCard label="Default" value={defaults} hint="Base sell unit" tone="ok" icon={<CheckCircle2 size={16} />} />
       <KpiCard label="Symbols" value={new Set(units.map((u) => u.symbol)).size} hint="Distinct" tone="stale" icon={<Ruler size={16} />} />
@@ -138,7 +157,7 @@ function UnitsKpis() {
 }
 
 function TransfersKpis() {
-  const { sectionKpi, setSectionKpi } = useProductsHub();
+  const { sectionKpi, setSectionKpi, transfers } = useProductsHub();
   const pending = transfers.filter((t) => t.status === "PENDING").length;
   const done = transfers.filter((t) => t.status === "COMPLETED").length;
   const cancelled = transfers.filter((t) => t.status === "CANCELLED").length;
@@ -160,12 +179,12 @@ function TransfersKpis() {
 }
 
 function CategoriesKpis() {
-  const { sectionKpi, setSectionKpi } = useProductsHub();
-  const used = productCategories.filter((name) => catalog.some((p) => p.category === name)).length;
-  const empty = productCategories.length - used;
-  const biggest = productCategories.reduce((best, name) => {
-    const n = catalog.filter((p) => p.category === name).length;
-    return n > best.count ? { name, count: n } : best;
+  const { sectionKpi, setSectionKpi, categories, products } = useProductsHub();
+  const used = categories.filter((cat) => products.some((p) => p.category === cat.name)).length;
+  const empty = categories.length - used;
+  const biggest = categories.reduce((best, cat) => {
+    const n = products.filter((p) => p.category === cat.name).length;
+    return n > best.count ? { name: cat.name, count: n } : best;
   }, { name: "—", count: 0 });
 
   function toggle(id: string) {
@@ -174,10 +193,10 @@ function CategoriesKpis() {
 
   return (
     <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
-      <KpiCard label="Categories" value={productCategories.length} hint="Catalog groups" tone="ok" icon={<Tags size={16} />} active={sectionKpi === null} onClick={() => setSectionKpi(null)} />
+      <KpiCard label="Categories" value={categories.length} hint="Catalog groups" tone="ok" icon={<Tags size={16} />} active={sectionKpi === null} onClick={() => setSectionKpi(null)} />
       <KpiCard label="In use" value={used} hint="Have products" tone="phantom" icon={<Package size={16} />} active={sectionKpi === "used"} onClick={() => toggle("used")} />
       <KpiCard label="Empty" value={empty} hint="No products yet" tone="stale" icon={<Box size={16} />} active={sectionKpi === "empty"} onClick={() => toggle("empty")} />
-      <KpiCard label="Products" value={catalog.length} hint="Assigned SKUs" tone="ok" icon={<Package size={16} />} />
+      <KpiCard label="Products" value={products.length} hint="Assigned SKUs" tone="ok" icon={<Package size={16} />} />
       <KpiCard label="Largest" value={biggest.count} hint={biggest.name} tone="warn" icon={<Layers size={16} />} />
     </div>
   );
@@ -224,17 +243,79 @@ export function ProductsLayout() {
   const [actions, setActions] = useState<ReactNode>(null);
   const [health, setHealth] = useState<ProductHealth | null>(null);
   const [sectionKpi, setSectionKpi] = useState<string | null>(null);
-  const [lots, setLots] = useState(seedLots);
-  const [products, setProducts] = useState(catalog);
+  const [lots, setLots] = useState<ProductLotRow[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [units, setUnits] = useState<{ id: string; name: string; symbol: string }[]>([]);
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string; isActive: boolean }[]>([]);
+  const [transfers, setTransfers] = useState<{ id: string; status: string; items: unknown[] }[]>([]);
+
+  const refreshProducts = useCallback(async (signal?: AbortSignal) => {
+    const records = await listAllProducts(signal);
+    setProducts(records);
+  }, []);
+
+  const refreshLots = useCallback(async (signal?: AbortSignal) => {
+    const records = await listAllLots(signal);
+    setLots(records);
+  }, []);
+
+  const refreshHub = useCallback(async (signal?: AbortSignal) => {
+    await ensureSession(signal);
+    const [productRows, lotRows, categoryRows, unitRows, supplierRows, transferRows] = await Promise.all([
+      listAllProducts(signal).catch(() => [] as Product[]),
+      listAllLots(signal).catch(() => [] as ProductLotRow[]),
+      listMasterRecords("categories", { perPage: MAX_PAGE_SIZE, isActive: true }, signal)
+        .then((r) => r.data.map(({ id, name }) => ({ id, name })))
+        .catch(() => [] as { id: string; name: string }[]),
+      listMasterRecords("units", { perPage: MAX_PAGE_SIZE, isActive: true }, signal)
+        .then((r) => r.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" })))
+        .catch(() => [] as { id: string; name: string; symbol: string }[]),
+      listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, signal)
+        .then((r) => r.data.map(({ id, name, isActive }) => ({ id, name, isActive })))
+        .catch(() => [] as { id: string; name: string; isActive: boolean }[]),
+      listAllTransfers(signal).catch(() => []),
+    ]);
+    setProducts(productRows);
+    setLots(lotRows);
+    setCategories(categoryRows);
+    setUnits(unitRows);
+    setSuppliers(supplierRows);
+    setTransfers(transferRows.map((t) => ({ id: t.id, status: t.status, items: t.items })));
+  }, []);
+
   const ctx = useMemo(
-    () => ({ setActions, health, setHealth, sectionKpi, setSectionKpi, lots, setLots, products, setProducts }),
-    [health, sectionKpi, lots, products],
+    () => ({
+      setActions,
+      health,
+      setHealth,
+      sectionKpi,
+      setSectionKpi,
+      lots,
+      setLots,
+      products,
+      setProducts,
+      categories,
+      units,
+      suppliers,
+      transfers,
+      refreshHub: () => refreshHub(),
+      refreshLots: () => refreshLots(),
+      refreshProducts: () => refreshProducts(),
+    }),
+    [health, sectionKpi, lots, products, categories, units, suppliers, transfers, refreshHub, refreshLots, refreshProducts],
   );
 
   useEffect(() => {
     setSectionKpi(null);
     setHealth(null);
   }, [pathname]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void refreshHub(controller.signal);
+    return () => controller.abort();
+  }, [refreshHub]);
 
   return (
     <ProductsHubContext.Provider value={ctx}>

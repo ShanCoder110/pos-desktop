@@ -17,15 +17,17 @@ import {
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
-import { catalog as seed, stockMovements, branchName, lotNumber, userName } from "@/shared/domain/mock";
-import type { CatalogProduct } from "@/shared/domain/types";
+import type { CatalogProduct, StockMovementRow } from "@/shared/domain/types";
 import { qty } from "@/utils/format";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import { STOCK_TABLE_COLUMNS } from "@/shared/constants/products";
-
+import { ensureSession } from "@/services/auth";
+import { listAllBranches, listAllUsers } from "@/services/org";
+import { listAllLots } from "@/services/lots";
+import { listAllStockMovements } from "@/services/stock";
 
 export function StockPage() {
-  const { sectionKpi } = useProductsHub();
+  const { sectionKpi, products } = useProductsHub();
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
@@ -34,10 +36,58 @@ export function StockPage() {
   const [view, setView] = useState<HubView>("table");
   const [selected, setSelected] = useState<string[]>([]);
   const [open, setOpen] = useState<CatalogProduct | null>(null);
+  const [moves, setMoves] = useState<StockMovementRow[]>([]);
+  const [branchNames, setBranchNames] = useState<Record<string, string>>({});
+  const [userNames, setUserNames] = useState<Record<string, string>>({});
+  const [lotNumbers, setLotNumbers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setPage(1);
   }, [sectionKpi]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await ensureSession(controller.signal);
+      const [branches, users, lots] = await Promise.all([
+        listAllBranches(controller.signal).catch(() => []),
+        listAllUsers(controller.signal).catch(() => []),
+        listAllLots(controller.signal).catch(() => []),
+      ]);
+      setBranchNames(Object.fromEntries(branches.map((b) => [b.id, b.name])));
+      setUserNames(Object.fromEntries(users.map((u) => [u.id, u.name])));
+      setLotNumbers(Object.fromEntries(lots.map((l) => [l.id, l.lotNumber])));
+    })();
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      setMoves([]);
+      return;
+    }
+    const controller = new AbortController();
+    void listAllStockMovements({ productId: open.id }, controller.signal)
+      .then(setMoves)
+      .catch(() => setMoves([]));
+    return () => controller.abort();
+  }, [open]);
+
+  const seed = useMemo<CatalogProduct[]>(
+    () =>
+      products.map((p) => ({
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        barcode: p.barcode ?? "",
+        category: p.category,
+        baseUnit: p.unit,
+        minimumStock: p.minimumStock ?? 20,
+        isManufactured: Boolean(p.isManufactured),
+        onHand: p.stock,
+      })),
+    [products],
+  );
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -53,14 +103,13 @@ export function StockPage() {
       if (status === "Zero") return r.onHand <= 0;
       return true;
     });
-  }, [q, chips, sectionKpi]);
+  }, [q, chips, sectionKpi, seed]);
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(rows.length / pageSize));
   const shown = pageSize === PAGE_SIZE_ALL ? rows : rows.slice((page - 1) * pageSize, page * pageSize);
   const chartData = rows
     .map((row) => ({ id: row.id, label: row.name, value: row.onHand }))
     .sort((a, b) => b.value - a.value);
-  const moves = open ? stockMovements.filter((m) => m.productId === open.id) : [];
   const show = (id: string) => cols.includes(id);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
@@ -193,9 +242,9 @@ export function StockPage() {
                       <Badge tone={m.quantity < 0 ? "danger" : "ok"}>{m.type}</Badge>
                     </Td>
                     <Td numeric>{m.quantity}</Td>
-                    <Td>{lotNumber(m.productLotId)}</Td>
-                    <Td>{branchName(m.branchId)}</Td>
-                    <Td>{userName(m.createdBy)}</Td>
+                    <Td>{(lotNumbers[m.productLotId] ?? m.productLotId) || "—"}</Td>
+                    <Td>{branchNames[m.branchId] ?? m.branchId}</Td>
+                    <Td>{userNames[m.createdBy] ?? m.createdBy}</Td>
                   </tr>
                 ))}
               </tbody>

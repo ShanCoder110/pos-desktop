@@ -81,11 +81,19 @@ export const catalog: CatalogProduct[] = [
 
 export const productUnits: ProductUnitRow[] = [
   { id: "pu1", productId: "p1", name: "Meter", conversionQuantity: 1, sellingPrice: 85, barcode: "89010001", isDefault: true },
-  { id: "pu2", productId: "p1", name: "90m Roll", conversionQuantity: 90, sellingPrice: 7200, barcode: "89019001", isDefault: false },
-  { id: "pu3", productId: "p5", name: "Piece", conversionQuantity: 1, sellingPrice: 80, barcode: "89010005", isDefault: true },
-  { id: "pu4", productId: "p5", name: "Pack of 12", conversionQuantity: 12, sellingPrice: 900, barcode: "89011205", isDefault: false },
-  { id: "pu5", productId: "p4", name: "Piece", conversionQuantity: 1, sellingPrice: 280, barcode: "89010004", isDefault: true },
-  { id: "pu6", productId: "p4", name: "Box of 100", conversionQuantity: 100, sellingPrice: 25000, barcode: "89010400", isDefault: false },
+  { id: "pu2", productId: "p1", name: "Pack", conversionQuantity: 90, sellingPrice: 7650, barcode: "89019001", isDefault: false },
+  { id: "pu3", productId: "p1", name: "Gaz", conversionQuantity: 0.9, sellingPrice: 76.5, barcode: "", isDefault: false },
+  { id: "pu4", productId: "p2", name: "Meter", conversionQuantity: 1, sellingPrice: 130, barcode: "89010002", isDefault: true },
+  { id: "pu5", productId: "p2", name: "Pack", conversionQuantity: 90, sellingPrice: 11700, barcode: "89019002", isDefault: false },
+  { id: "pu6", productId: "p2", name: "Gaz", conversionQuantity: 0.9, sellingPrice: 117, barcode: "", isDefault: false },
+  { id: "pu7", productId: "p3", name: "Piece", conversionQuantity: 1, sellingPrice: 5400, barcode: "89010003", isDefault: true },
+  { id: "pu8", productId: "p4", name: "Piece", conversionQuantity: 1, sellingPrice: 280, barcode: "89010004", isDefault: true },
+  { id: "pu9", productId: "p4", name: "Box of 100", conversionQuantity: 100, sellingPrice: 25000, barcode: "89010400", isDefault: false },
+  { id: "pu10", productId: "p5", name: "Piece", conversionQuantity: 1, sellingPrice: 80, barcode: "89010005", isDefault: true },
+  { id: "pu11", productId: "p5", name: "Pack of 12", conversionQuantity: 12, sellingPrice: 900, barcode: "89011205", isDefault: false },
+  { id: "pu12", productId: "p6", name: "Piece", conversionQuantity: 1, sellingPrice: 120, barcode: "89010006", isDefault: true },
+  { id: "pu13", productId: "p7", name: "Piece", conversionQuantity: 1, sellingPrice: 1150, barcode: "89010007", isDefault: true },
+  { id: "pu14", productId: "p8", name: "Piece", conversionQuantity: 1, sellingPrice: 70, barcode: "89010008", isDefault: true },
 ];
 
 export const suppliers: SupplierRow[] = [
@@ -96,12 +104,19 @@ export const suppliers: SupplierRow[] = [
 ];
 
 export const productLots: ProductLotRow[] = [
+  { id: "lot10", productId: "p1", supplierId: "s1", lotNumber: "L-2388", purchasePrice: 52, minimumPrice: 60, wholesalePrice: 64, retailPrice: 75, originalQuantity: 90, remainingQuantity: 0, damagedQuantity: 0, receivedAt: "2026-03-08", expiryDate: null, createdBy: "u1" },
+  { id: "lot11", productId: "p1", supplierId: "s1", lotNumber: "L-2395", purchasePrice: 55, minimumPrice: 62, wholesalePrice: 66, retailPrice: 78, originalQuantity: 90, remainingQuantity: 0, damagedQuantity: 0, receivedAt: "2026-04-12", expiryDate: null, createdBy: "u1" },
   { id: "lot1", productId: "p1", supplierId: "s1", lotNumber: "L-2401", purchasePrice: 62, minimumPrice: 70, wholesalePrice: 74, retailPrice: 85, originalQuantity: 90, remainingQuantity: 2, damagedQuantity: 0, receivedAt: "2026-06-02", expiryDate: null, createdBy: "u1" },
   { id: "lot2", productId: "p1", supplierId: "s2", lotNumber: "L-2408", purchasePrice: 58, minimumPrice: 70, wholesalePrice: 74, retailPrice: 85, originalQuantity: 90, remainingQuantity: 40, damagedQuantity: 0, receivedAt: "2026-08-01", expiryDate: null, createdBy: "u3" },
+  { id: "lot12", productId: "p1", supplierId: "s2", lotNumber: "L-2416", purchasePrice: 67, minimumPrice: 74, wholesalePrice: 78, retailPrice: 90, originalQuantity: 90, remainingQuantity: 0, damagedQuantity: 0, receivedAt: "2026-08-22", expiryDate: null, createdBy: "u3" },
   { id: "lot3", productId: "p3", supplierId: "s3", lotNumber: "L-2410", purchasePrice: 4200, minimumPrice: 4600, wholesalePrice: 4900, retailPrice: 5400, originalQuantity: 12, remainingQuantity: 7, damagedQuantity: 0, receivedAt: "2026-08-04", expiryDate: null, createdBy: "u1" },
   { id: "lot4", productId: "p4", supplierId: "s3", lotNumber: "L-2411", purchasePrice: 180, minimumPrice: 210, wholesalePrice: 230, retailPrice: 280, originalQuantity: 100, remainingQuantity: 64, damagedQuantity: 0, receivedAt: "2026-08-06", expiryDate: "2028-08-06", createdBy: "u3" },
   { id: "lot5", productId: "p5", supplierId: "s1", lotNumber: "L-2412", purchasePrice: 45, minimumPrice: 55, wholesalePrice: 62, retailPrice: 80, originalQuantity: 200, remainingQuantity: 120, damagedQuantity: 0, receivedAt: "2026-08-08", expiryDate: null, createdBy: "u2" },
   { id: "lot6", productId: "p8", supplierId: "s1", lotNumber: "L-2390", purchasePrice: 40, minimumPrice: 50, wholesalePrice: 55, retailPrice: 70, originalQuantity: 48, remainingQuantity: 0, damagedQuantity: 4, receivedAt: "2026-05-12", expiryDate: null, createdBy: "u1" },
+  { id: "lot13", productId: "p2", supplierId: "s2", lotNumber: "L-2380", purchasePrice: 88, minimumPrice: 100, wholesalePrice: 108, retailPrice: 120, originalQuantity: 90, remainingQuantity: 0, damagedQuantity: 0, receivedAt: "2026-05-01", expiryDate: null, createdBy: "u3" },
+  { id: "lot7", productId: "p2", supplierId: "s2", lotNumber: "L-2413", purchasePrice: 95, minimumPrice: 108, wholesalePrice: 115, retailPrice: 130, originalQuantity: 90, remainingQuantity: 18, damagedQuantity: 0, receivedAt: "2026-08-01", expiryDate: null, createdBy: "u3" },
+  { id: "lot8", productId: "p6", supplierId: "s1", lotNumber: "L-2414", purchasePrice: 70, minimumPrice: 85, wholesalePrice: 95, retailPrice: 120, originalQuantity: 100, remainingQuantity: 86, damagedQuantity: 0, receivedAt: "2026-08-08", expiryDate: null, createdBy: "u1" },
+  { id: "lot9", productId: "p7", supplierId: "s1", lotNumber: "L-2415", purchasePrice: 780, minimumPrice: 890, wholesalePrice: 950, retailPrice: 1150, originalQuantity: 15, remainingQuantity: 11, damagedQuantity: 0, receivedAt: "2026-07-28", expiryDate: null, createdBy: "u1" },
 ];
 
 export const branchLots: BranchLotRow[] = [

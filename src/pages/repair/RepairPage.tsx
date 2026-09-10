@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Eye } from "lucide-react";
 import {
   Badge,
@@ -16,11 +16,13 @@ import {
   THead,
   Th,
 } from "@/components/common";
-import { productions as seed, bom, branchName, lotNumber, productName, userName } from "@/shared/domain/mock";
 import type { ProductionRow, ProductionStatus } from "@/shared/domain/types";
+import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import { ensureSession } from "@/services/auth";
+import { listAllBranches, listAllUsers } from "@/services/org";
+import { listAllProducts } from "@/services/products";
+import { listAllProduction } from "@/services/production";
 import { money } from "@/utils/format";
-
-const PAGE = 10;
 
 function tone(s: ProductionStatus) {
   if (s === "COMPLETED") return "ok" as const;
@@ -34,6 +36,32 @@ export function RepairPage() {
   const [tab, setTab] = useState("all");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<ProductionRow | null>(null);
+  const [seed, setSeed] = useState<ProductionRow[]>([]);
+  const [productNames, setProductNames] = useState<Record<string, string>>({});
+  const [branchNames, setBranchNames] = useState<Record<string, string>>({});
+  const [userNames, setUserNames] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await ensureSession(controller.signal);
+      const [jobs, products, branches, users] = await Promise.all([
+        listAllProduction(controller.signal).catch(() => []),
+        listAllProducts(controller.signal).catch(() => []),
+        listAllBranches(controller.signal).catch(() => []),
+        listAllUsers(controller.signal).catch(() => []),
+      ]);
+      setSeed(jobs);
+      setProductNames(Object.fromEntries(products.map((p) => [p.id, p.name])));
+      setBranchNames(Object.fromEntries(branches.map((b) => [b.id, b.name])));
+      setUserNames(Object.fromEntries(users.map((u) => [u.id, u.name])));
+    })();
+    return () => controller.abort();
+  }, []);
+
+  const productName = (id: string) => productNames[id] ?? id;
+  const branchName = (id: string) => branchNames[id] ?? id;
+  const userName = (id: string) => userNames[id] ?? id;
 
   const rows = useMemo(() => {
     return seed.filter((r) => {
@@ -42,10 +70,10 @@ export function RepairPage() {
       if (tab !== "all") return r.status === tab.toUpperCase();
       return true;
     });
-  }, [q, tab]);
+  }, [q, tab, seed, productNames]);
 
-  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
-  const shown = rows.slice((page - 1) * PAGE, page * PAGE);
+  const pages = Math.max(1, Math.ceil(rows.length / DEFAULT_PAGE_SIZE));
+  const shown = rows.slice((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE);
 
   return (
     <div className="ui-stack [display:grid] [gap:12px]">
@@ -128,30 +156,7 @@ export function RepairPage() {
               <dt>Total</dt>
               <dd>{money(open.totalCost)}</dd>
             </dl>
-            <p className="ui-page-title [font-size:22px] [font-weight:800] [letter-spacing:-0.03em] [color:var(--ink)] [min-width:0]" style={{ fontSize: 14 }}>
-              Recipe (BOM)
-            </p>
-            <Table>
-              <THead>
-                <tr>
-                  <Th>Component</Th>
-                  <Th>Qty</Th>
-                  <Th>Unit</Th>
-                </tr>
-              </THead>
-              <tbody>
-                {bom.filter((b) => b.productId === open.productId).map((row) => (
-                  <tr key={row.id}>
-                    <Td>{productName(row.componentProductId)}</Td>
-                    <Td numeric>{row.quantity}</Td>
-                    <Td>{row.unit}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-            <p className="ui-page-title [font-size:22px] [font-weight:800] [letter-spacing:-0.03em] [color:var(--ink)] [min-width:0]" style={{ fontSize: 14 }}>
-              Consumed this job
-            </p>
+            <p className="text-[14px] font-extrabold tracking-tight text-ink">Consumed this job</p>
             <Table>
               <THead>
                 <tr>
@@ -166,7 +171,7 @@ export function RepairPage() {
                 {open.items.map((item, i) => (
                   <tr key={i}>
                     <Td>{productName(item.productId)}</Td>
-                    <Td>{lotNumber(item.lotId)}</Td>
+                    <Td>{item.lotId || "—"}</Td>
                     <Td numeric>{item.quantityUsed}</Td>
                     <Td numeric>{item.quantityDamaged}</Td>
                   </tr>

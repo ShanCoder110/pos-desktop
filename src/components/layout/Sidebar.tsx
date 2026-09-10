@@ -6,11 +6,13 @@ import { useMgmtLayout } from "@/components/layout/MgmtLayoutContext";
 import { useSession } from "@/shared/auth/session";
 import { managementNav } from "@/shared/constants/nav";
 import { routes } from "@/shared/constants/routes";
+import { useSettings } from "@/shared/settings";
 
 export function Sidebar() {
   const navigate = useNavigate();
   const { collapsed, toggle } = useMgmtLayout();
   const { logout } = useSession();
+  const { settings } = useSettings();
   const [menuOpen, setMenuOpen] = useState(false);
   const footRef = useRef<HTMLDivElement>(null);
 
@@ -28,7 +30,7 @@ export function Sidebar() {
         <div className="mgmt-brand [display:flex] [align-items:center] [gap:8px] [padding:0_4px] [min-width:0] [flex:1]">
           <img src={posMark} alt="" />
           <div className="mgmt-brand-copy [min-width:0] mgmt-label [overflow:hidden] [white-space:nowrap] [opacity:1] [max-width:150px] [transition:opacity_0.14s_ease,_max-width_0.2s_ease]">
-            <p className="mgmt-brand-name [font-size:12px] [font-weight:800] [letter-spacing:-0.02em] [color:#fff] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis]">POS</p>
+            <p className="mgmt-brand-name [font-size:12px] [font-weight:800] [letter-spacing:-0.02em] [color:#fff] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis]">{settings.shopName || "POS"}</p>
             <p className="mgmt-brand-tag [margin-top:1px] [font-size:9px] [font-weight:600] [color:#64748b] [letter-spacing:0.04em] [text-transform:uppercase]">Shop counter</p>
           </div>
         </div>

@@ -152,12 +152,97 @@ function a4Html(rows: Product[], shopName: string) {
 
 export function printProducts(rows: Product[], size: PrintSize, shopName: string) {
   const markup = size === "thermal" ? thermalHtml(rows, shopName) : a4Html(rows, shopName);
+  printHtml(markup, size === "thermal" ? "80mm" : "210mm");
+}
+
+export type ShopReportPdf = {
+  shopName: string;
+  rangeLabel: string;
+  kpis: { label: string; value: string }[];
+  invoices: { number: string; when: string; status: string; total: string; paid: string; credit: string }[];
+  products: { name: string; qty: string; revenue: string }[];
+  expenses: { when: string; description: string; amount: string }[];
+};
+
+export function exportReportPdf(report: ShopReportPdf) {
+  const kpi = report.kpis
+    .map((item) => `<div class="kpi"><span>${html(item.label)}</span><strong>${html(item.value)}</strong></div>`)
+    .join("");
+  const invoices = report.invoices.length
+    ? report.invoices
+        .map(
+          (row) =>
+            `<tr><td>${html(row.number)}<small>${html(row.when)}</small></td><td>${html(row.status)}</td><td class="num">${html(row.total)}</td><td class="num">${html(row.paid)}</td><td class="num">${html(row.credit)}</td></tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="5">No invoices in this range.</td></tr>`;
+  const products = report.products.length
+    ? report.products
+        .map((row) => `<tr><td>${html(row.name)}</td><td class="num">${html(row.qty)}</td><td class="num">${html(row.revenue)}</td></tr>`)
+        .join("")
+    : `<tr><td colspan="3">No product sales in this range.</td></tr>`;
+  const expenses = report.expenses.length
+    ? report.expenses
+        .map((row) => `<tr><td>${html(row.when)}</td><td>${html(row.description)}</td><td class="num">${html(row.amount)}</td></tr>`)
+        .join("")
+    : `<tr><td colspan="3">No expenses in this range.</td></tr>`;
+
+  const markup = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${html(report.shopName)} report</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #0f172a; font: 12px/1.4 Inter, system-ui, sans-serif; }
+    h1 { margin: 0; font-size: 20px; }
+    h2 { margin: 18px 0 8px; font-size: 13px; }
+    .meta { margin: 4px 0 14px; color: #64748b; font-size: 11px; }
+    .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+    .kpi { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; }
+    .kpi span { display: block; color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+    .kpi strong { display: block; margin-top: 4px; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }
+    th { font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    small { display: block; color: #64748b; font-size: 10px; }
+    thead { display: table-header-group; }
+    tr { break-inside: avoid; }
+  </style>
+</head>
+<body>
+  <h1>${html(report.shopName)}</h1>
+  <p class="meta">Shop report · ${html(report.rangeLabel)} · ${html(stamp())}</p>
+  <div class="kpis">${kpi}</div>
+  <h2>Invoices</h2>
+  <table>
+    <thead><tr><th>Invoice</th><th>Status</th><th>Total</th><th>Paid</th><th>Credit</th></tr></thead>
+    <tbody>${invoices}</tbody>
+  </table>
+  <h2>Top products</h2>
+  <table>
+    <thead><tr><th>Product</th><th>Qty</th><th>Revenue</th></tr></thead>
+    <tbody>${products}</tbody>
+  </table>
+  <h2>Expenses</h2>
+  <table>
+    <thead><tr><th>When</th><th>Description</th><th>Amount</th></tr></thead>
+    <tbody>${expenses}</tbody>
+  </table>
+</body>
+</html>`;
+  printHtml(markup, "210mm");
+}
+
+function printHtml(markup: string, width: string) {
   const frame = document.createElement("iframe");
   Object.assign(frame.style, {
     position: "fixed",
     left: "-10000px",
     top: "0",
-    width: size === "thermal" ? "80mm" : "210mm",
+    width,
     height: "100vh",
     border: "0",
   });

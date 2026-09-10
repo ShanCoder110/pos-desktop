@@ -1,14 +1,39 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge, EmptyRow, KpiCard, PageHead, Pagination, SearchInput, Table, TabSheet, Tabs, Td, THead, Th } from "@/components/common";
-import { moneyTxns as seed, branchName, userName } from "@/shared/domain/mock";
+import type { MoneyTxnRow } from "@/shared/domain/types";
 import { money } from "@/utils/format";
+import { ensureSession } from "@/services/auth";
+import { listAllTransactions } from "@/services/finance";
+import { listAllBranches, mapBranch } from "@/services/org";
 
 const PAGE = 10;
 
 export function TransactionsPage() {
+  const [seed, setSeed] = useState<MoneyTxnRow[]>([]);
+  const [branchNames, setBranchNames] = useState<Record<string, string>>({});
   const [q, setQ] = useState("");
   const [tab, setTab] = useState("all");
   const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await ensureSession(controller.signal);
+      const [txns, branches] = await Promise.all([
+        listAllTransactions(controller.signal).catch(() => [] as MoneyTxnRow[]),
+        listAllBranches(controller.signal)
+          .then((rows) => rows.map(mapBranch))
+          .catch(() => []),
+      ]);
+      setSeed(txns);
+      const map: Record<string, string> = {};
+      branches.forEach((b) => {
+        map[b.id] = b.name;
+      });
+      setBranchNames(map);
+    })();
+    return () => controller.abort();
+  }, []);
 
   const rows = useMemo(() => {
     return seed.filter((r) => {
@@ -18,7 +43,7 @@ export function TransactionsPage() {
       if (tab === "out") return r.direction === "OUT";
       return true;
     });
-  }, [q, tab]);
+  }, [seed, q, tab]);
 
   const pages = Math.max(1, Math.ceil(rows.length / PAGE));
   const shown = rows.slice((page - 1) * PAGE, page * PAGE);
@@ -79,9 +104,9 @@ export function TransactionsPage() {
               </Td>
               <Td>{row.paymentMethod}</Td>
               <Td numeric>{money(row.amount)}</Td>
-              <Td>{branchName(row.branchId)}</Td>
+              <Td>{branchNames[row.branchId] ?? row.branchId}</Td>
               <Td>{row.notes}</Td>
-              <Td>{userName(row.createdBy)}</Td>
+              <Td>{row.createdBy || "—"}</Td>
             </tr>
           ))}
         </tbody>

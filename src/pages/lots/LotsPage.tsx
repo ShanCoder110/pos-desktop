@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, TrendingUp, Trash2, X } from "lucide-react";
 import {
-  Badge,
   BulkAction,
   BulkActions,
   Button,
@@ -15,6 +14,7 @@ import {
   MenuItem,
   PAGE_SIZE_ALL,
   Pagination,
+  SearchableSelect,
   Table,
   Td,
   THead,
@@ -28,13 +28,15 @@ import type { FilterChip } from "@/components/common/FilterPicker";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { LotForm } from "@/pages/lots/LotForm";
 import { nextLotNumber, syncProductStock } from "@/pages/products/productLots";
-import { formatMixedQty, formatStockQty, unitLabel } from "@/pages/products/productQty";
+import { formatStockQty, priceBreakdown, qtyBreakdown } from "@/pages/products/productQty";
+import type { Product } from "@/shared/types";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
-import { suppliers as initialSuppliers, userName } from "@/shared/domain/mock";
-import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { LOT_TABLE_COLUMNS } from "@/shared/constants/products";
 import type { ProductLotRow, SupplierRow } from "@/shared/domain/types";
 import { money } from "@/utils/format";
+import { listMasterRecords, createMasterRecord } from "@/services/masters";
+import { receiveLot, receivePayloadFromLot } from "@/services/lots";
 
 
 function newLot(rows: ProductLotRow[]): ProductLotRow {
@@ -56,10 +58,61 @@ function newLot(rows: ProductLotRow[]): ProductLotRow {
   };
 }
 
+function LotQty({ product, qty, tone }: { product?: Product; qty: number; tone?: "ok" | "danger" }) {
+  const rows = product ? qtyBreakdown(product, qty) : [{ id: "qty", name: "", qty }];
+  return (
+    <div className="product-qty [display:grid] [gap:1px] [justify-items:end] [font-variant-numeric:tabular-nums]">
+      {rows.map((row) => (
+        <span
+          key={row.id || row.name}
+          style={tone ? { color: tone === "danger" ? "var(--danger)" : "var(--sale)" } : undefined}
+        >
+          {formatStockQty(row.qty)}
+          {row.name ? ` ${row.name}` : ""}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function shortDate(iso: string) {
+  const date = new Date(`${iso.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function signedMoney(value: number) {
+  if (!value) return money(0);
+  return `${value > 0 ? "+" : "−"}${money(Math.abs(value))}`;
+}
+
+function LotCost({ product, price }: { product?: Product; price: number }) {
+  if (!product) return money(price);
+  return (
+    <div className="product-unit-prices grid justify-items-end gap-1 [font-variant-numeric:tabular-nums]">
+      {priceBreakdown(product, price).map((row) => (
+        <span key={row.id} className="whitespace-nowrap">
+          {money(row.value)} <small className="font-medium text-muted">/ {row.name}</small>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function LotsPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { setActions, sectionKpi, lots: rows, setLots: setRows, products, setProducts } = useProductsHub();
+  const {
+    setActions,
+    sectionKpi,
+    lots: rows,
+    setLots: setRows,
+    products,
+    setProducts,
+    refreshHub,
+    refreshLots,
+    refreshProducts,
+  } = useProductsHub();
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
@@ -70,7 +123,39 @@ export function LotsPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<ProductLotRow | null>(null);
   const [remove, setRemove] = useState<ProductLotRow | null>(null);
-  const [supplierRows, setSupplierRows] = useState<SupplierRow[]>(() => initialSuppliers);
+  const [supplierRows, setSupplierRows] = useState<SupplierRow[]>([]);
+  const [apiSupplierIds, setApiSupplierIds] = useState<Set<string>>(() => new Set());
+  const [chartProductId, setChartProductId] = useState("");
+  const [chartLotId, setChartLotId] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, controller.signal)
+      .then((response) => {
+        setSupplierRows(
+          response.data.map((record) => ({
+            id: record.id,
+            name: record.name,
+            phone: record.phone ?? "",
+            email: record.email ?? "",
+            address: record.address ?? "",
+            notes: record.notes ?? "",
+            isActive: record.isActive,
+          })),
+        );
+        setApiSupplierIds(new Set(response.data.map((record) => record.id)));
+      })
+      .catch(() => {
+        setSupplierRows([]);
+        setApiSupplierIds(new Set());
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!chartProductId && products[0]) setChartProductId(products[0].id);
+  }, [products, chartProductId]);
 
   function newLotForProduct(productId: string) {
     const product = products.find((item) => item.id === productId);
@@ -95,13 +180,12 @@ export function LotsPage() {
     navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, location.state]);
 
+  useEffect(() => {
+    setChartLotId("");
+  }, [chartProductId]);
+
   function productOf(id: string) {
     return products.find((p) => p.id === id);
-  }
-
-  function mixedQty(productId: string, qty: number) {
-    const p = productOf(productId);
-    return p ? formatMixedQty(p, qty) : formatStockQty(qty);
   }
 
   function productLabel(id: string) {
@@ -136,18 +220,60 @@ export function LotsPage() {
     setProducts((prev) => productIds.reduce((acc, id) => syncProductStock(acc, nextLots, id), prev));
   }
 
-  function saveLot(lot: ProductLotRow) {
+  async function saveLot(lot: ProductLotRow) {
     const exists = rows.some((row) => row.id === lot.id);
+    if (!exists) {
+      if (saving) return;
+      setSaving(true);
+      try {
+        let supplierId = lot.supplierId;
+        if (supplierId && !apiSupplierIds.has(supplierId)) {
+          const local = supplierRows.find((row) => row.id === supplierId);
+          if (local) {
+            const created = await createMasterRecord("suppliers", {
+              name: local.name,
+              notes: local.notes || "Added while receiving stock",
+              isActive: true,
+            });
+            supplierId = created.id;
+            setApiSupplierIds((prev) => new Set([...prev, created.id]));
+            setSupplierRows((current) =>
+              current.map((row) =>
+                row.id === local.id
+                  ? {
+                      id: created.id,
+                      name: created.name,
+                      phone: created.phone ?? "",
+                      email: created.email ?? "",
+                      address: created.address ?? "",
+                      notes: created.notes ?? "",
+                      isActive: created.isActive,
+                    }
+                  : row,
+              ),
+            );
+          }
+        }
+        await receiveLot(receivePayloadFromLot({ ...lot, supplierId }));
+        await Promise.all([refreshLots(), refreshProducts()]);
+        toaster.success("Lot added");
+        setEdit(null);
+      } catch (error) {
+        toaster.error(error instanceof Error ? error.message : "Could not receive lot");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     const damagedQuantity = Math.min(Math.max(0, lot.damagedQuantity), lot.originalQuantity);
     const next = {
       ...lot,
       damagedQuantity,
-      remainingQuantity: exists
-        ? Math.max(0, Math.min(lot.remainingQuantity, lot.originalQuantity - damagedQuantity))
-        : Math.max(0, lot.originalQuantity - damagedQuantity),
+      remainingQuantity: Math.max(0, Math.min(lot.remainingQuantity, lot.originalQuantity - damagedQuantity)),
     };
     const previous = rows.find((row) => row.id === next.id);
-    const list = exists ? rows.map((row) => (row.id === next.id ? next : row)) : [...rows, next];
+    const list = rows.map((row) => (row.id === next.id ? next : row));
     writeLots(list, [...new Set([next.productId, previous?.productId].filter(Boolean) as string[])]);
     setProducts((current) =>
       current.map((product) => {
@@ -173,11 +299,13 @@ export function LotsPage() {
         };
       }),
     );
-    toaster.success(exists ? "Lot updated" : "Lot added");
+    toaster.success("Lot updated");
     setEdit(null);
+    void refreshHub();
   }
 
   function removeRow(row: ProductLotRow) {
+    // Backend has no lot delete; remove locally for UX then reload from API.
     if (row.remainingQuantity < row.originalQuantity) setRemove(row);
     else {
       writeLots(
@@ -185,6 +313,7 @@ export function LotsPage() {
         [row.productId],
       );
       setSelected((s) => s.filter((id) => id !== row.id));
+      void refreshLots();
     }
   }
 
@@ -230,13 +359,41 @@ export function LotsPage() {
     });
   }, [rows, q, chips, sectionKpi, products, supplierRows, dateRange]);
 
-  const chartData = useMemo(() => {
-    const grouped = new Map<string, number>();
-    filtered.forEach((row) => grouped.set(row.productId, (grouped.get(row.productId) ?? 0) + row.remainingQuantity * row.purchasePrice));
-    return [...grouped.entries()]
-      .map(([id, value]) => ({ id, label: productLabel(id), value }))
-      .sort((a, b) => b.value - a.value);
-  }, [filtered, products]);
+  const chartHistory = useMemo(() => {
+    const lots = filtered
+      .filter((lot) => lot.productId === chartProductId)
+      .slice()
+      .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt) || a.lotNumber.localeCompare(b.lotNumber));
+    return lots.map((lot, index) => {
+      const previous = lots[index - 1];
+      const change = previous ? lot.purchasePrice - previous.purchasePrice : 0;
+      return { lot, change, previous };
+    });
+  }, [filtered, chartProductId]);
+
+  const chartData = useMemo(
+    () =>
+      chartHistory.map(({ lot, change, previous }) => ({
+        id: lot.id,
+        label: lot.receivedAt,
+        value: lot.purchasePrice,
+        up: change > 0,
+        details: [
+          { label: "Lot", value: lot.lotNumber },
+          { label: "Supplier", value: supplierLabel(lot.supplierId) },
+          { label: "Cost", value: money(lot.purchasePrice) },
+          {
+            label: "Change",
+            value: previous ? `${signedMoney(change)} vs ${previous.lotNumber}` : "First lot",
+          },
+        ],
+      })),
+    [chartHistory, supplierRows],
+  );
+
+  const chartIncreases = chartHistory.filter((row) => row.change > 0);
+  const lastIncrease = chartIncreases[chartIncreases.length - 1];
+  const chartProduct = productOf(chartProductId);
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
   const shown = pageSize === PAGE_SIZE_ALL ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
@@ -278,6 +435,19 @@ export function LotsPage() {
               setDateRange(range);
               setPage(1);
             }}
+            insightControls={
+              view === "insights" ? (
+                <SearchableSelect
+                  className="w-[240px] [&_.ui-combo-field]:h-8 [&_.ui-combo-input]:text-[11px]"
+                  value={chartProductId}
+                  options={products.map((product) => ({ value: product.id, label: `${product.name} · ${product.sku}` }))}
+                  onChange={setChartProductId}
+                  placeholder="Choose product"
+                  searchPlaceholder="Search products"
+                  clearable={false}
+                />
+              ) : null
+            }
             trailing={
               selected.length > 0 ? (
                 <BulkActions count={selected.length}>
@@ -308,11 +478,71 @@ export function LotsPage() {
         body={
           view === "insights" ? (
             <HubChart
-              type="bar"
-              title="Stock value by product"
-              subtitle={`${filtered.length} lots after search, status, and date filters`}
+              type="line"
+              title={`${chartProduct?.name ?? "Product"} lot cost`}
+              subtitle={
+                lastIncrease
+                  ? `${chartHistory.length} lots · ${chartIncreases.length} increase${chartIncreases.length === 1 ? "" : "s"} · last up ${signedMoney(lastIncrease.change)} on ${shortDate(lastIncrease.lot.receivedAt)}`
+                  : `${chartHistory.length} lots in the selected dates · no price increase yet`
+              }
               data={chartData}
               formatValue={money}
+              selectedId={chartLotId}
+              onPointClick={(point) => setChartLotId(point.id ?? "")}
+              sidePanel={
+                chartProduct ? (
+                  <aside className="w-[320px] shrink-0 bg-bg/20 p-4">
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-accent-deep">Price history</span>
+                        <h3 className="mt-1 truncate text-[16px] font-extrabold text-ink">{chartProduct.name}</h3>
+                        <p className="mt-1 text-[10px] text-muted">{chartProduct.sku} · cost per {chartProduct.unit || "unit"}</p>
+                      </div>
+                      {chartLotId ? (
+                        <Button size="icon" variant="ghost" aria-label="Clear lot" onClick={() => setChartLotId("")}>
+                          <X size={15} />
+                        </Button>
+                      ) : null}
+                    </div>
+                    {chartIncreases.length ? (
+                      <div className="mb-3 flex items-center gap-2 rounded-lg border border-line bg-paper px-2.5 py-2 text-[10px]">
+                        <TrendingUp size={14} style={{ color: "var(--danger)" }} />
+                        <span className="text-muted">
+                          {chartIncreases.map((row) => `${row.lot.lotNumber} ${shortDate(row.lot.receivedAt)} ${signedMoney(row.change)}`).join(" · ")}
+                        </span>
+                      </div>
+                    ) : null}
+                    <div className="grid gap-2">
+                      {chartHistory.length === 0 ? (
+                        <p className="m-0 text-[11px] text-muted">No lots for this product in the current filters.</p>
+                      ) : (
+                        chartHistory.map(({ lot, change, previous }) => {
+                          const active = chartLotId === lot.id;
+                          return (
+                            <button
+                              key={lot.id}
+                              type="button"
+                              className={`grid gap-1 rounded-lg border p-2.5 text-left ${active ? "border-accent bg-accent-bg/70" : "border-line bg-paper"}`}
+                              onClick={() => setChartLotId(lot.id)}
+                            >
+                              <span className="flex items-center justify-between gap-3">
+                                <strong className="text-[11px] text-ink">{lot.lotNumber}</strong>
+                                <b className="text-[11px] tabular-nums text-ink">{money(lot.purchasePrice)}</b>
+                              </span>
+                              <span className="flex items-center justify-between gap-3 text-[10px] text-muted">
+                                <span>{shortDate(lot.receivedAt)} · {supplierLabel(lot.supplierId)}</span>
+                                <span style={{ color: change > 0 ? "var(--danger)" : change < 0 ? "var(--sale)" : undefined, fontWeight: change > 0 ? 700 : undefined }}>
+                                  {previous ? signedMoney(change) : "Opening"}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </aside>
+                ) : undefined
+              }
             />
           ) : undefined
         }
@@ -344,12 +574,10 @@ export function LotsPage() {
             <Th>Lot</Th>
             {show("product") ? <Th>Product</Th> : null}
             {show("supplier") ? <Th>Supplier</Th> : null}
-            {show("received") ? <Th>Received</Th> : null}
             {show("cost") ? <Th>Cost</Th> : null}
             {show("original") ? <Th>Original</Th> : null}
             {show("left") ? <Th>Left</Th> : null}
             {show("damaged") ? <Th>Damaged</Th> : null}
-            {show("by") ? <Th>By</Th> : null}
             <Th>Actions</Th>
           </tr>
         </THead>
@@ -368,20 +596,30 @@ export function LotsPage() {
               <Td>{row.lotNumber}</Td>
               {show("product") ? <Td>{productLabel(row.productId)}</Td> : null}
               {show("supplier") ? <Td>{supplierLabel(row.supplierId)}</Td> : null}
-              {show("received") ? <Td>{row.receivedAt}</Td> : null}
               {show("cost") ? (
                 <Td numeric>
-                  {money(row.purchasePrice)}/{unitLabel(productOf(row.productId)?.unit ?? "")}
+                  <LotCost product={productOf(row.productId)} price={row.purchasePrice} />
                 </Td>
               ) : null}
-              {show("original") ? <Td numeric>{mixedQty(row.productId, row.originalQuantity)}</Td> : null}
+              {show("original") ? (
+                <Td numeric>
+                  <LotQty product={productOf(row.productId)} qty={row.originalQuantity} />
+                </Td>
+              ) : null}
               {show("left") ? (
                 <Td numeric>
-                  <Badge tone={row.remainingQuantity <= 0 ? "danger" : "ok"}>{mixedQty(row.productId, row.remainingQuantity)}</Badge>
+                  <LotQty
+                    product={productOf(row.productId)}
+                    qty={row.remainingQuantity}
+                    tone={row.remainingQuantity <= 0 ? "danger" : "ok"}
+                  />
                 </Td>
               ) : null}
-              {show("damaged") ? <Td numeric>{mixedQty(row.productId, row.damagedQuantity)}</Td> : null}
-              {show("by") ? <Td>{userName(row.createdBy)}</Td> : null}
+              {show("damaged") ? (
+                <Td numeric>
+                  <LotQty product={productOf(row.productId)} qty={row.damagedQuantity} />
+                </Td>
+              ) : null}
               <Td>
                 <Menu>
                   <MenuItem icon={<Pencil size={14} />} onClick={() => setEdit(row)}>
@@ -399,10 +637,9 @@ export function LotsPage() {
 
       <Drawer
         open={Boolean(edit)}
-        wide
+        size="xl"
         form
         dim={false}
-        className="is-lot"
         title={edit && rows.some((row) => row.id === edit.id) ? "Edit lot" : "Add lot"}
         subtitle={
           <p className="m-0 text-[10px] text-muted">

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import {
   Badge,
@@ -16,8 +16,9 @@ import {
   Toggle,
   SelectInput,
 } from "@/components/common";
-import { branches as seed, branchSettings } from "@/shared/domain/mock";
-import type { Branch, BranchType } from "@/shared/domain/types";
+import type { Branch, BranchSetting, BranchType } from "@/shared/domain/types";
+import { ensureSession } from "@/services/auth";
+import { listAllBranches, mapBranch, mapBranchSetting } from "@/services/org";
 
 function typeTone(t: BranchType) {
   if (t === "STORE") return "ok" as const;
@@ -27,13 +28,31 @@ function typeTone(t: BranchType) {
 }
 
 export function ShopsPage() {
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [settings, setSettings] = useState<BranchSetting[]>([]);
   const [open, setOpen] = useState<Branch | null>(null);
-  const setting = (id: string) => branchSettings.find((s) => s.branchId === id);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await ensureSession(controller.signal);
+      const rows = await listAllBranches(controller.signal).catch(() => []);
+      setBranches(rows.map(mapBranch));
+      setSettings(rows.map(mapBranchSetting).filter((s): s is BranchSetting => s !== null));
+    })();
+    return () => controller.abort();
+  }, []);
+
+  const setting = useMemo(() => {
+    const map = new Map<string, BranchSetting>();
+    settings.forEach((s) => map.set(s.branchId, s));
+    return (id: string) => map.get(id);
+  }, [settings]);
 
   return (
     <div className="ui-stack [display:grid] [gap:12px]">
       <PageHead title="Branches">
-        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(seed[0])}>
+        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(branches[0] ?? null)}>
           Add branch
         </Button>
       </PageHead>
@@ -41,9 +60,9 @@ export function ShopsPage() {
         STORE sells. WAREHOUSE holds bulk lots. REPAIR and PRODUCTION consume components. BranchSetting controls lot tracking and negative stock per location.
       </p>
       <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
-        <KpiCard label="Active" value={seed.filter((b) => b.isActive).length} hint="In use" tone="ok" />
-        <KpiCard label="Stores" value={seed.filter((b) => b.type === "STORE").length} hint="POS counters" tone="ok" />
-        <KpiCard label="Lot tracking" value={branchSettings.filter((s) => s.branchLotEnabled).length} hint="BranchLot rows" tone="warn" />
+        <KpiCard label="Active" value={branches.filter((b) => b.isActive).length} hint="In use" tone="ok" />
+        <KpiCard label="Stores" value={branches.filter((b) => b.type === "STORE").length} hint="POS counters" tone="ok" />
+        <KpiCard label="Lot tracking" value={settings.filter((s) => s.branchLotEnabled).length} hint="BranchLot rows" tone="warn" />
       </div>
       <Table>
         <THead>
@@ -59,8 +78,8 @@ export function ShopsPage() {
           </tr>
         </THead>
         <tbody>
-          {seed.length === 0 ? <EmptyRow cols={8} /> : null}
-          {seed.map((row) => {
+          {branches.length === 0 ? <EmptyRow cols={8} /> : null}
+          {branches.map((row) => {
             const s = setting(row.id);
             return (
               <tr key={row.id}>
@@ -106,28 +125,27 @@ export function ShopsPage() {
         {open ? (
           <div className="ui-stack [display:grid] [gap:12px]">
             <Field label="Name">
-              <TextInput defaultValue={open.name} />
+              <TextInput defaultValue={open.name} placeholder="e.g. Main Store" />
             </Field>
             <Field label="Code">
-              <TextInput defaultValue={open.code} />
+              <TextInput defaultValue={open.code} placeholder="e.g. MAIN" />
             </Field>
             <Field label="Type">
               <SelectInput defaultValue={open.type}>
-                <option>STORE</option>
-                <option>WAREHOUSE</option>
-                <option>REPAIR</option>
-                <option>PRODUCTION</option>
+                <option value="STORE">Store</option>
+                <option value="WAREHOUSE">Warehouse</option>
+                <option value="REPAIR">Repair</option>
+                <option value="PRODUCTION">Production</option>
               </SelectInput>
             </Field>
             <Field label="Phone">
-              <TextInput defaultValue={open.phone} />
+              <TextInput defaultValue={open.phone} placeholder="e.g. 0300 1234567" />
             </Field>
             <Field label="Address">
-              <TextInput defaultValue={open.address} />
+              <TextInput defaultValue={open.address} placeholder="e.g. Hall Road, Lahore" />
             </Field>
             <Toggle checked={Boolean(setting(open.id)?.branchLotEnabled)} onChange={() => undefined} label="Branch lot tracking" />
             <Toggle checked={Boolean(setting(open.id)?.allowNegativeStock)} onChange={() => undefined} label="Allow negative stock" />
-            <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">Lot tracking writes BranchLot allocations. Negative stock is for the repair bench only in this shop.</p>
           </div>
         ) : null}
       </Drawer>

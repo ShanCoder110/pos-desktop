@@ -1,100 +1,329 @@
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, ChevronRight, Factory, PackageMinus, RotateCcw, Wallet } from "lucide-react";
-import { Badge } from "@/components/common";
+import {
+  AlertTriangle,
+  ArrowLeftRight,
+  ChevronRight,
+  Factory,
+  PackageMinus,
+  Receipt,
+  RotateCcw,
+  Store,
+  Wallet,
+} from "lucide-react";
+import {
+  Badge,
+  Button,
+  EmptyRow,
+  HubChart,
+  KpiCard,
+  PageHead,
+  Skeleton,
+  Table,
+  Td,
+  THead,
+  Th,
+} from "@/components/common";
+import {
+  DASHBOARD_COPY,
+  DASHBOARD_KPI,
+  DASHBOARD_RECENT_INVOICES,
+  DASHBOARD_TOP_PRODUCTS,
+  addDays,
+  compareToPrevious,
+  isSameCalendarDay,
+} from "@/shared/constants/dashboard";
 import { routes } from "@/shared/constants/routes";
-import { catalog, invoices, productions, transfers, domainCustomers } from "@/shared/domain/mock";
+import type { ExpenseRow, InvoiceRow, PaymentStatus, ReturnRow } from "@/shared/domain/types";
 import { money } from "@/utils/format";
+import { ensureSession } from "@/services/auth";
+import { listAllReturns } from "@/services/credit";
+import { listAllExpenses, reportsAnalytics, reportsDashboard } from "@/services/finance";
+import { listAllRepairs, type RepairResponse } from "@/services/repairs";
+import { listAllInvoices } from "@/services/sales";
+import { listAllTransfers } from "@/services/transfers";
 
-const salesToday = invoices.filter((i) => i.createdAt.startsWith("2026-08-13") && i.status === "COMPLETED");
-const cashToday = salesToday.reduce((s, i) => s + i.paidAmount, 0);
-const creditOpen = domainCustomers.filter((c) => c.currentBalance > 0).reduce((s, c) => s + c.currentBalance, 0);
-const low = catalog.filter((p) => p.onHand > 0 && p.onHand < p.minimumStock).length;
+function payTone(status: PaymentStatus) {
+  if (status === "PAID") return "ok" as const;
+  if (status === "PARTIAL") return "warn" as const;
+  return "danger" as const;
+}
 
-const chart = [
-  { label: "Mon", value: 62000 },
-  { label: "Tue", value: 71000 },
-  { label: "Wed", value: 54000 },
-  { label: "Thu", value: 88000 },
-  { label: "Fri", value: 96000 },
-  { label: "Sat", value: 102000 },
-  { label: "Today", value: cashToday + 18500 },
-];
+function weekdayLabel(date = new Date()) {
+  return date.toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function sumDay(rows: InvoiceRow[], day: Date, pick: (row: InvoiceRow) => number) {
+  return rows
+    .filter((row) => row.status === "COMPLETED" && isSameCalendarDay(row.createdAt, day))
+    .reduce((sum, row) => sum + pick(row), 0);
+}
+
+function countOnDay<T>(rows: T[], day: Date, dateOf: (row: T) => string) {
+  return rows.filter((row) => isSameCalendarDay(dateOf(row), day)).length;
+}
+
+function deltaClass(direction: "up" | "down" | "flat" | "new", invert?: boolean) {
+  if (direction === "flat" || direction === "new") return "is-flat";
+  if (invert) return direction === "up" ? "is-down" : "is-up";
+  return direction === "up" ? "is-up" : "is-down";
+}
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const max = Math.max(...chart.map((p) => p.value), 1);
-  const pendingJobs = productions.filter((p) => p.status !== "COMPLETED" && p.status !== "CANCELLED").length;
-  const pendingTransfers = transfers.filter((t) => t.status === "PENDING").length;
-  const pendingReturns = 1;
+  const [loading, setLoading] = useState(true);
+  const [todaySales, setTodaySales] = useState(0);
+  const [creditOpen, setCreditOpen] = useState(0);
+  const [low, setLow] = useState(0);
+  const [openRepairs, setOpenRepairs] = useState(0);
+  const [pendingTransfers, setPendingTransfers] = useState(0);
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [returns, setReturns] = useState<ReturnRow[]>([]);
+  const [repairs, setRepairs] = useState<RepairResponse[]>([]);
+  const [transfers, setTransfers] = useState<{ status: string; createdAt: string }[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
+  const [chart, setChart] = useState<{ label: string; value: number }[]>([]);
+  const [topProducts, setTopProducts] = useState<{ productId: string; productName: string; quantity: number; revenue: number }[]>([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await ensureSession(controller.signal);
+      const [dash, analytics, transferRows, invoiceRows, returnRows, expenseRows, repairRows] = await Promise.all([
+        reportsDashboard(controller.signal).catch(() => null),
+        reportsAnalytics({}, controller.signal).catch(() => null),
+        listAllTransfers(controller.signal).catch(() => []),
+        listAllInvoices(controller.signal).catch(() => [] as InvoiceRow[]),
+        listAllReturns(controller.signal).catch(() => [] as ReturnRow[]),
+        listAllExpenses(controller.signal).catch(() => [] as ExpenseRow[]),
+        listAllRepairs(controller.signal).catch(() => [] as RepairResponse[]),
+      ]);
+      if (dash) {
+        setTodaySales(dash.todaySalesTotal);
+        setCreditOpen(dash.creditOutstanding);
+        setLow(dash.lowStockCount);
+        setOpenRepairs(dash.openRepairs);
+      }
+      setTransfers(transferRows);
+      setPendingTransfers(transferRows.filter((t) => t.status === "PENDING").length);
+      setInvoices(invoiceRows);
+      setReturns(returnRows);
+      setExpenses(expenseRows);
+      setRepairs(repairRows);
+      setChart(
+        analytics?.salesByDay?.length
+          ? analytics.salesByDay.map((day) => ({ label: day.day, value: day.total }))
+          : [],
+      );
+      setTopProducts(analytics?.topProducts ?? []);
+      setLoading(false);
+    })();
+    return () => controller.abort();
+  }, []);
+
+  const today = useMemo(() => new Date(), []);
+  const yesterday = useMemo(() => addDays(today, -1), [today]);
+
+  const todayInvoices = useMemo(
+    () => invoices.filter((row) => row.status === "COMPLETED" && isSameCalendarDay(row.createdAt, today)),
+    [invoices, today],
+  );
+  const salesToday = todaySales || sumDay(invoices, today, (row) => row.total);
+  const salesYesterday = sumDay(invoices, yesterday, (row) => row.total);
+  const collectedToday = sumDay(invoices, today, (row) => row.paidAmount);
+  const collectedYesterday = sumDay(invoices, yesterday, (row) => row.paidAmount);
+  const creditToday = sumDay(invoices, today, (row) => row.creditAmount);
+  const creditYesterday = sumDay(invoices, yesterday, (row) => row.creditAmount);
+  const expenseToday = expenses
+    .filter((row) => isSameCalendarDay(row.expenseDate, today))
+    .reduce((sum, row) => sum + row.amount, 0);
+  const repairsToday = countOnDay(repairs, today, (row) => row.receivedAt || row.createdAt);
+  const repairsYesterday = countOnDay(repairs, yesterday, (row) => row.receivedAt || row.createdAt);
+  const transfersToday = countOnDay(
+    transfers.filter((row) => row.status === "PENDING"),
+    today,
+    (row) => row.createdAt,
+  );
+  const transfersYesterday = countOnDay(
+    transfers.filter((row) => row.status === "PENDING"),
+    yesterday,
+    (row) => row.createdAt,
+  );
+  const returnsToday = countOnDay(returns, today, (row) => row.createdAt);
+  const returnsYesterday = countOnDay(returns, yesterday, (row) => row.createdAt);
+  const recentBills = invoices.slice(0, DASHBOARD_RECENT_INVOICES);
+  const weekTotal = chart.reduce((sum, point) => sum + point.value, 0);
+
+  const salesDelta = compareToPrevious(salesToday, salesYesterday);
+  const collectedDelta = compareToPrevious(collectedToday, collectedYesterday);
+  const creditDelta = compareToPrevious(creditToday, creditYesterday);
+
+  const actions = [
+    {
+      label: "Low stock",
+      value: low,
+      hint: "Reorder SKUs",
+      icon: PackageMinus,
+      to: routes.productsLow,
+      severity: (low ? "danger" : "ok") as "ok" | "warn" | "danger",
+      delta: null,
+    },
+    {
+      label: "Open repairs",
+      value: openRepairs,
+      hint: "Jobs still open",
+      icon: Factory,
+      to: routes.repair,
+      severity: (openRepairs ? "warn" : "ok") as "ok" | "warn" | "danger",
+      delta: compareToPrevious(repairsToday, repairsYesterday),
+    },
+    {
+      label: "Pending transfers",
+      value: pendingTransfers,
+      hint: "Waiting receive",
+      icon: ArrowLeftRight,
+      to: routes.transfers,
+      severity: (pendingTransfers ? "warn" : "ok") as "ok" | "warn" | "danger",
+      delta: compareToPrevious(transfersToday, transfersYesterday),
+    },
+    {
+      label: "Returns",
+      value: returns.length,
+      hint: "Tickets on file",
+      icon: RotateCcw,
+      to: routes.salesReturns,
+      severity: (returns.length ? "warn" : "ok") as "ok" | "warn" | "danger",
+      delta: compareToPrevious(returnsToday, returnsYesterday),
+    },
+  ];
 
   return (
-    <div>
-      <div className="kpi-row [display:grid] [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:12px] [flex-shrink:0]">
-        <article className="panel [min-height:0] [display:flex] [flex-direction:column] [overflow:hidden] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:10px] [box-shadow:0_1px_2px_rgba(15,_23,_42,_0.04)] kpi-card [padding:12px_14px]">
-          <p className="kpi-label [font-size:11px] [font-weight:650] [color:var(--muted)]">Today's sales</p>
-          <p className="kpi-value [margin-top:6px] [font-size:22px] [font-weight:750] [letter-spacing:-0.03em] [font-variant-numeric:tabular-nums] [color:var(--ink)] [line-height:1.1]">{money(salesToday.reduce((s, i) => s + i.total, 0))}</p>
-        </article>
-        <article className="panel [min-height:0] [display:flex] [flex-direction:column] [overflow:hidden] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:10px] [box-shadow:0_1px_2px_rgba(15,_23,_42,_0.04)] kpi-card [padding:12px_14px]">
-          <p className="kpi-label [font-size:11px] [font-weight:650] [color:var(--muted)]">Cash / bank in</p>
-          <p className="kpi-value [margin-top:6px] [font-size:22px] [font-weight:750] [letter-spacing:-0.03em] [font-variant-numeric:tabular-nums] [color:var(--ink)] [line-height:1.1]">{money(cashToday)}</p>
-        </article>
-        <article className="panel [min-height:0] [display:flex] [flex-direction:column] [overflow:hidden] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:10px] [box-shadow:0_1px_2px_rgba(15,_23,_42,_0.04)] kpi-card [padding:12px_14px]">
-          <p className="kpi-label [font-size:11px] [font-weight:650] [color:var(--muted)]">Customer owes</p>
-          <p className="kpi-value [margin-top:6px] [font-size:22px] [font-weight:750] [letter-spacing:-0.03em] [font-variant-numeric:tabular-nums] [color:var(--ink)] [line-height:1.1]">{money(creditOpen)}</p>
-        </article>
-        <article className="panel [min-height:0] [display:flex] [flex-direction:column] [overflow:hidden] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:10px] [box-shadow:0_1px_2px_rgba(15,_23,_42,_0.04)] kpi-card [padding:12px_14px]">
-          <p className="kpi-label [font-size:11px] [font-weight:650] [color:var(--muted)]">Low stock SKUs</p>
-          <p className="kpi-value [margin-top:6px] [font-size:22px] [font-weight:750] [letter-spacing:-0.03em] [font-variant-numeric:tabular-nums] [color:var(--ink)] [line-height:1.1]">{low}</p>
-        </article>
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
+      <PageHead title={DASHBOARD_COPY.title}>
+        <p className="mr-auto text-[12px] font-medium text-muted">{weekdayLabel()}</p>
+        <Button onClick={() => navigate(routes.reports)}>{DASHBOARD_COPY.reports}</Button>
+        <Button variant="primary" icon={<Store size={14} />} onClick={() => navigate(routes.pos)}>
+          {DASHBOARD_COPY.openPos}
+        </Button>
+      </PageHead>
+
+      <div className="grid shrink-0 grid-cols-4 gap-2.5">
+        {loading ? (
+          Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="h-[92px] rounded-[10px]" />
+          ))
+        ) : (
+          <>
+            <KpiCard
+              label={DASHBOARD_KPI.sales.label}
+              value={money(salesToday)}
+              hint={DASHBOARD_KPI.sales.hint}
+              tone="ok"
+              icon={<Receipt size={16} />}
+              delta={salesDelta}
+              onClick={() => navigate(DASHBOARD_KPI.sales.to)}
+            />
+            <KpiCard
+              label={DASHBOARD_KPI.collected.label}
+              value={money(collectedToday)}
+              hint={DASHBOARD_KPI.collected.hint}
+              tone="ok"
+              icon={<Wallet size={16} />}
+              delta={collectedDelta}
+              onClick={() => navigate(DASHBOARD_KPI.collected.to)}
+            />
+            <KpiCard
+              label={DASHBOARD_KPI.credit.label}
+              value={money(creditOpen)}
+              hint={DASHBOARD_KPI.credit.hint}
+              tone={creditOpen > 0 ? "warn" : "ok"}
+              icon={<Wallet size={16} />}
+              delta={creditDelta}
+              invertDelta
+              onClick={() => navigate(DASHBOARD_KPI.credit.to)}
+            />
+            <KpiCard
+              label={DASHBOARD_KPI.low.label}
+              value={low}
+              hint={DASHBOARD_KPI.low.hint}
+              tone={low ? "danger" : "ok"}
+              icon={<PackageMinus size={16} />}
+              onClick={() => navigate(DASHBOARD_KPI.low.to)}
+            />
+          </>
+        )}
       </div>
 
-      <div className="dash-mid [display:grid] [grid-template-columns:minmax(0,_1.65fr)_minmax(280px,_0.9fr)] [gap:12px] [flex:1] [min-height:0]">
-        <section className="panel [min-height:0] [display:flex] [flex-direction:column] [overflow:hidden] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:10px] [box-shadow:0_1px_2px_rgba(15,_23,_42,_0.04)]">
-          <div className="panel-head [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [padding:12px_14px_0] [flex-shrink:0]">
-            <h2 className="panel-title [font-size:13px] [font-weight:700] [color:var(--ink)]">Sales this week</h2>
-          </div>
-          <div className="panel-body [flex:1] [min-height:0] [overflow:hidden] [padding:12px_14px_14px]">
-            <div className="chart [height:100%] [min-height:0] [display:flex] [align-items:stretch] [gap:10px]">
-              {chart.map((point) => (
-                <div key={point.label} className="chart-col [flex:1] [min-width:0] [min-height:0] [display:flex] [flex-direction:column] [justify-content:flex-end] [align-items:center] [gap:8px]">
-                  <div className="chart-bar-wrap [width:100%] [flex:1] [min-height:0] [display:flex] [align-items:flex-end] [justify-content:center]">
-                    <div
-                      className={point.label === "Today" ? "chart-bar [width:46%] [max-width:28px] [border-radius:6px_6px_3px_3px] [background:color-mix(in_srgb,_var(--accent)_78%,_#99f6e4)] is-today" : "chart-bar [width:46%] [max-width:28px] [border-radius:6px_6px_3px_3px] [background:color-mix(in_srgb,_var(--accent)_78%,_#99f6e4)]"}
-                      style={{ height: `${Math.max(8, (point.value / max) * 100)}%` }}
-                      title={money(point.value)}
-                    />
-                  </div>
-                  <span className="chart-label [font-size:11px] [font-weight:650] [color:var(--muted)]">{point.label}</span>
-                </div>
-              ))}
+      <div className="grid shrink-0 grid-cols-4 gap-2.5">
+        {[
+          { label: "Bills today", value: String(todayInvoices.length), hint: "Completed" },
+          { label: "This period", value: money(weekTotal), hint: "Sales by day" },
+          { label: "Expenses today", value: money(expenseToday), hint: "Money out" },
+          { label: "Open jobs", value: String(openRepairs), hint: "Repairs" },
+        ].map((stat) => (
+          <div key={stat.label} className="flex items-center justify-between rounded-[10px] border border-line bg-paper px-3.5 py-2.5">
+            <div>
+              <p className="text-[11px] font-semibold text-muted">{stat.label}</p>
+              <p className="mt-0.5 text-[13px] font-bold tabular-nums text-ink">{loading ? "—" : stat.value}</p>
             </div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">{stat.hint}</p>
           </div>
+        ))}
+      </div>
+
+      <div className="grid min-h-[280px] shrink-0 grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)] gap-2.5">
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-paper">
+          {loading ? (
+            <div className="grid flex-1 place-items-center p-6">
+              <Skeleton className="h-40 w-full rounded-lg" />
+            </div>
+          ) : chart.length ? (
+            <HubChart
+              type="line"
+              title={DASHBOARD_COPY.salesTrend}
+              subtitle={DASHBOARD_COPY.salesTrendHint}
+              data={chart}
+              formatValue={money}
+              maxItems={null}
+            />
+          ) : (
+            <div className="grid flex-1 place-items-center p-6 text-[12px] text-muted">{DASHBOARD_COPY.emptySales}</div>
+          )}
         </section>
 
-        <section className="panel [min-height:0] [display:flex] [flex-direction:column] [overflow:hidden] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:10px] [box-shadow:0_1px_2px_rgba(15,_23,_42,_0.04)]">
-          <div className="panel-head [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [padding:12px_14px_0] [flex-shrink:0]">
-            <h2 className="panel-title [font-size:13px] [font-weight:700] [color:var(--ink)]">Needs action</h2>
-            <AlertTriangle size={14} color="var(--gold)" />
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-paper">
+          <div className="flex shrink-0 items-center justify-between gap-3 px-3.5 py-3">
+            <h2 className="text-[13px] font-bold text-ink">{DASHBOARD_COPY.needsAction}</h2>
+            <AlertTriangle size={14} className="text-gold" />
           </div>
-          <div className="panel-body [flex:1] [min-height:0] [overflow:hidden] [padding:12px_14px_14px]" style={{ paddingTop: 6, paddingBottom: 8 }}>
-            {[
-              { icon: PackageMinus, tone: "is-warn", title: `${low} products below minimum`, sub: "Open products to check qty and reorder as a new lot", to: routes.productsLow },
-              { icon: Wallet, tone: "is-rose", title: `${money(creditOpen)} customer udhaar`, sub: "Record a payment on Credit / Udhaar", to: routes.credit },
-              { icon: RotateCcw, tone: "", title: `${pendingReturns} return to review`, sub: "Refund or replacement against an invoice", to: routes.salesReturns },
-              { icon: Factory, tone: "", title: `${pendingJobs} production jobs open`, sub: "Components come off lots via PRODUCTION_USE", to: routes.production },
-              { icon: AlertTriangle, tone: "is-warn", title: `${pendingTransfers} branch transfer pending`, sub: "Complete to write TRANSFER_IN / OUT", to: routes.transfers },
-            ].map((row) => {
-              const Icon = row.icon;
+          <div className="min-h-0 flex-1 overflow-auto px-1.5 pb-2">
+            {actions.map((item) => {
+              const Icon = item.icon;
               return (
-                <button key={row.title} type="button" className="attn-row [display:flex] [align-items:center] [gap:10px] [width:100%] [padding:10px_8px] [border:0] [border-radius:8px] [background:transparent] [color:var(--ink)] [text-align:left] [cursor:pointer]" onClick={() => navigate(row.to)}>
-                  <span className={row.tone ? `attn-ico [width:30px] [height:30px] [border-radius:8px] [display:grid] [place-items:center] [flex-shrink:0] [background:var(--accent-bg)] [color:var(--accent-deep)] ${row.tone}` : "attn-ico [width:30px] [height:30px] [border-radius:8px] [display:grid] [place-items:center] [flex-shrink:0] [background:var(--accent-bg)] [color:var(--accent-deep)]"}>
-                    <Icon size={15} strokeWidth={1.8} />
+                <button
+                  key={item.label}
+                  type="button"
+                  className="flex w-full items-center gap-2.5 rounded-lg border-0 bg-transparent px-2.5 py-2.5 text-left text-ink hover:bg-bg"
+                  onClick={() => navigate(item.to)}
+                >
+                  <span className={`attn-ico grid size-[30px] shrink-0 place-items-center rounded-lg is-${item.severity}`}>
+                    <Icon size={14} />
                   </span>
-                  <span className="attn-copy [flex:1] [min-width:0]">
-                    <span className="attn-title [font-size:13px] [font-weight:650]">{row.title}</span>
-                    <span className="attn-sub [margin-top:1px] [font-size:11px] [color:var(--muted)]">{row.sub}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] font-semibold">{item.label}</span>
+                    <span className="mt-px block text-[11px] text-muted">{item.hint}</span>
+                    {item.delta ? (
+                      <span className={`attn-delta mt-0.5 block text-[10px] font-bold ${deltaClass(item.delta.direction, true)}`}>
+                        {item.delta.text}
+                      </span>
+                    ) : null}
                   </span>
-                  <ChevronRight size={14} color="var(--muted)" />
+                  <Badge tone={item.value === 0 ? "ok" : item.severity === "danger" ? "danger" : "warn"}>{item.value}</Badge>
+                  <ChevronRight size={14} className="text-muted" />
                 </button>
               );
             })}
@@ -102,56 +331,73 @@ export function DashboardPage() {
         </section>
       </div>
 
-      <div className="dash-low [display:grid] [grid-template-columns:minmax(0,_1.65fr)_minmax(280px,_0.9fr)] [gap:12px] [flex:1] [min-height:0]">
-        <section className="panel [min-height:0] [display:flex] [flex-direction:column] [overflow:hidden] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:10px] [box-shadow:0_1px_2px_rgba(15,_23,_42,_0.04)]">
-          <div className="panel-head [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [padding:12px_14px_0] [flex-shrink:0]">
-            <h2 className="panel-title [font-size:13px] [font-weight:700] [color:var(--ink)]">Latest invoices</h2>
-            <button type="button" className="auth-link [font-weight:600] [color:var(--accent)] [text-decoration:none]" style={{ fontSize: 12 }} onClick={() => navigate(routes.sales)}>
-              All invoices
-            </button>
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.35fr)_minmax(260px,0.85fr)] gap-2.5 pb-1">
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-paper">
+          <div className="flex shrink-0 items-center justify-between px-3.5 py-3">
+            <h2 className="text-[13px] font-bold text-ink">{DASHBOARD_COPY.recentBills}</h2>
+            <Button size="sm" onClick={() => navigate(routes.sales)}>
+              View all
+            </Button>
           </div>
-          <div className="panel-body [flex:1] [min-height:0] [overflow:hidden] [padding:12px_14px_14px]" style={{ paddingTop: 8 }}>
-            <table className="dash-table [width:100%] [border-collapse:collapse]">
-              <thead>
-                <tr>
-                  <th>No</th>
-                  <th>When</th>
-                  <th>Pay</th>
-                  <th className="num">Total</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoices.slice(0, 5).map((row) => (
-                  <tr key={row.id}>
-                    <td className="num" style={{ textAlign: "left", fontFamily: "var(--mono)", fontSize: 12 }}>
+          <Table>
+            <THead>
+              <tr>
+                <Th>Invoice</Th>
+                <Th>Status</Th>
+                <Th>Total</Th>
+                <Th>Paid</Th>
+              </tr>
+            </THead>
+            <tbody>
+              {loading ? (
+                <EmptyRow cols={4} text="Loading…" />
+              ) : recentBills.length === 0 ? (
+                <EmptyRow cols={4} text={DASHBOARD_COPY.emptyBills} />
+              ) : (
+                recentBills.map((row) => (
+                  <tr key={row.id} className="cursor-pointer" onClick={() => navigate(routes.sales)}>
+                    <Td>
                       {row.invoiceNumber}
-                    </td>
-                    <td>{row.createdAt}</td>
-                    <td>{row.paymentStatus}</td>
-                    <td className="num">{money(row.total)}</td>
-                    <td>
-                      <Badge tone={row.status === "COMPLETED" ? "ok" : "danger"}>{row.status}</Badge>
-                    </td>
+                      <span className="sub">{new Date(row.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                    </Td>
+                    <Td>
+                      <Badge tone={payTone(row.paymentStatus)}>{row.paymentStatus}</Badge>
+                    </Td>
+                    <Td numeric>{money(row.total)}</Td>
+                    <Td numeric>{money(row.paidAmount)}</Td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                ))
+              )}
+            </tbody>
+          </Table>
         </section>
 
-        <section className="panel [min-height:0] [display:flex] [flex-direction:column] [overflow:hidden] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:10px] [box-shadow:0_1px_2px_rgba(15,_23,_42,_0.04)]">
-          <div className="panel-head [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [padding:12px_14px_0] [flex-shrink:0]">
-            <h2 className="panel-title [font-size:13px] [font-weight:700] [color:var(--ink)]">What happens next</h2>
-          </div>
-          <div className="panel-body [flex:1] [min-height:0] [overflow:hidden] [padding:12px_14px_14px]">
-            <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]" style={{ marginBottom: 10 }}>
-              A sale writes Invoice + InvoiceItem, consumes FIFO ProductLot, posts StockMovement SALE, and if unpaid posts CustomerLedger CREDIT_SALE.
-            </p>
-            <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
-              Receive stock on Lots. Move between shops on Transfers. Assemble fans on Production. Staff permissions live on Staff.
-            </p>
-          </div>
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-paper">
+          {loading ? (
+            <div className="p-4">
+              <Skeleton className="h-48 rounded-lg" />
+            </div>
+          ) : topProducts.length ? (
+            <HubChart
+              type="bar"
+              title={DASHBOARD_COPY.topProducts}
+              subtitle="By revenue"
+              data={topProducts.slice(0, DASHBOARD_TOP_PRODUCTS).map((row) => ({
+                id: row.productId,
+                label: row.productName,
+                value: row.revenue,
+                details: [
+                  { label: "Revenue", value: money(row.revenue) },
+                  { label: "Qty", value: String(row.quantity) },
+                ],
+              }))}
+              formatValue={money}
+              maxItems={DASHBOARD_TOP_PRODUCTS}
+              onPointClick={() => navigate(routes.salesProducts)}
+            />
+          ) : (
+            <div className="grid flex-1 place-items-center p-6 text-[12px] text-muted">{DASHBOARD_COPY.emptyProducts}</div>
+          )}
         </section>
       </div>
     </div>

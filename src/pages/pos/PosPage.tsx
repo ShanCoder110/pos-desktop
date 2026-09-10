@@ -2,12 +2,17 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboa
 import { useNavigate } from "react-router-dom";
 import { PrintPreview } from "@/components/print/PrintPreview";
 import { useDebounce } from "@/hooks/useDebounce";
-import { customers as seedCustomers, heldBills, products as seedProducts } from "@/shared/mock";
 import { useSettings } from "@/shared/settings";
 import { routes } from "@/shared/constants/routes";
+import { MAX_PAGE_SIZE } from "@/shared/constants/config";
+import { MIN_PRODUCT_SEARCH_LENGTH } from "@/shared/constants/api";
 import type { Customer, HeldBill, InvoiceLine, Product } from "@/shared/types";
 import { moneyNum } from "@/utils/format";
-import { consumeLots, remainingStock as lotStock } from "@/utils/lots";
+import { consumeLots } from "@/utils/lots";
+import { ensureSession } from "@/services/auth";
+import { listAllProducts, searchAllProducts } from "@/services/products";
+import { listMasterRecords } from "@/services/masters";
+import { listHolds } from "@/services/sales";
 
 type PriceMode = "retail" | "wholesale";
 type PayMethod = "cash" | "online" | "split";
@@ -110,7 +115,9 @@ export function PosPage() {
   const [priceMode, setPriceMode] = useState<PriceMode>("retail");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [selected, setSelected] = useState(-1);
-  const [customerId, setCustomerId] = useState("c0");
+  const [products, setProducts] = useState<Product[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customerId, setCustomerId] = useState("");
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [custQ, setCustQ] = useState("");
@@ -127,7 +134,7 @@ export function PosPage() {
   const [bank, setBank] = useState(BANKS[0]);
   const [returnChange, setReturnChange] = useState(false);
   const [note, setNote] = useState("");
-  const [holds, setHolds] = useState<HeldBill[]>(heldBills);
+  const [holds, setHolds] = useState<HeldBill[]>([]);
   const [invoices, setInvoices] = useState<{ no: string; total: number; at: string; customer: string }[]>([]);
   const [billsTip, setBillsTip] = useState(false);
   const [holdsOpen, setHoldsOpen] = useState(false);
@@ -156,24 +163,87 @@ export function PosPage() {
     searchRef.current?.focus();
   }, []);
 
-  const customer = seedCustomers.find((c) => c.id === customerId) ?? seedCustomers[0];
-  const displayCustomer: Customer = customer.isWalking
-    ? {
-        ...customer,
-        name: guestName.trim() || (guestPhone ? guestPhone : "Walking Customer"),
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await ensureSession(controller.signal);
+      const [productRows, customerRows, holdRows] = await Promise.all([
+        listAllProducts(controller.signal).catch(() => [] as Product[]),
+        listMasterRecords("customers", { perPage: MAX_PAGE_SIZE }, controller.signal)
+          .then((response) =>
+            response.data.map(
+              (record): Customer => ({
+                id: record.id,
+                name: record.name,
+                phone: record.phone ?? "",
+                balance: 0,
+                isWalking: Boolean(record.isWalkIn),
+              }),
+            ),
+          )
+          .catch(() => [] as Customer[]),
+        listHolds(controller.signal).catch(() => []),
+      ]);
+      setProducts(productRows);
+      setCustomers(customerRows);
+      if (customerRows[0] && !customerId) setCustomerId(customerRows[0].id);
+      setHolds(
+        holdRows.map((hold) => ({
+          id: hold.id,
+          label: hold.label,
+          customerId: hold.customerId ?? "",
+          lines: [],
+          at: hold.createdAt,
+        })),
+      );
+    })();
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const q = debounced.trim();
+    if (q.length < MIN_PRODUCT_SEARCH_LENGTH) return;
+    const controller = new AbortController();
+    searchAllProducts(q, controller.signal)
+      .then((hits) => {
+        if (hits.length) {
+          setProducts((current) => {
+            const byId = new Map(current.map((p) => [p.id, p]));
+            hits.forEach((p) => byId.set(p.id, p));
+            return [...byId.values()];
+          });
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [debounced]);
+
+  const customer = customers.find((c) => c.id === customerId) ?? customers[0];
+  const displayCustomer: Customer = customer
+    ? customer.isWalking
+      ? {
+          ...customer,
+          name: guestName.trim() || (guestPhone ? guestPhone : "Walking Customer"),
+          phone: guestPhone,
+        }
+      : customer
+    : {
+        id: "",
+        name: guestName.trim() || "Walking Customer",
         phone: guestPhone,
-      }
-    : customer;
+        balance: 0,
+        isWalking: true,
+      };
 
   const results = useMemo(() => {
     const q = debounced.trim().toLowerCase();
-    if (!q) return seedProducts.slice(0, 12);
-    return seedProducts.filter(
+    if (!q) return products.slice(0, 12);
+    return products.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.sku.toLowerCase().includes(q),
     );
-  }, [debounced]);
+  }, [debounced, products]);
 
   useEffect(() => {
     setHit(0);
@@ -181,17 +251,17 @@ export function PosPage() {
 
   const custHits = useMemo(() => {
     const q = custQ.trim().toLowerCase();
-    if (!q) return seedCustomers;
-    return seedCustomers.filter(
+    if (!q) return customers;
+    return customers.filter(
       (c) => c.name.toLowerCase().includes(q) || c.phone.includes(q),
     );
-  }, [custQ]);
+  }, [custQ, customers]);
 
   function cartStock(productId: string, exceptId?: string) {
     const held = cart
       .filter((x) => x.productId === productId && x.id !== exceptId)
       .reduce((s, x) => s + x.baseQty, 0);
-    const base = lotStock(productId) || seedProducts.find((p) => p.id === productId)?.stock || 0;
+    const base = products.find((p) => p.id === productId)?.stock || 0;
     return +(base - held).toFixed(3);
   }
 
@@ -287,7 +357,7 @@ export function PosPage() {
   }
 
   function selectProduct(product: Product) {
-    if ((lotStock(product.id) || product.stock) <= 0) {
+    if (product.stock <= 0) {
       showToast("Out of stock");
       return;
     }
@@ -424,7 +494,7 @@ export function PosPage() {
     setCart((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
-        const p = seedProducts.find((x) => x.id === item.productId);
+        const p = products.find((x) => x.id === item.productId);
         const packN = p ? packOf(p) : 0;
         if (!packN) return item;
         const wantPack = to === "pack";
@@ -462,7 +532,7 @@ export function PosPage() {
     setCart((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
-        const p = seedProducts.find((x) => x.id === item.productId);
+        const p = products.find((x) => x.id === item.productId);
         if (!p) return item;
         const factor = item.sellUnit !== item.baseUnit ? item.packSize : 1;
         const sell = +(listPrice(p, mode) * factor).toFixed(2);
@@ -488,7 +558,7 @@ export function PosPage() {
     setPriceMode(next);
     setCart((prev) =>
       prev.map((item) => {
-        const p = seedProducts.find((x) => x.id === item.productId);
+        const p = products.find((x) => x.id === item.productId);
         if (!p) return item;
         const factor = item.sellUnit !== item.baseUnit ? item.packSize : 1;
         const sell = +(listPrice(p, next) * factor).toFixed(2);
@@ -1773,7 +1843,7 @@ export function PosPage() {
                     onClick={() => {
                       // restore simplified from held lines
                       const restored: CartLine[] = h.lines.map((l) => {
-                        const p = seedProducts.find((x) => x.id === l.productId);
+                        const p = products.find((x) => x.id === l.productId);
                         return recompute({
                           id: uid(),
                           productId: l.productId,

@@ -23,11 +23,12 @@ import type { DateRangeFilter } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
-import { transfers as seed, branchName, lotNumber, productName, userName, branches, productLots } from "@/shared/domain/mock";
 import type { StockTransferRow, TransferStatus } from "@/shared/domain/types";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import { TRANSFER_TABLE_COLUMNS } from "@/shared/constants/products";
-
+import { ensureSession } from "@/services/auth";
+import { listAllTransfers } from "@/services/transfers";
+import { listAllBranches, type BranchResponse } from "@/services/org";
 
 function tone(s: TransferStatus) {
   if (s === "COMPLETED") return "ok" as const;
@@ -36,7 +37,9 @@ function tone(s: TransferStatus) {
 }
 
 export function TransfersPage() {
-  const { setActions, sectionKpi } = useProductsHub();
+  const { setActions, sectionKpi, products } = useProductsHub();
+  const [transfers, setTransfers] = useState<StockTransferRow[]>([]);
+  const [branches, setBranches] = useState<BranchResponse[]>([]);
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
@@ -47,26 +50,56 @@ export function TransfersPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [open, setOpen] = useState<StockTransferRow | null>(null);
 
+  const branchNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    branches.forEach((b) => {
+      map[b.id] = b.name;
+    });
+    return map;
+  }, [branches]);
+
+  const productNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    products.forEach((p) => {
+      map[p.id] = p.name;
+    });
+    return map;
+  }, [products]);
+
   useEffect(() => {
     setPage(1);
   }, [sectionKpi]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await ensureSession(controller.signal);
+      const [transferRows, branchRows] = await Promise.all([
+        listAllTransfers(controller.signal).catch(() => [] as StockTransferRow[]),
+        listAllBranches(controller.signal).catch(() => [] as BranchResponse[]),
+      ]);
+      setTransfers(transferRows);
+      setBranches(branchRows);
+    })();
+    return () => controller.abort();
+  }, []);
+
   useLayoutEffect(() => {
     setActions(
-      <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(seed[1])}>
+      <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(transfers[0] ?? null)}>
         Add transfer
       </Button>,
     );
     return () => setActions(null);
-  }, [setActions]);
+  }, [setActions, transfers]);
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const status = chips.find((c) => c.field === "status")?.value?.toUpperCase();
-    return seed.filter((r) => {
+    return transfers.filter((r) => {
       if (!dateInRange(r.createdAt, dateRange)) return false;
       if (needle) {
-        const text = `${branchName(r.fromBranchId)} ${branchName(r.toBranchId)} ${r.notes}`.toLowerCase();
+        const text = `${branchNames[r.fromBranchId] ?? ""} ${branchNames[r.toBranchId] ?? ""} ${r.notes}`.toLowerCase();
         if (!text.includes(needle)) return false;
       }
       if (sectionKpi === "PENDING" || sectionKpi === "COMPLETED" || sectionKpi === "CANCELLED") {
@@ -75,7 +108,7 @@ export function TransfersPage() {
       if (status) return r.status === status;
       return true;
     });
-  }, [q, chips, sectionKpi, dateRange]);
+  }, [transfers, q, chips, sectionKpi, dateRange, branchNames]);
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(rows.length / pageSize));
   const shown = pageSize === PAGE_SIZE_ALL ? rows : rows.slice((page - 1) * pageSize, page * pageSize);
@@ -181,8 +214,8 @@ export function TransfersPage() {
                   }}
                 />
               </Td>
-              <Td>{branchName(row.fromBranchId)}</Td>
-              {show("to") ? <Td>{branchName(row.toBranchId)}</Td> : null}
+              <Td>{branchNames[row.fromBranchId] ?? row.fromBranchId}</Td>
+              {show("to") ? <Td>{branchNames[row.toBranchId] ?? row.toBranchId}</Td> : null}
               {show("status") ? (
                 <Td>
                   <Badge tone={tone(row.status)}>{row.status}</Badge>
@@ -191,7 +224,7 @@ export function TransfersPage() {
               {show("items") ? <Td numeric>{row.items.length}</Td> : null}
               {show("created") ? <Td>{row.createdAt}</Td> : null}
               {show("completed") ? <Td>{row.completedAt ?? "—"}</Td> : null}
-              {show("by") ? <Td>{userName(row.createdBy)}</Td> : null}
+              {show("by") ? <Td>{row.createdBy || "—"}</Td> : null}
               <Td>
                 <Button size="icon" variant="ghost" onClick={() => setOpen(row)} aria-label="View">
                   <Eye size={15} />
@@ -245,10 +278,11 @@ export function TransfersPage() {
                 </tr>
               </THead>
               <tbody>
+                {open.items.length === 0 ? <EmptyRow cols={3} /> : null}
                 {open.items.map((item, i) => (
                   <tr key={i}>
-                    <Td>{productName(item.productId)}</Td>
-                    <Td>{lotNumber(item.productLotId) || productLots.find((l) => l.id === item.productLotId)?.lotNumber}</Td>
+                    <Td>{productNames[item.productId] ?? item.productId}</Td>
+                    <Td>{item.productLotId}</Td>
                     <Td numeric>{item.quantity}</Td>
                   </tr>
                 ))}

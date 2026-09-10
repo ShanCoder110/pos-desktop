@@ -23,21 +23,17 @@ import {
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
-import { productCategories, products as catalog } from "@/shared/mock";
-import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { CATEGORY_TABLE_COLUMNS } from "@/shared/constants/products";
+import { listMasterRecords } from "@/services/masters";
 
 type CategoryRow = { id: string; name: string };
 
 const blank: CategoryRow = { id: "", name: "" };
 
-function seedRows(): CategoryRow[] {
-  return productCategories.map((name, i) => ({ id: `cat${i + 1}`, name }));
-}
-
 export function CategoriesPage() {
-  const { setActions, sectionKpi } = useProductsHub();
-  const [rows, setRows] = useState(seedRows);
+  const { setActions, sectionKpi, products } = useProductsHub();
+  const [rows, setRows] = useState<CategoryRow[]>([]);
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
@@ -52,6 +48,16 @@ export function CategoriesPage() {
     setPage(1);
   }, [sectionKpi]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    listMasterRecords("categories", { perPage: MAX_PAGE_SIZE, isActive: true }, controller.signal)
+      .then((response) => {
+        setRows(response.data.map(({ id, name }) => ({ id, name })));
+      })
+      .catch(() => setRows([]));
+    return () => controller.abort();
+  }, []);
+
   useLayoutEffect(() => {
     setActions(
       <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}>
@@ -65,19 +71,19 @@ export function CategoriesPage() {
     const needle = q.trim().toLowerCase();
     const nameChip = chips.find((c) => c.field === "name")?.value.toLowerCase();
     return rows.filter((r) => {
-      const count = catalog.filter((p) => p.category === r.name).length;
+      const count = products.filter((p) => p.category === r.name).length;
       if (needle && !r.name.toLowerCase().includes(needle)) return false;
       if (sectionKpi === "used") return count > 0;
       if (sectionKpi === "empty") return count === 0;
       if (nameChip && !r.name.toLowerCase().includes(nameChip)) return false;
       return true;
     });
-  }, [rows, q, chips, sectionKpi]);
+  }, [rows, q, chips, sectionKpi, products]);
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
   const shown = pageSize === PAGE_SIZE_ALL ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
   const chartData = filtered
-    .map((row) => ({ id: row.id, label: row.name, value: catalog.filter((product) => product.category === row.name).length }))
+    .map((row) => ({ id: row.id, label: row.name, value: products.filter((product) => product.category === row.name).length }))
     .sort((a, b) => b.value - a.value);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
@@ -173,7 +179,7 @@ export function CategoriesPage() {
                 />
               </Td>
               <Td>{row.name}</Td>
-              {cols.includes("products") ? <Td numeric>{catalog.filter((p) => p.category === row.name).length}</Td> : null}
+              {cols.includes("products") ? <Td numeric>{products.filter((p) => p.category === row.name).length}</Td> : null}
               <Td>
                 <Menu>
                   <MenuItem icon={<Pencil size={14} />} onClick={() => setEdit(row)}>

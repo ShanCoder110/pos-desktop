@@ -1,0 +1,95 @@
+export const API_BASE_URL = String(
+  import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:38472/api/v1",
+).replace(/\/$/, "");
+
+export const API_ROUTES = {
+  health: "/health",
+  authLogin: "/auth/login",
+  authLogout: "/auth/logout",
+  authMe: "/auth/me",
+  cashSessionsOpen: "/cash-sessions/open",
+  cashSessionsCurrent: "/cash-sessions/current",
+  cashSessionClose: (id: string) => `/cash-sessions/${encodeURIComponent(id)}/close`,
+  users: "/users",
+  userById: (id: string) => `/users/${encodeURIComponent(id)}`,
+  branches: "/branches",
+  branchById: (id: string) => `/branches/${encodeURIComponent(id)}`,
+  devices: "/devices",
+  devicePrinter: (id: string) => `/devices/${encodeURIComponent(id)}/printer`,
+  products: "/products",
+  productById: (id: string) => `/products/${encodeURIComponent(id)}`,
+  productSearch: "/products/search",
+  categories: "/categories",
+  categoryById: (id: string) => `/categories/${encodeURIComponent(id)}`,
+  units: "/units",
+  unitById: (id: string) => `/units/${encodeURIComponent(id)}`,
+  suppliers: "/suppliers",
+  supplierById: (id: string) => `/suppliers/${encodeURIComponent(id)}`,
+  supplierLedger: (id: string) => `/suppliers/${encodeURIComponent(id)}/ledger`,
+  supplierPayments: (id: string) => `/suppliers/${encodeURIComponent(id)}/payments`,
+  customers: "/customers",
+  customerById: (id: string) => `/customers/${encodeURIComponent(id)}`,
+  customersLedger: (id: string) => `/customers/${encodeURIComponent(id)}/ledger`,
+  customersPayments: (id: string) => `/customers/${encodeURIComponent(id)}/payments`,
+  lots: "/lots",
+  lotById: (id: string) => `/lots/${encodeURIComponent(id)}`,
+  lotsReceive: "/lots/receive",
+  stock: "/stock",
+  stockMovements: "/stock/movements",
+  purchaseOrders: "/purchase-orders",
+  purchaseOrderById: (id: string) => `/purchase-orders/${encodeURIComponent(id)}`,
+  purchaseOrderOrder: (id: string) => `/purchase-orders/${encodeURIComponent(id)}/order`,
+  purchaseOrderReceive: (id: string) => `/purchase-orders/${encodeURIComponent(id)}/receive`,
+  salesComplete: "/sales/complete",
+  salesHolds: "/sales/holds",
+  salesHoldById: (id: string) => `/sales/holds/${encodeURIComponent(id)}`,
+  invoices: "/invoices",
+  invoiceById: (id: string) => `/invoices/${encodeURIComponent(id)}`,
+  invoiceVoid: (id: string) => `/invoices/${encodeURIComponent(id)}/void`,
+  returns: "/returns",
+  returnById: (id: string) => `/returns/${encodeURIComponent(id)}`,
+  claims: "/claims",
+  claimById: (id: string) => `/claims/${encodeURIComponent(id)}`,
+  transfers: "/transfers",
+  transferById: (id: string) => `/transfers/${encodeURIComponent(id)}`,
+  transferSend: (id: string) => `/transfers/${encodeURIComponent(id)}/send`,
+  transferReceive: (id: string) => `/transfers/${encodeURIComponent(id)}/receive`,
+  production: "/production",
+  productionById: (id: string) => `/production/${encodeURIComponent(id)}`,
+  productionStart: (id: string) => `/production/${encodeURIComponent(id)}/start`,
+  productionComplete: (id: string) => `/production/${encodeURIComponent(id)}/complete`,
+  repairs: "/repairs",
+  repairById: (id: string) => `/repairs/${encodeURIComponent(id)}`,
+  repairStart: (id: string) => `/repairs/${encodeURIComponent(id)}/start`,
+  repairComplete: (id: string) => `/repairs/${encodeURIComponent(id)}/complete`,
+  repairDeliver: (id: string) => `/repairs/${encodeURIComponent(id)}/deliver`,
+  expenseCategories: "/expense-categories",
+  expenses: "/expenses",
+  transactions: "/transactions",
+  reportsDashboard: "/reports/dashboard",
+  reportsAnalytics: "/reports/analytics",
+  settingsLocalization: "/settings/localization",
+  settingsReceipt: "/settings/receipt",
+  settingsProfile: "/settings/profile",
+  syncStatus: "/sync/status",
+} as const;
+
+export const API_HEADERS = {
+  accept: "application/json",
+  contentType: "application/json",
+} as const;
+
+export const API_ERRORS = {
+  requestFailed: "The request could not be completed.",
+  backendUnavailable: "The local backend is unavailable.",
+} as const;
+
+/** Seed credentials for silent local session bootstrap when AUTH_ENABLED is false. */
+export const SEED_AUTH = {
+  username: "owner",
+  password: "owner123",
+  deviceId: "20000000-0000-4000-8000-000000000003",
+} as const;
+
+export const PRODUCT_SEARCH_DEBOUNCE_MS = 320;
+export const MIN_PRODUCT_SEARCH_LENGTH = 2;

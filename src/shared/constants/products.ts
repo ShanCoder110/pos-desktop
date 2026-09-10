@@ -72,12 +72,10 @@ export const LOT_TABLE_COLUMNS = [
   { id: "lot", label: "Lot", locked: true },
   { id: "product", label: "Product" },
   { id: "supplier", label: "Supplier" },
-  { id: "received", label: "Received" },
   { id: "cost", label: "Cost" },
   { id: "original", label: "Original" },
   { id: "left", label: "Left" },
   { id: "damaged", label: "Damaged" },
-  { id: "by", label: "By" },
 ];
 
 export const CATEGORY_TABLE_COLUMNS = [

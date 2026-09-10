@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Eye, Plus } from "lucide-react";
 import {
   Badge,
@@ -19,18 +19,53 @@ import {
   THead,
   Th,
 } from "@/components/common";
-import { domainCustomers as seed, ledger, branchName, invoiceNumber } from "@/shared/domain/mock";
-import type { DomainCustomer } from "@/shared/domain/types";
+import type { DomainCustomer, LedgerRow } from "@/shared/domain/types";
 import { creditState, money } from "@/utils/format";
+import {
+  getCustomerLedger,
+  listCustomersWithBalances,
+  mapLedgerEntry,
+  recordCustomerPayment,
+} from "@/services/credit";
+import { ensureSession } from "@/services/auth";
 
 const PAGE = 10;
 
 export function CreditSalesPage() {
+  const [seed, setSeed] = useState<DomainCustomer[]>([]);
   const [q, setQ] = useState("");
   const [tab, setTab] = useState("all");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<DomainCustomer | null>(null);
   const [pay, setPay] = useState("");
+  const [method, setMethod] = useState("CASH");
+  const [lines, setLines] = useState<LedgerRow[]>([]);
+
+  async function reload(signal?: AbortSignal) {
+    await ensureSession(signal);
+    const customers = await listCustomersWithBalances(signal).catch(() => [] as DomainCustomer[]);
+    setSeed(customers);
+    return customers;
+  }
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void reload(controller.signal);
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      setLines([]);
+      setPay("");
+      return;
+    }
+    const controller = new AbortController();
+    getCustomerLedger(open.id, controller.signal)
+      .then((ledger) => setLines(ledger.entries.map(mapLedgerEntry)))
+      .catch(() => setLines([]));
+    return () => controller.abort();
+  }, [open]);
 
   const rows = useMemo(() => {
     return seed.filter((r) => {
@@ -41,17 +76,34 @@ export function CreditSalesPage() {
       if (tab === "settled") return r.currentBalance === 0 && r.isActive;
       return true;
     });
-  }, [q, tab]);
+  }, [seed, q, tab]);
 
   const pages = Math.max(1, Math.ceil(rows.length / PAGE));
   const shown = rows.slice((page - 1) * PAGE, page * PAGE);
   const owing = seed.filter((c) => c.currentBalance > 0);
-  const lines = open ? ledger.filter((l) => l.customerId === open.id) : [];
+
+  async function savePayment() {
+    if (!open) return;
+    const amount = Number(pay);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    try {
+      await recordCustomerPayment(open.id, {
+        amount,
+        paymentMethod: method,
+      });
+      const customers = await reload();
+      const next = customers.find((c) => c.id === open.id) ?? null;
+      setOpen(next);
+      setPay("");
+    } catch {
+      // keep drawer open
+    }
+  }
 
   return (
     <div className="ui-stack [display:grid] [gap:12px]">
       <PageHead title="Credit / Udhaar">
-        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(owing[0] ?? seed[0])}>
+        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(owing[0] ?? seed[0] ?? null)}>
           Record payment
         </Button>
       </PageHead>
@@ -125,7 +177,7 @@ export function CreditSalesPage() {
         footer={
           <>
             <Button onClick={() => setOpen(null)}>Close</Button>
-            <Button variant="primary" onClick={() => setOpen(null)}>
+            <Button variant="primary" onClick={() => void savePayment()}>
               Save payment
             </Button>
           </>
@@ -138,10 +190,10 @@ export function CreditSalesPage() {
               <TextInput value={pay} onChange={(e) => setPay(e.target.value)} placeholder="0" />
             </Field>
             <Field label="Method">
-              <SelectInput defaultValue="CASH">
-                <option>CASH</option>
-                <option>CARD</option>
-                <option>BANK</option>
+              <SelectInput value={method} onChange={(e) => setMethod(e.target.value)}>
+                <option value="CASH">CASH</option>
+                <option value="CARD">CARD</option>
+                <option value="BANK">BANK</option>
               </SelectInput>
             </Field>
             <Table>
@@ -161,7 +213,10 @@ export function CreditSalesPage() {
                     <Td>{line.createdAt}</Td>
                     <Td>
                       {line.type}
-                      <span className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]"> {line.invoiceId ? invoiceNumber(line.invoiceId) : branchName(line.branchId)}</span>
+                      <span className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
+                        {" "}
+                        {line.invoiceId ?? line.branchId}
+                      </span>
                     </Td>
                     <Td numeric>{line.debit ? money(line.debit) : "—"}</Td>
                     <Td numeric>{line.credit ? money(line.credit) : "—"}</Td>

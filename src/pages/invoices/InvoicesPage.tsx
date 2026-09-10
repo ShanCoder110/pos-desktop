@@ -13,9 +13,12 @@ import {
   Th,
 } from "@/components/common";
 import { useSalesHub } from "@/pages/sales/SalesLayout";
-import { invoices as seed, branchName, customerName, productName, userName } from "@/shared/domain/mock";
 import type { InvoiceRow, PaymentStatus } from "@/shared/domain/types";
 import { money } from "@/utils/format";
+import { listAllInvoices } from "@/services/sales";
+import { listAllBranches } from "@/services/org";
+import { listMasterRecords } from "@/services/masters";
+import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 
 const PAGE = 10;
 
@@ -26,7 +29,10 @@ function payTone(s: PaymentStatus) {
 }
 
 export function InvoicesPage() {
-  const { sectionKpi } = useSalesHub();
+  const { sectionKpi, invoices: hubInvoices } = useSalesHub();
+  const [rows, setRows] = useState<InvoiceRow[]>([]);
+  const [branchNames, setBranchNames] = useState<Record<string, string>>({});
+  const [customerNames, setCustomerNames] = useState<Record<string, string>>({});
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<InvoiceRow | null>(null);
@@ -35,9 +41,46 @@ export function InvoicesPage() {
     setPage(1);
   }, [sectionKpi]);
 
-  const rows = useMemo(() => {
-    return seed.filter((r) => {
-      const text = `${r.invoiceNumber} ${customerName(r.customerId)}`.toLowerCase();
+  useEffect(() => {
+    if (hubInvoices.length) {
+      setRows(hubInvoices);
+      return;
+    }
+    const controller = new AbortController();
+    listAllInvoices(controller.signal)
+      .then(setRows)
+      .catch(() => setRows([]));
+    return () => controller.abort();
+  }, [hubInvoices]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.all([
+      listAllBranches(controller.signal)
+        .then((branches) => {
+          const map: Record<string, string> = {};
+          branches.forEach((b) => {
+            map[b.id] = b.name;
+          });
+          setBranchNames(map);
+        })
+        .catch(() => undefined),
+      listMasterRecords("customers", { perPage: MAX_PAGE_SIZE }, controller.signal)
+        .then((response) => {
+          const map: Record<string, string> = {};
+          response.data.forEach((c) => {
+            map[c.id] = c.name;
+          });
+          setCustomerNames(map);
+        })
+        .catch(() => undefined),
+    ]);
+    return () => controller.abort();
+  }, []);
+
+  const filtered = useMemo(() => {
+    return rows.filter((r) => {
+      const text = `${r.invoiceNumber} ${r.customerId ? customerNames[r.customerId] ?? "" : ""}`.toLowerCase();
       if (q && !text.includes(q.toLowerCase())) return false;
       if (sectionKpi === "paid") return r.paymentStatus === "PAID" && r.status === "COMPLETED";
       if (sectionKpi === "partial") return r.paymentStatus === "PARTIAL";
@@ -45,16 +88,16 @@ export function InvoicesPage() {
       if (sectionKpi === "cancelled") return r.status === "CANCELLED";
       return true;
     });
-  }, [q, sectionKpi]);
+  }, [rows, q, sectionKpi, customerNames]);
 
-  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
-  const shown = rows.slice((page - 1) * PAGE, page * PAGE);
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
+  const shown = filtered.slice((page - 1) * PAGE, page * PAGE);
 
   return (
     <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
         toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Search number or customer" />}
-        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
+        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={filtered.length} onChange={setPage} />}
       >
         <THead>
           <tr>
@@ -76,8 +119,8 @@ export function InvoicesPage() {
             <tr key={row.id}>
               <Td>{row.invoiceNumber}</Td>
               <Td>{row.createdAt}</Td>
-              <Td>{branchName(row.branchId)}</Td>
-              <Td>{customerName(row.customerId)}</Td>
+              <Td>{branchNames[row.branchId] ?? row.branchId}</Td>
+              <Td>{row.customerId ? customerNames[row.customerId] ?? row.customerId : "Walk-in"}</Td>
               <Td numeric>{money(row.total)}</Td>
               <Td numeric>{money(row.paidAmount)}</Td>
               <Td numeric>{money(row.creditAmount)}</Td>
@@ -88,8 +131,8 @@ export function InvoicesPage() {
                 <Badge tone={row.status === "COMPLETED" ? "ok" : "danger"}>{row.status}</Badge>
               </Td>
               <Td>
-                <Button size="icon" variant="ghost" onClick={() => setOpen(row)} aria-label="View">
-                  <Eye size={15} />
+                <Button variant="ghost" icon={<Eye size={14} />} onClick={() => setOpen(row)}>
+                  View
                 </Button>
               </Td>
             </tr>
@@ -97,55 +140,29 @@ export function InvoicesPage() {
         </tbody>
       </Table>
 
-      <Drawer
-        open={Boolean(open)}
-        title={open?.invoiceNumber ?? "Invoice"}
-        onClose={() => setOpen(null)}
-        footer={<Button onClick={() => setOpen(null)}>Close</Button>}
-      >
+      <Drawer open={Boolean(open)} title={open?.invoiceNumber ?? "Invoice"} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
         {open ? (
-          <div className="ui-stack [display:grid] [gap:12px]">
-            <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
-              Cashier {userName(open.createdBy)} · Discount {money(open.discount)}. Cancelled bills do not reverse stock in this demo.
-            </p>
-            <dl className="ui-kv [display:grid] [grid-template-columns:118px_1fr] [gap:8px_12px] [font-size:13px]">
-              <dt>Customer</dt>
-              <dd>{customerName(open.customerId)}</dd>
-              <dt>Payment</dt>
-              <dd>{open.paymentStatus}</dd>
-              <dt>Total</dt>
-              <dd>{money(open.total)}</dd>
-              <dt>Paid</dt>
-              <dd>{money(open.paidAmount)}</dd>
-              <dt>Credit</dt>
-              <dd>{money(open.creditAmount)}</dd>
-            </dl>
-            <Table>
-              <THead>
-                <tr>
-                  <Th>Product</Th>
-                  <Th>Unit</Th>
-                  <Th>Qty</Th>
-                  <Th>Base qty</Th>
-                  <Th>Price</Th>
-                  <Th>Total</Th>
+          <Table>
+            <THead>
+              <tr>
+                <Th>Product</Th>
+                <Th>Qty</Th>
+                <Th>Price</Th>
+                <Th>Total</Th>
+              </tr>
+            </THead>
+            <tbody>
+              {open.items.length === 0 ? <EmptyRow cols={4} /> : null}
+              {open.items.map((item) => (
+                <tr key={item.id}>
+                  <Td>{item.productId}</Td>
+                  <Td numeric>{item.quantity} {item.unitName}</Td>
+                  <Td numeric>{money(item.unitPrice)}</Td>
+                  <Td numeric>{money(item.total)}</Td>
                 </tr>
-              </THead>
-              <tbody>
-                {open.items.map((item) => (
-                  <tr key={item.id}>
-                    <Td>{productName(item.productId)}</Td>
-                    <Td>{item.unitName}</Td>
-                    <Td numeric>{item.quantity}</Td>
-                    <Td numeric>{item.baseQuantity}</Td>
-                    <Td numeric>{money(item.unitPrice)}</Td>
-                    <Td numeric>{money(item.total)}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-            <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">Example: 1 × 90m Roll stores quantity 1 and base_quantity 90. Lot consumption is a StockMovement SALE.</p>
-          </div>
+              ))}
+            </tbody>
+          </Table>
         ) : null}
       </Drawer>
     </div>

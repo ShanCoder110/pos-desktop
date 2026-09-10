@@ -4,7 +4,8 @@ import { Bell, LogOut } from "lucide-react";
 import { pageMeta } from "@/shared/constants/nav";
 import { routes } from "@/shared/constants/routes";
 import { AUTH_ENABLED, useSession } from "@/shared/auth/session";
-import { shops } from "@/shared/mock";
+import { ensureSession } from "@/services/auth";
+import { listAllBranches, type BranchResponse } from "@/services/org";
 
 function initials(name: string) {
   const parts = name.trim().split(/\s+/);
@@ -21,6 +22,7 @@ export function TopBar() {
     : "Staff";
   const [notesOpen, setNotesOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
+  const [branches, setBranches] = useState<BranchResponse[]>([]);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,6 +36,16 @@ export function TopBar() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await ensureSession(controller.signal);
+      const rows = await listAllBranches(controller.signal).catch(() => [] as BranchResponse[]);
+      setBranches(rows.filter((b) => b.isActive));
+    })();
+    return () => controller.abort();
+  }, []);
+
   return (
     <header className="mgmt-header [display:flex] [align-items:center] [justify-content:space-between] [gap:16px] [height:56px] [padding-top:0] [padding-bottom:0] [flex-shrink:0] [background:var(--paper)] [border-bottom:1px_solid_var(--line)] [padding-left:20px] [padding-right:20px]">
       <div>
@@ -41,10 +53,14 @@ export function TopBar() {
         {meta.subtitle ? <p className="mgmt-header-sub [margin-top:2px] [font-size:12px] [font-weight:500] [color:var(--muted)]">{meta.subtitle}</p> : null}
       </div>
       <div className="mgmt-header-right [display:flex] [align-items:center] [gap:8px] [flex-shrink:0]" ref={wrapRef}>
-        <select defaultValue="sh1" className="mgmt-branch [height:32px] [padding:0_10px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--bg)] [color:var(--ink)] [font-size:12px] [font-weight:600]" aria-label="Current branch">
-          {shops.map((shop) => (
-            <option key={shop.id} value={shop.id}>
-              {shop.isMain ? "Main Branch" : shop.name}
+        <select
+          defaultValue={branches.find((b) => b.isMain)?.id ?? branches[0]?.id ?? ""}
+          className="mgmt-branch [height:32px] [padding:0_10px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--bg)] [color:var(--ink)] [font-size:12px] [font-weight:600]"
+          aria-label="Current branch"
+        >
+          {branches.map((branch) => (
+            <option key={branch.id} value={branch.id}>
+              {branch.isMain ? "Main Branch" : branch.name}
             </option>
           ))}
         </select>
@@ -52,7 +68,7 @@ export function TopBar() {
           <span className="dot" />
           Synced
         </span>
-        <div style={{ position: "relative" }}>
+        <div className="relative">
           <button
             type="button"
             className="mgmt-icon-btn [position:relative] [width:32px] [height:32px] [display:grid] [place-items:center] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [color:var(--sub)] [cursor:pointer]"
@@ -68,25 +84,24 @@ export function TopBar() {
           {notesOpen ? (
             <div className="mgmt-menu [position:absolute] [top:calc(100%_+_6px)] [right:0] [z-index:30] [width:260px] [padding:6px] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)] [box-shadow:var(--shadow)]">
               <button type="button" onClick={() => navigate(routes.productsLow)}>
-                12 Low stock products
+                Low stock products
                 <span className="mgmt-menu-note [font-size:11px] [font-weight:500] [color:var(--muted)]">Reorder</span>
               </button>
               <button type="button" onClick={() => navigate(routes.credit)}>
                 Customer outstanding
-                <span className="mgmt-menu-note [font-size:11px] [font-weight:500] [color:var(--muted)]">Rs 83,900</span>
+                <span className="mgmt-menu-note [font-size:11px] [font-weight:500] [color:var(--muted)]">Khata</span>
               </button>
               <button type="button" onClick={() => navigate(routes.salesReturns)}>
-                3 Pending returns
+                Pending returns
                 <span className="mgmt-menu-note [font-size:11px] [font-weight:500] [color:var(--muted)]">Review</span>
               </button>
             </div>
           ) : null}
         </div>
-        <div style={{ position: "relative" }}>
+        <div className="relative">
           <button
             type="button"
-            className="mgmt-avatar [width:26px] [height:26px] [border-radius:6px] [background:color-mix(in_srgb,_var(--accent)_22%,_transparent)] [color:#99f6e4] [display:grid] [place-items:center] [font-size:9px] [font-weight:800] [flex-shrink:0]"
-            style={{ cursor: "pointer", border: 0 }}
+            className="mgmt-avatar [width:26px] [height:26px] [border-radius:6px] [background:color-mix(in_srgb,var(--accent)_22%,transparent)] [color:var(--accent-deep)] [display:grid] [place-items:center] [font-size:9px] [font-weight:800] [flex-shrink:0] [border:0] [cursor:pointer]"
             aria-label="Profile"
             onClick={() => {
               setUserOpen((v) => !v);

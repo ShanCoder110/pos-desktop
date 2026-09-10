@@ -45,11 +45,9 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { blankProduct, lotTotals, openingLot } from "@/pages/products/productLots";
 import { formatStockQty, qtyUnits, stockBreakdown, unitLabel } from "@/pages/products/productQty";
 import { matchesHealth, useProductsHub } from "@/pages/products/ProductsLayout";
-import { productCategories, topSelling } from "@/shared/mock";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import { DEFAULT_PRODUCT_COLUMNS, DEFAULT_REORDER_COLUMNS, PRODUCT_HEALTH_FROM_LABEL, PRODUCT_HEALTH_LABEL, PRODUCT_TABLE_COLUMNS, REORDER_PRODUCT_COLUMNS } from "@/shared/constants/products";
 import { routes } from "@/shared/constants/routes";
-import { supplierName } from "@/shared/domain/mock";
 import { useSettings } from "@/shared/settings";
 import type { Product } from "@/shared/types";
 import { searchAllProducts } from "@/services/products";
@@ -124,14 +122,12 @@ function stockLabel(row: Product) {
   return "In stock";
 }
 
-const soldById = new Map(topSelling.map((t) => [t.productId, t]));
-
-function soldQty(id: string) {
-  return soldById.get(id)?.qty ?? 0;
+function soldQty(_id: string) {
+  return 0;
 }
 
 function salesAmount(id: string) {
-  return soldById.get(id)?.amount ?? 0;
+  return soldQty(id);
 }
 
 function profitOf(row: Product) {
@@ -181,7 +177,21 @@ function ExportMenu({ rows, shopName }: { rows: Product[]; shopName: string }) {
 
 export function ProductsPage() {
   const { settings } = useSettings();
-  const { setActions, health, setHealth, sectionKpi, lots, setLots, products: rows, setProducts: setRows } = useProductsHub();
+  const {
+    setActions,
+    health,
+    setHealth,
+    sectionKpi,
+    lots,
+    setLots,
+    products: rows,
+    setProducts: setRows,
+    categories,
+    suppliers,
+  } = useProductsHub();
+  const categoryOptions = categories.map((c) => c.name);
+  const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.name ?? "";
+
   const location = useLocation();
   const navigate = useNavigate();
   const tab = location.pathname.endsWith("/low") ? "low" : "all";
@@ -418,7 +428,7 @@ export function ProductsPage() {
             filterFields={[
               { id: "name", label: "Name" },
               { id: "sku", label: "SKU" },
-              { id: "category", label: "Category", options: productCategories, searchable: true },
+              { id: "category", label: "Category", options: categoryOptions, searchable: true },
               { id: "sales", label: "Total sales", placeholder: "Min amount e.g. 5000", numeric: true },
               { id: "profit", label: "Profit", placeholder: "Min amount e.g. 1000", numeric: true },
               { id: "stock", label: "Stock status", options: ["In stock", "Low stock", "Out of stock"] },
@@ -636,7 +646,7 @@ export function ProductsPage() {
                 {show("sales") ? <Td numeric>{money(salesAmount(row.id))}</Td> : null}
                 {show("profit") ? (
                   <Td numeric>
-                    <span style={{ color: profitOf(row) >= 0 ? "var(--sale)" : "var(--danger)", fontWeight: 700 }}>
+                    <span className={profitOf(row) >= 0 ? "font-bold text-sale" : "font-bold text-danger"}>
                       {money(profitOf(row))}
                     </span>
                   </Td>
@@ -645,7 +655,7 @@ export function ProductsPage() {
                   <Td numeric>
                     <div className="product-qty [display:grid] [gap:1px] [justify-items:end] [font-variant-numeric:tabular-nums]">
                       {stockBreakdown(row).map((q) => (
-                        <span key={q.name}>
+                        <span key={q.id || q.name}>
                           {formatStockQty(q.qty)} {q.name}
                         </span>
                       ))}
@@ -688,7 +698,7 @@ export function ProductsPage() {
 
       <Drawer
         open={Boolean(edit)}
-        wide
+        size="lg"
         form
         dim={false}
         title={isNew ? "Add Product" : "Edit Product"}

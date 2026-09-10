@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import {
   Badge,
@@ -12,8 +12,9 @@ import {
   type DateRangeFilter,
 } from "@/components/common";
 import { formatStockQty, unitLabel } from "@/pages/products/productQty";
-import { invoices } from "@/shared/domain/mock";
-import { products, repairJobs } from "@/shared/mock";
+import { useSalesHub } from "@/pages/sales/SalesLayout";
+import { ensureSession } from "@/services/auth";
+import { listAllRepairs, type RepairResponse } from "@/services/repairs";
 import { money } from "@/utils/format";
 
 type SalesFilter = "topProfit" | "bestSelling" | "worst";
@@ -27,18 +28,30 @@ function stockTone(stock: number): "ok" | "warn" | "danger" {
 }
 
 export function ProductSalesPage() {
+  const { invoices, products } = useSalesHub();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<SalesFilter>("topProfit");
   const [limit, setLimit] = useState<ChartLimit>("10");
   const [source, setSource] = useState<SalesSource>("all");
   const [dateRange, setDateRange] = useState<DateRangeFilter>(() => rangeForPeriod("30d"));
   const [selectedId, setSelectedId] = useState("");
+  const [repairJobs, setRepairJobs] = useState<RepairResponse[]>([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await ensureSession(controller.signal);
+      const rows = await listAllRepairs(controller.signal).catch(() => []);
+      setRepairJobs(rows);
+    })();
+    return () => controller.abort();
+  }, []);
 
   const visibleProducts = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return products;
     return products.filter((product) => `${product.name} ${product.sku} ${product.category}`.toLowerCase().includes(needle));
-  }, [query]);
+  }, [products, query]);
 
   const completed = useMemo(
     () => invoices.filter((invoice) => {
@@ -48,14 +61,14 @@ export function ProductSalesPage() {
       if (source === "partial") return invoice.paymentStatus === "PARTIAL";
       return source === "all";
     }),
-    [dateRange, source],
+    [dateRange, invoices, source],
   );
 
   const repairSales = useMemo(
     () => source === "all" || source === "repair"
-      ? repairJobs.filter((job) => dateInRange(job.date, dateRange))
+      ? repairJobs.filter((job) => dateInRange(job.receivedAt || job.createdAt, dateRange))
       : [],
-    [dateRange, source],
+    [dateRange, repairJobs, source],
   );
 
   const chartData = useMemo(() => {
@@ -69,8 +82,8 @@ export function ProductSalesPage() {
       }));
       repairSales.forEach((job) => job.parts.forEach((part) => {
         if (part.productId !== product.id) return;
-        sales += part.qty * part.price;
-        quantity += part.qty;
+        sales += part.lineTotal;
+        quantity += part.baseQuantity;
       }));
       const profit = sales - quantity * product.cost;
       return {

@@ -7,7 +7,23 @@ export type HubChartPoint = {
   label: string;
   value: number;
   details?: { label: string; value: string }[];
+  up?: boolean;
 };
+
+function axisLabel(label: string) {
+  if (/^\d{4}-\d{2}-\d{2}/.test(label)) {
+    const date = new Date(`${label.slice(0, 10)}T00:00:00`);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    }
+  }
+  return label;
+}
+
+function pointTitle(point: HubChartPoint, formatValue: (value: number) => string) {
+  const extra = point.details?.map((detail) => `${detail.label}: ${detail.value}`).join("\n");
+  return extra ? `${point.label}\n${formatValue(point.value)}\n${extra}` : `${point.label}: ${formatValue(point.value)}`;
+}
 
 function smoothPath(points: { x: number; y: number }[]) {
   if (!points.length) return "";
@@ -129,12 +145,17 @@ export function HubChart({
               const { x, y } = linePoints[index];
               const labelStep = Math.max(1, Math.ceil(shown.length / 7));
               const showLabel = index % labelStep === 0 || index === shown.length - 1;
+              const color = point.up ? "var(--danger)" : "var(--accent)";
               return (
-                <g key={point.id ?? point.label}>
-                  <circle cx={x} cy={y} r={showLabel ? "5" : "3"} fill="var(--paper)" stroke="var(--accent)" strokeWidth={showLabel ? "3" : "2"}>
-                    <title>{point.label}: {formatValue(point.value)}</title>
+                <g
+                  key={point.id ?? `${point.label}-${index}`}
+                  className={onPointClick ? "cursor-pointer" : undefined}
+                  onClick={() => onPointClick?.(point)}
+                >
+                  <circle cx={x} cy={y} r={selectedId === point.id || showLabel ? "5" : "3"} fill="var(--paper)" stroke={color} strokeWidth={showLabel ? "3" : "2"}>
+                    <title>{pointTitle(point, formatValue)}</title>
                   </circle>
-                  {showLabel ? <text x={x} y="302" textAnchor="middle" fontSize="10" fill="var(--muted)">{point.label.slice(5)}</text> : null}
+                  {showLabel ? <text x={x} y="302" textAnchor="middle" fontSize="10" fill="var(--muted)">{axisLabel(point.label)}</text> : null}
                   {showLabel ? <text x={x} y={Math.max(17, y - 11)} textAnchor="middle" fontSize="10" fontWeight="700" fill="var(--ink)">{formatValue(point.value)}</text> : null}
                 </g>
               );

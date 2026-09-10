@@ -23,17 +23,16 @@ import {
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
-import { units as seed } from "@/shared/domain/mock";
-import { products as catalog } from "@/shared/mock";
 import type { UnitRow } from "@/shared/domain/types";
-import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { UNIT_TABLE_COLUMNS } from "@/shared/constants/products";
+import { listMasterRecords } from "@/services/masters";
 
 const blank: UnitRow = { id: "", name: "", symbol: "" };
 
 export function UnitsPage() {
-  const { setActions, sectionKpi } = useProductsHub();
-  const [rows, setRows] = useState(seed);
+  const { setActions, sectionKpi, products } = useProductsHub();
+  const [rows, setRows] = useState<UnitRow[]>([]);
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
@@ -47,6 +46,16 @@ export function UnitsPage() {
   useEffect(() => {
     setPage(1);
   }, [sectionKpi]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listMasterRecords("units", { perPage: MAX_PAGE_SIZE, isActive: true }, controller.signal)
+      .then((response) => {
+        setRows(response.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" })));
+      })
+      .catch(() => setRows([]));
+    return () => controller.abort();
+  }, []);
 
   useLayoutEffect(() => {
     setActions(
@@ -73,7 +82,7 @@ export function UnitsPage() {
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
   const shown = pageSize === PAGE_SIZE_ALL ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
   const chartData = filtered
-    .map((row) => ({ id: row.id, label: row.name, value: catalog.filter((product) => product.unit === row.symbol).length }))
+    .map((row) => ({ id: row.id, label: row.name, value: products.filter((product) => product.unit === row.symbol).length }))
     .sort((a, b) => b.value - a.value);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 

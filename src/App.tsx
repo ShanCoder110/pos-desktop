@@ -22,7 +22,14 @@ import { ClaimsPage } from "@/pages/sales/ClaimsPage";
 import { ProductSalesPage } from "@/pages/sales/ProductSalesPage";
 import { SalesLayout } from "@/pages/sales/SalesLayout";
 import { ReturnsPage } from "@/pages/returns/ReturnsPage";
-import { SettingsPage } from "@/pages/settings/SettingsPage";
+import { SettingsLayout } from "@/pages/settings/SettingsLayout";
+import { DevicesSection } from "@/pages/settings/sections/DevicesSection";
+import { LocalizationSection } from "@/pages/settings/sections/LocalizationSection";
+import { PrinterSection } from "@/pages/settings/sections/PrinterSection";
+import { ProductsSection } from "@/pages/settings/sections/ProductsSection";
+import { ProfileSection } from "@/pages/settings/sections/ProfileSection";
+import { ReceiptSection } from "@/pages/settings/sections/ReceiptSection";
+import { SyncSection } from "@/pages/settings/sections/SyncSection";
 import { SetupPage } from "@/pages/setup/SetupPage";
 import { ShopsPage } from "@/pages/shops/ShopsPage";
 import { SuppliersPage } from "@/pages/suppliers/SuppliersPage";
@@ -83,7 +90,15 @@ export default function App() {
                 <Route path={routes.shops} element={<ShopsPage />} />
                 <Route path={routes.reports} element={<AnalyticsPage />} />
                 <Route path={routes.analytics} element={<AnalyticsPage />} />
-                <Route path={routes.settings} element={<SettingsPage />} />
+                <Route path={routes.settings} element={<SettingsLayout />}>
+                  <Route index element={<ProfileSection />} />
+                  <Route path="receipt" element={<ReceiptSection />} />
+                  <Route path="products" element={<ProductsSection />} />
+                  <Route path="localization" element={<LocalizationSection />} />
+                  <Route path="printer" element={<PrinterSection />} />
+                  <Route path="devices" element={<DevicesSection />} />
+                  <Route path="sync" element={<SyncSection />} />
+                </Route>
               </Route>
             </Route>
             <Route path="*" element={<RootRedirect />} />

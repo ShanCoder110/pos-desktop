@@ -1,5 +1,7 @@
 export type StockPick = "oldest" | "newest" | "ask";
 export type PrintSize = "thermal" | "a4";
+export type PaperWidth = "MM_58" | "MM_80" | "A4";
+export type AppLanguage = "EN" | "UR";
 export type BranchKind = "retail" | "repair";
 export type Unit = "pc" | "m";
 export type InvoiceStatus = "paid" | "partial" | "credit" | "held";
@@ -16,6 +18,10 @@ export type TxnKind =
 
 export interface ShopSettings {
   shopName: string;
+  legalName: string;
+  phone: string;
+  email: string;
+  address: string;
   footer: string;
   showBalanceOnSlip: boolean;
   printSize: PrintSize;
@@ -26,6 +32,26 @@ export interface ShopSettings {
   defaultTax: number;
   defaultDiscount: number;
   isMainServer: boolean;
+  currencySymbol: string;
+  currencyCode: string;
+  language: AppLanguage;
+  expiryReminderDays: number;
+  invoicePrefix: string;
+  skuPrefix: string;
+  lotPrefix: string;
+  fifoEnabled: boolean;
+  receiptShopName: string;
+  paperWidth: PaperWidth;
+  showLogo: boolean;
+  showCashierName: boolean;
+  showItemDiscount: boolean;
+  tagline: string;
+  contactLine: string;
+  promoUrdu: string;
+  printerName: string;
+  printerPaperWidth: PaperWidth;
+  copies: number;
+  splitLongBill: boolean;
 }
 
 export interface Shop {
@@ -90,6 +116,8 @@ export interface ProductSellUnit {
 
 export interface Product {
   id: string;
+  categoryId?: string;
+  baseUnitId?: string;
   name: string;
   sku: string;
   barcode?: string;
@@ -115,6 +143,9 @@ export interface Product {
   stock: number;
   components: BomLine[];
   sellUnits?: ProductSellUnit[];
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Lot {

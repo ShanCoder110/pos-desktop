@@ -32,6 +32,12 @@ export const routes = {
   reports: "/reports",
   analytics: "/analytics",
   settings: "/settings",
+  settingsReceipt: "/settings/receipt",
+  settingsProducts: "/settings/products",
+  settingsLocalization: "/settings/localization",
+  settingsPrinter: "/settings/printer",
+  settingsDevices: "/settings/devices",
+  settingsSync: "/settings/sync",
 } as const;
 
 export type AppRoute = (typeof routes)[keyof typeof routes];

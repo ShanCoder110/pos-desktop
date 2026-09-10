@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   emptySession,
   loadSession,
@@ -6,9 +6,16 @@ import {
   SessionContext,
 } from "@/shared/auth/session";
 import type { AuthSession, OwnerProfile, ShopProfile } from "@/shared/types";
+import { ensureSession } from "@/services/auth";
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession>(() => loadSession());
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void ensureSession(controller.signal);
+    return () => controller.abort();
+  }, []);
 
   const value = useMemo(
     () => ({
