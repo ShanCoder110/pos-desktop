@@ -4,10 +4,16 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
+    "dev:ui": "vite",
+    "api": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin api",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "db:migrate": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin db -- migrate",
+    "db:seed": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin db -- seed",
+    "db:status": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin db -- status",
+    "db:new": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin db -- new"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
