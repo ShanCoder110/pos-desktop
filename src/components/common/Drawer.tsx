@@ -69,19 +69,24 @@ export function Drawer({
     flexDirection: "column",
     overflow: "hidden",
     background: "var(--paper)",
-    boxShadow: "-12px 0 32px color-mix(in srgb, var(--ink) 14%, transparent)",
+    boxShadow: "-12px 0 32px rgb(0 0 0 / 28%)",
   };
 
   const backStyle: CSSProperties = {
     position: "fixed",
     inset: 0,
     zIndex: 79,
-    background: dim ? "color-mix(in srgb, var(--ink) 40%, transparent)" : "transparent",
+    background: dim ? "rgb(0 0 0 / 48%)" : "transparent",
   };
 
   return createPortal(
     <>
-      <div className={cn("ui-drawer-back", !dim && "is-clear")} style={backStyle} onClick={onClose} aria-hidden="true" />
+      <div
+        className={cn("ui-drawer-back", !dim && "is-clear")}
+        style={backStyle}
+        onClick={onClose}
+        aria-hidden="true"
+      />
       <aside
         className={cn("ui-drawer", SIZE_CLASS[resolvedSize], className)}
         style={panelStyle}
@@ -93,7 +98,13 @@ export function Drawer({
             <h2 className="ui-drawer-title">{title}</h2>
             {subtitle}
           </div>
-          <Button size="icon" variant="ghost" tabIndex={form ? -1 : undefined} onClick={onClose} aria-label="Close">
+          <Button
+            size="icon"
+            variant="ghost"
+            tabIndex={form ? -1 : undefined}
+            onClick={onClose}
+            aria-label="Close"
+          >
             <X size={16} />
           </Button>
         </div>

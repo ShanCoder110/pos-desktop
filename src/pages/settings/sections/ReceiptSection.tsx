@@ -1,4 +1,5 @@
 import { Field, SelectInput, TextArea, TextInput, Toggle } from "@/components/common";
+import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { SettingsSection } from "@/pages/settings/SettingsSection";
 import { useSettingsForm } from "@/shared/settings";
 import type { PaperWidth } from "@/shared/types";
@@ -29,7 +30,11 @@ export function ReceiptSection() {
     >
       <div className="settings-row">
         <Field label="Invoice prefix" hint="Printed as INV-0001">
-          <TextInput value={draft.invoicePrefix} onChange={(e) => patch({ invoicePrefix: e.target.value })} />
+          <TextInput
+            maxLength={FIELD_LIMITS.prefix}
+            value={draft.invoicePrefix}
+            onChange={(e) => patch({ invoicePrefix: e.target.value })}
+          />
         </Field>
         <Field label="Paper width" hint="Slip design size. This till can override it under Printer">
           <SelectInput
@@ -46,7 +51,10 @@ export function ReceiptSection() {
         <TextInput value={draft.tagline} onChange={(e) => patch({ tagline: e.target.value })} />
       </Field>
       <Field label="Contact line" hint="Phone / WhatsApp printed on the slip">
-        <TextInput value={draft.contactLine} onChange={(e) => patch({ contactLine: e.target.value })} />
+        <TextInput
+          value={draft.contactLine}
+          onChange={(e) => patch({ contactLine: e.target.value })}
+        />
       </Field>
       <Field label="Footer">
         <TextArea value={draft.footer} onChange={(e) => patch({ footer: e.target.value })} />
@@ -54,11 +62,7 @@ export function ReceiptSection() {
       <Field label="Promo (Urdu)" hint="Unicode. Can print even when the UI is English">
         <TextInput value={draft.promoUrdu} onChange={(e) => patch({ promoUrdu: e.target.value })} />
       </Field>
-      <Toggle
-        checked={draft.showLogo}
-        onChange={(v) => patch({ showLogo: v })}
-        label="Show logo"
-      />
+      <Toggle checked={draft.showLogo} onChange={(v) => patch({ showLogo: v })} label="Show logo" />
       <Toggle
         checked={draft.showCashierName}
         onChange={(v) => patch({ showCashierName: v })}

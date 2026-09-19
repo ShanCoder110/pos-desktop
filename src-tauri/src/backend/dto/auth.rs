@@ -1,29 +1,87 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use validator::Validate;
 
-#[derive(Clone, Debug, Deserialize, Validate)]
+use super::PageQuery;
+
+#[derive(Clone, Debug, Deserialize, Validate, TS)]
+#[ts(export, export_to = "auth/", rename_all = "camelCase")]
 #[serde(rename_all = "camelCase")]
 pub struct LoginRequest {
-    #[validate(length(min = 1, max = 80))]
-    pub username: String,
+    #[validate(email)]
+    pub email: String,
     #[validate(length(min = 1, max = 200))]
     pub password: String,
     pub device_id: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export, export_to = "auth/", rename_all = "camelCase")]
 #[serde(rename_all = "camelCase")]
 pub struct LoginResponse {
     pub token: String,
     pub expires_at: String,
+    pub refresh_token: String,
+    pub refresh_expires_at: String,
     pub user: UserResponse,
     pub branch_id: String,
     pub device_id: String,
     pub cash_session_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export, export_to = "auth/", rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
+pub struct AuthStatusResponse {
+    pub needs_setup: bool,
+    pub shop_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Validate, TS)]
+#[ts(export, export_to = "auth/", rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
+pub struct SetupRequest {
+    #[validate(length(min = 1, max = 120))]
+    pub shop_name: String,
+    #[validate(length(min = 1, max = 500))]
+    pub address: String,
+    #[validate(length(min = 1, max = 120))]
+    pub owner_name: String,
+    #[validate(length(min = 1, max = 80))]
+    pub username: String,
+    #[validate(length(min = 6, max = 200))]
+    pub password: String,
+    #[validate(length(min = 1, max = 32))]
+    #[serde(default)]
+    pub phone: Option<String>,
+    #[validate(email)]
+    #[serde(default)]
+    pub email: Option<String>,
+    pub device_id: String,
+    #[validate(length(min = 1, max = 120))]
+    #[serde(default)]
+    pub device_name: Option<String>,
+    #[validate(length(max = 200))]
+    #[serde(default)]
+    pub tagline: Option<String>,
+    #[validate(length(max = 200))]
+    #[serde(default)]
+    pub contact_line: Option<String>,
+    #[serde(default)]
+    pub show_logo: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Validate, TS)]
+#[ts(export, export_to = "auth/", rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshRequest {
+    pub refresh_token: String,
+    pub device_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export, export_to = "auth/", rename_all = "camelCase")]
 #[serde(rename_all = "camelCase")]
 pub struct MeResponse {
     pub user: UserResponse,
@@ -34,10 +92,20 @@ pub struct MeResponse {
     pub cash_session_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export, export_to = "auth/", rename_all = "camelCase")]
 #[serde(rename_all = "camelCase")]
 pub struct LogoutResponse {
     pub revoked: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct UserListQuery {
+    #[serde(flatten)]
+    pub page: PageQuery,
+    pub role: Option<String>,
+    pub staff_only: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Validate)]
@@ -48,6 +116,7 @@ pub struct UserRequest {
     #[validate(length(min = 1, max = 80))]
     pub username: String,
     #[validate(length(min = 6, max = 200))]
+    #[serde(default)]
     pub password: Option<String>,
     #[validate(length(max = 32))]
     #[serde(default)]
@@ -73,7 +142,8 @@ pub struct UserPermissionInput {
     pub is_allowed: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export, export_to = "auth/", rename_all = "camelCase")]
 #[serde(rename_all = "camelCase")]
 pub struct UserPermissionResponse {
     pub id: String,
@@ -81,7 +151,8 @@ pub struct UserPermissionResponse {
     pub is_allowed: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export, export_to = "auth/", rename_all = "camelCase")]
 #[serde(rename_all = "camelCase")]
 pub struct UserResponse {
     pub id: String,
@@ -94,6 +165,7 @@ pub struct UserResponse {
     pub is_active: bool,
     pub last_login_at: Option<String>,
     pub permissions: Vec<UserPermissionResponse>,
+    pub total_paid: f64,
     pub created_at: String,
     pub updated_at: String,
 }

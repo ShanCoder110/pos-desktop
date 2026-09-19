@@ -6,6 +6,19 @@ use super::PageQuery;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
+pub struct SupplierLedgerListQuery {
+    #[serde(flatten)]
+    pub page: PageQuery,
+    pub supplier: Option<String>,
+    pub entry_type: Option<String>,
+    pub debit: Option<f64>,
+    pub credit: Option<f64>,
+    pub occurred_from: Option<String>,
+    pub occurred_to: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct PurchaseOrderListQuery {
     #[serde(flatten)]
     pub page: PageQuery,
@@ -108,6 +121,7 @@ pub struct PurchaseOrderResponse {
 pub struct SupplierLedgerEntryResponse {
     pub id: String,
     pub supplier_id: String,
+    pub supplier_name: Option<String>,
     pub branch_id: String,
     pub entry_type: String,
     pub purchase_order_id: Option<String>,

@@ -14,11 +14,25 @@ import {
   toaster,
 } from "@/components/common";
 import { STORAGE_KEYS, MAX_PAGE_SIZE } from "@/shared/constants/config";
-import { PRODUCT_FORM_SECTIONS, type ProductFormSection } from "@/shared/constants/products";
+import { FIELD_LIMITS } from "@/shared/constants/fields";
+import {
+  PRODUCT_COPY,
+  PRODUCT_FORM_SECTIONS,
+  type ProductFormSection,
+} from "@/shared/constants/products";
+import { listAllBranches } from "@/services/org";
 import type { Product, ProductSellUnit } from "@/shared/types";
-import { warrantyDaysOf, money } from "@/utils/format";
+import { money, shortError, warrantyDaysOf } from "@/utils/format";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
-import { blankProduct, fifoLot, fifoLots, lotTotals, openingLot, setLotDamage, setLotQty } from "@/pages/products/productLots";
+import {
+  blankProduct,
+  fifoLot,
+  fifoLots,
+  lotTotals,
+  openingLot,
+  setLotDamage,
+  setLotQty,
+} from "@/pages/products/productLots";
 import { LinkedUnitBoxes, UnitQtyFields } from "@/pages/products/LotFields";
 import {
   baseUnit,
@@ -29,6 +43,7 @@ import {
   extraKind,
   extraUnits,
   formatMixedQty,
+  formatStockQty,
   isBiggerSymbol,
   priceFromStock,
   pricePerStock,
@@ -37,7 +52,7 @@ import {
   unitInStock,
   unitLabel,
 } from "@/pages/products/productQty";
-import { listMasterRecords } from "@/services/masters";
+import { createMasterRecord, listMasterRecords } from "@/services/masters";
 
 type PriceKey = "cost" | "min" | "wholesale" | "price";
 
@@ -82,7 +97,9 @@ function defaultSellUnits(product: Product): ProductSellUnit[] {
     }));
     if (mapped.some((u) => u.kind === "base")) return mapped;
     const match = mapped.find((u) => u.symbol === product.unit) ?? mapped[0];
-    return mapped.map((u) => (u.id === match.id ? { ...u, kind: "base" as const, contains: 1 } : u));
+    return mapped.map((u) =>
+      u.id === match.id ? { ...u, kind: "base" as const, contains: 1 } : u,
+    );
   }
   const packN = product.packQty && product.packQty > 1 ? product.packQty : null;
   const base: ProductSellUnit = {
@@ -118,9 +135,11 @@ function defaultSellUnits(product: Product): ProductSellUnit[] {
 }
 
 function focusables(root: HTMLElement) {
-  return [...root.querySelectorAll<HTMLElement>(
-    "input:not([disabled]):not([type=hidden]):not([type=checkbox]), select:not([disabled]), textarea:not([disabled]), button.toggle, .product-inline-add",
-  )].filter((el) => el.offsetParent !== null);
+  return [
+    ...root.querySelectorAll<HTMLElement>(
+      "input:not([disabled]):not([type=hidden]):not([type=checkbox]), select:not([disabled]), textarea:not([disabled]), button.toggle, .product-inline-add",
+    ),
+  ].filter((el) => el.offsetParent !== null);
 }
 
 function focusField(root: HTMLElement, name: string) {
@@ -135,18 +154,25 @@ export function ProductForm({
   onChange,
   onCommit,
   onClose,
+  saving = false,
 }: {
   product: Product;
   catalog: Product[];
   onChange: (next: Product) => void;
-  onCommit: (next: Product) => boolean;
+  onCommit: (
+    next: Product,
+    branchQuantities?: Record<string, number>,
+  ) => boolean | Promise<boolean>;
   onClose: () => void;
+  saving?: boolean;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [section, setSection] = useState<ProductFormSection>("details");
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState(false);
-  const [keepAdding, setKeepAdding] = useState(() => sessionStorage.getItem(STORAGE_KEYS.keepAddingProducts) === "1");
+  const [keepAdding, setKeepAdding] = useState(
+    () => sessionStorage.getItem(STORAGE_KEYS.keepAddingProducts) === "1",
+  );
   const focusPane = useRef(false);
   const unitCards = useRef<Record<string, HTMLDivElement | null>>({});
   const unitPositions = useRef(new Map<string, DOMRect>());
@@ -158,13 +184,22 @@ export function ProductForm({
     categories: hubCategories,
     units: hubUnits,
     suppliers: hubSuppliers,
+    refreshHub,
   } = useProductsHub();
   const [localCategories, setLocalCategories] = useState<{ id: string; name: string }[]>([]);
   const [localUnits, setLocalUnits] = useState<{ id: string; name: string; symbol: string }[]>([]);
-  const [localSuppliers, setLocalSuppliers] = useState<{ id: string; name: string; isActive: boolean }[]>([]);
-  const categoryOptions = hubCategories.length
-    ? hubCategories.map((c) => c.name)
-    : localCategories.map((c) => c.name);
+  const [localSuppliers, setLocalSuppliers] = useState<
+    { id: string; name: string; isActive: boolean }[]
+  >([]);
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  const [branchQuantities, setBranchQuantities] = useState<Record<string, number>>({});
+  const categoryOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const row of [...hubCategories, ...localCategories]) names.add(row.name);
+    if (product.category) names.add(product.category);
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [hubCategories, localCategories, product.category]);
   const unitRows = hubUnits.length ? hubUnits : localUnits;
   const suppliers = hubSuppliers.length ? hubSuppliers : localSuppliers;
   const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.name ?? "";
@@ -177,7 +212,9 @@ export function ProductForm({
         .then((r) => setLocalCategories(r.data.map(({ id, name }) => ({ id, name }))))
         .catch(() => undefined),
       listMasterRecords("units", { perPage: MAX_PAGE_SIZE, isActive: true }, controller.signal)
-        .then((r) => setLocalUnits(r.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" }))))
+        .then((r) =>
+          setLocalUnits(r.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" }))),
+        )
         .catch(() => undefined),
       listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, controller.signal)
         .then((r) =>
@@ -192,32 +229,73 @@ export function ProductForm({
   const [priceLotId, setPriceLotId] = useState("");
   const [lotOpened, setLotOpened] = useState<Record<string, number>>({});
   const sellUnits = qtyUnits(defaultSellUnits(product));
-  const unitLayoutKey = sellUnits.map((unit) => `${unit.id}:${unit.kind}:${unit.contains}`).join("|");
+  const unitLayoutKey = sellUnits
+    .map((unit) => `${unit.id}:${unit.kind}:${unit.contains}`)
+    .join("|");
   const base = baseUnit(sellUnits) ?? sellUnits[0];
   const pack = biggerUnit(sellUnits);
   const extras = extraUnits(sellUnits);
   const stockSymbol = product.unit || base.symbol || "pc";
   const priceLot = lotDraft.find((l) => l.id === priceLotId);
   const activeSuppliers = useMemo(() => {
-    const ids = [...new Set(lotDraft.filter((l) => l.remainingQuantity > 0 && l.supplierId).map((l) => l.supplierId))];
+    const ids = [
+      ...new Set(
+        lotDraft.filter((l) => l.remainingQuantity > 0 && l.supplierId).map((l) => l.supplierId),
+      ),
+    ];
     return ids.map((id) => ({
       id,
       name: supplierName(id) || id,
-      lots: lotDraft.filter((l) => l.supplierId === id && l.remainingQuantity > 0).map((l) => l.lotNumber),
+      lots: lotDraft
+        .filter((l) => l.supplierId === id && l.remainingQuantity > 0)
+        .map((l) => l.lotNumber),
     }));
   }, [lotDraft, suppliers]);
   const openPriceLots = lotDraft.filter((l) => l.remainingQuantity > 0 || l.damagedQuantity > 0);
   const sellingLot = fifoLot(lotDraft);
   const queuedLots = fifoLots(lotDraft).slice(1);
+  const branchTotal = useMemo(
+    () =>
+      Object.values(branchQuantities).reduce(
+        (sum, qty) => sum + (Number.isFinite(qty) ? qty : 0),
+        0,
+      ),
+    [branchQuantities],
+  );
+
   const sections = useMemo(
     () =>
       PRODUCT_FORM_SECTIONS.filter((id) => {
         if (id === "recipe") return product.isManufactured;
         if (id === "lots") return !isNew;
+        if (id === "branches") return isNew;
         return true;
       }),
     [product.isManufactured, isNew],
   );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listAllBranches(controller.signal)
+      .then((rows) =>
+        setBranches(
+          rows.filter((row) => row.isActive).map((row) => ({ id: row.id, name: row.name })),
+        ),
+      )
+      .catch(() => setBranches([]));
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!isNew) return;
+    setBranchQuantities((current) => {
+      const next: Record<string, number> = {};
+      for (const branch of branches) {
+        next[branch.id] = current[branch.id] ?? 0;
+      }
+      return next;
+    });
+  }, [branches, isNew, product.id]);
 
   useEffect(() => {
     setSection("details");
@@ -272,7 +350,9 @@ export function ProductForm({
         [
           {
             transform: `translateY(${deltaY}px)`,
-            boxShadow: changed ? "0 0 0 2px var(--accent), 0 10px 24px rgba(15, 159, 143, 0.18)" : "none",
+            boxShadow: changed
+              ? "0 0 0 2px var(--accent), 0 10px 24px rgba(15, 159, 143, 0.18)"
+              : "none",
           },
           {
             transform: "translateY(0)",
@@ -294,6 +374,27 @@ export function ProductForm({
 
   function patch(next: Partial<Product>) {
     onChange({ ...product, sellUnits, ...next });
+  }
+
+  async function addCategory(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || creatingCategory) return;
+    setCreatingCategory(true);
+    try {
+      const created = await createMasterRecord("categories", { name: trimmed, isActive: true });
+      setLocalCategories((current) =>
+        current.some((row) => row.id === created.id)
+          ? current
+          : [...current, { id: created.id, name: created.name }],
+      );
+      await refreshHub();
+      patch({ category: created.name, categoryId: created.id });
+      toaster.success("Category added");
+    } catch (error) {
+      toaster.error(shortError(error, "Could not add category"));
+    } finally {
+      setCreatingCategory(false);
+    }
   }
 
   function setKeep(value: boolean) {
@@ -319,7 +420,8 @@ export function ProductForm({
   }
 
   function setExtraField(id: string, patchRow: Partial<ProductSellUnit>, manual?: PriceKey) {
-    if (patchRow.kind || patchRow.symbol || patchRow.contains !== undefined) changedUnitId.current = id;
+    if (patchRow.kind || patchRow.symbol || patchRow.contains !== undefined)
+      changedUnitId.current = id;
     setUnits(
       sellUnits.map((u) =>
         u.id === id
@@ -338,7 +440,9 @@ export function ProductForm({
     if (priceLot && key === "cost") {
       setLotDraft((prev) =>
         prev.map((l) =>
-          l.id === priceLot.id ? { ...l, purchasePrice: pricePerStock(sellUnits, stockSymbol, value, row) } : l,
+          l.id === priceLot.id
+            ? { ...l, purchasePrice: pricePerStock(sellUnits, stockSymbol, value, row) }
+            : l,
         ),
       );
       return;
@@ -348,7 +452,8 @@ export function ProductForm({
   }
 
   function unitPrice(row: ProductSellUnit, key: PriceKey) {
-    if (priceLot && key === "cost") return priceFromStock(sellUnits, stockSymbol, priceLot.purchasePrice, row);
+    if (priceLot && key === "cost")
+      return priceFromStock(sellUnits, stockSymbol, priceLot.purchasePrice, row);
     return row[key];
   }
 
@@ -359,11 +464,16 @@ export function ProductForm({
     return null;
   }
 
-  function save() {
+  async function save() {
+    if (saving) return;
     const field = validate();
     if (field) {
       setError(field);
-      const jump: Record<string, ProductFormSection> = { name: "details", category: "details", unit: "details" };
+      const jump: Record<string, ProductFormSection> = {
+        name: "details",
+        category: "details",
+        unit: "details",
+      };
       setSection(jump[field] ?? "details");
       requestAnimationFrame(() => {
         if (rootRef.current) focusField(rootRef.current, field);
@@ -374,8 +484,14 @@ export function ProductForm({
       const component = catalog.find((row) => row.id === line.productId);
       if (!component) return false;
       const units = productSellUnits(component);
-      const selectedUnit = units.find((unit) => unit.id === line.unitId) ?? units.find((unit) => unit.symbol === component.unit) ?? units[0];
-      return !selectedUnit || line.quantity * unitInStock(units, component.unit, selectedUnit) > component.stock + 1e-6;
+      const selectedUnit =
+        units.find((unit) => unit.id === line.unitId) ??
+        units.find((unit) => unit.symbol === component.unit) ??
+        units[0];
+      return (
+        !selectedUnit ||
+        line.quantity * unitInStock(units, component.unit, selectedUnit) > component.stock + 1e-6
+      );
     });
     if (insufficient) {
       const component = catalog.find((row) => row.id === insufficient.productId);
@@ -393,7 +509,7 @@ export function ProductForm({
     const metersInPack = isBiggerSymbol(base.symbol)
       ? smaller.find((u) => u.symbol === "m" || u.symbol === stockSymbol)?.contains
       : packRow?.contains;
-    const totals = isNew ? { stock: product.stock, damaged: product.damaged } : lotTotals(lotDraft);
+    const totals = isNew ? { stock: branchTotal, damaged: product.damaged } : lotTotals(lotDraft);
     const next: Product = {
       ...product,
       name: product.name.trim(),
@@ -407,14 +523,18 @@ export function ProductForm({
       retail: stock?.price ?? base.price,
       packQty: metersInPack && metersInPack > 1 ? metersInPack : null,
       packPrice: packRow?.price ?? 0,
-      stock: totals.stock,
+      stock: isNew ? branchTotal : totals.stock,
       damaged: totals.damaged,
       sellUnits,
       warrantyEnabled: Boolean(product.warrantyEnabled && product.warrantyQty > 0),
-      warrantyDays: product.warrantyEnabled ? warrantyDaysOf(product.warrantyQty, product.warrantyUnit) : 0,
-      components: product.isManufactured ? product.components.filter((c) => c.productId && c.quantity > 0) : [],
+      warrantyDays: product.warrantyEnabled
+        ? warrantyDaysOf(product.warrantyQty, product.warrantyUnit)
+        : 0,
+      components: product.isManufactured
+        ? product.components.filter((c) => c.productId && c.quantity > 0)
+        : [],
     };
-    const ok = onCommit(next);
+    const ok = await Promise.resolve(onCommit(next, isNew ? branchQuantities : undefined));
     if (!ok) return;
     if (!isNew) {
       setLots((prev) => [...prev.filter((l) => l.productId !== product.id), ...lotDraft]);
@@ -472,13 +592,22 @@ export function ProductForm({
         stepSection(e.key === "ArrowRight" ? 1 : -1);
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "n" || e.key === "N") && (section === "units" || section === "recipe")) {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key === "n" || e.key === "N") &&
+        (section === "units" || section === "recipe")
+      ) {
         e.preventDefault();
         e.stopPropagation();
         if (section === "units") {
           setUnits([...sellUnits, newExtraUnit()]);
         } else {
-          patch({ components: [...product.components, { id: crypto.randomUUID(), productId: "", quantity: 1 }] });
+          patch({
+            components: [
+              ...product.components,
+              { id: crypto.randomUUID(), productId: "", quantity: 1 },
+            ],
+          });
         }
         return;
       }
@@ -491,7 +620,8 @@ export function ProductForm({
         target.closest(".product-search.is-open") ||
         target.closest(".ui-combo-field.is-open") ||
         target.closest(".ui-combo-menu")
-      ) return;
+      )
+        return;
       if (target.tagName === "BUTTON") return;
 
       const root = rootRef.current?.querySelector<HTMLElement>(".product-form-pane");
@@ -511,7 +641,9 @@ export function ProductForm({
         return;
       }
       if (!stepSection(e.shiftKey ? -1 : 1)) {
-        rootRef.current?.querySelector<HTMLButtonElement>(".product-form-actions .is-primary")?.focus();
+        rootRef.current
+          ?.querySelector<HTMLButtonElement>(".product-form-actions .is-primary")
+          ?.focus();
       }
     }
     window.addEventListener("keydown", onKey, true);
@@ -521,9 +653,15 @@ export function ProductForm({
   const typeValue = product.isManufactured ? "manufactured" : "standard";
 
   return (
-    <div className="product-form [position:relative] [display:flex] [flex-direction:column] [flex:1] [min-height:0] [min-width:0] [height:100%] [overflow:hidden]" ref={rootRef}>
+    <div
+      className="product-form [position:relative] [display:flex] [flex-direction:column] [flex:1] [min-height:0] [min-width:0] [height:100%] [overflow:hidden]"
+      ref={rootRef}
+    >
       {flash ? (
-        <p className="product-saved [position:absolute] [top:10px] [left:50%] [z-index:4] [display:flex] [align-items:center] [gap:6px] [margin:0] [padding:6px_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [box-shadow:0_8px_20px_rgba(15,_23,_42,_0.12)] [font-size:12px] [font-weight:700] [color:var(--accent-deep)] [transform:translateX(-50%)] [pointer-events:none]" role="status">
+        <p
+          className="product-saved [position:absolute] [top:10px] [left:50%] [z-index:4] [display:flex] [align-items:center] [gap:6px] [margin:0] [padding:6px_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [box-shadow:0_8px_20px_rgba(15,_23,_42,_0.12)] [font-size:12px] [font-weight:700] [color:var(--accent-deep)] [transform:translateX(-50%)] [pointer-events:none]"
+          role="status"
+        >
           <Check size={14} /> Product saved
         </p>
       ) : null}
@@ -538,23 +676,31 @@ export function ProductForm({
           }}
           items={sections.map((id) => ({
             id,
-            tone: id === "recipe" ? "recipe" as const : undefined,
+            tone: id === "recipe" ? ("recipe" as const) : undefined,
             label:
               id === "details"
                 ? "Details"
-                : id === "units"
-                  ? "Units & prices"
-                  : id === "lots"
-                    ? "Lots"
-                    : id === "recipe"
-                      ? "Recipe"
-                      : "Warranty",
+                : id === "branches"
+                  ? "Branches"
+                  : id === "units"
+                    ? "Units & prices"
+                    : id === "lots"
+                      ? "Lots"
+                      : id === "recipe"
+                        ? "Recipe"
+                        : "Warranty",
           }))}
         />
         <p className="product-nav-hint [margin:0] [display:inline-flex] [align-items:center] [gap:4px] [font-size:11px] [color:var(--muted)] [white-space:nowrap] [flex-shrink:0]">
-          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Ctrl</kbd>
-          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">←</kbd>
-          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">→</kbd>
+          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+            Ctrl
+          </kbd>
+          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+            ←
+          </kbd>
+          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+            →
+          </kbd>
           Switch
         </p>
       </div>
@@ -562,10 +708,15 @@ export function ProductForm({
       {section === "details" ? (
         <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
           <div className="product-form-grid [display:grid] [grid-template-columns:1fr_1fr] [gap:10px_14px]">
-            <Field label="Name" className="is-full" error={error === "name" ? "Name is required" : undefined}>
+            <Field
+              label="Name"
+              className="is-full"
+              error={error === "name" ? "Name is required" : undefined}
+            >
               <TextInput
                 data-field="name"
                 autoFocus
+                maxLength={FIELD_LIMITS.productName}
                 placeholder="e.g. 1.5mm copper wire"
                 value={product.name}
                 onChange={(e) => patch({ name: e.target.value })}
@@ -578,9 +729,12 @@ export function ProductForm({
                 value={product.category}
                 onChange={(v) => patch({ category: v })}
                 placeholder="Choose category"
-                searchPlaceholder="Type to search"
+                searchPlaceholder="Type to search or add"
                 options={categoryOptions.map((c) => ({ value: c, label: c }))}
                 clearable={false}
+                disabled={creatingCategory}
+                onCreate={(label) => void addCategory(label)}
+                createLabel="Add category"
               />
             </Field>
             <Field label="Unit" error={error === "unit" ? "Choose a unit" : undefined}>
@@ -595,17 +749,7 @@ export function ProductForm({
                 clearable={false}
               />
             </Field>
-            {isNew ? (
-              <div className="product-qty-field [display:grid] [gap:6px] is-full">
-                <UnitQtyFields
-                  label="Quantity"
-                  units={sellUnits}
-                  stockSymbol={product.unit || base.symbol || "pc"}
-                  value={product.stock}
-                  onChange={(n) => patch({ stock: n })}
-                />
-              </div>
-            ) : (
+            {!isNew ? (
               <div className="product-qty-field [display:grid] [gap:6px] is-full">
                 <LinkedUnitBoxes
                   label="Total quantity (all lots)"
@@ -614,7 +758,7 @@ export function ProductForm({
                   stockQty={lotTotals(lotDraft).stock}
                 />
               </div>
-            )}
+            ) : null}
             {isNew ? (
               <Field label="Supplier">
                 <SearchableSelect
@@ -622,20 +766,31 @@ export function ProductForm({
                   onChange={(v) => patch({ supplierId: v })}
                   placeholder="Optional"
                   searchPlaceholder="Type to search"
-                  options={suppliers.filter((s) => s.isActive).map((s) => ({ value: s.id, label: s.name }))}
+                  options={suppliers
+                    .filter((s) => s.isActive)
+                    .map((s) => ({ value: s.id, label: s.name }))}
                 />
               </Field>
             ) : (
               <div className="product-supplier-list [display:grid] [gap:6px]">
-                <span className="field-label [font-size:12px] [font-weight:600] [color:var(--sub)]">Suppliers</span>
+                <span className="field-label [font-size:12px] [font-weight:600] [color:var(--sub)]">
+                  Suppliers
+                </span>
                 {activeSuppliers.length === 0 ? (
-                  <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">No active lots. Suppliers show here when a lot still has quantity.</p>
+                  <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
+                    No active lots. Suppliers show here when a lot still has quantity.
+                  </p>
                 ) : (
                   <div className="ui-chip-row [display:flex] [flex-wrap:wrap] [gap:6px]">
                     {activeSuppliers.map((s) => (
-                      <span key={s.id} className="ui-chip [display:inline-flex] [align-items:center] [gap:6px] [height:26px] [padding:0_8px_0_10px] [border:1px_solid_color-mix(in_srgb,_var(--accent)_28%,_transparent)] [border-radius:999px] [background:var(--accent-bg)] [color:var(--accent-deep)] [font-size:11px] [font-weight:650] [cursor:pointer]">
+                      <span
+                        key={s.id}
+                        className="ui-chip [display:inline-flex] [align-items:center] [gap:6px] [height:26px] [padding:0_8px_0_10px] [border:1px_solid_color-mix(in_srgb,_var(--accent)_28%,_transparent)] [border-radius:999px] [background:var(--accent-bg)] [color:var(--accent-deep)] [font-size:11px] [font-weight:650] [cursor:pointer]"
+                      >
                         <span className="ui-chip-label [opacity:0.75]">{s.name}</span>
-                        <span className="ui-chip-value [max-width:140px] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]">{s.lots.join(", ")}</span>
+                        <span className="ui-chip-value [max-width:140px] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]">
+                          {s.lots.join(", ")}
+                        </span>
                       </span>
                     ))}
                   </div>
@@ -644,29 +799,35 @@ export function ProductForm({
             )}
             <Field label="Product type">
               <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Product type">
-                {([
-                  { id: "standard", label: "Standard", icon: Package },
-                  { id: "manufactured", label: "Manufactured", icon: Factory },
-                ] as const).map((option) => {
+                {(
+                  [
+                    { id: "standard", label: "Standard", icon: Package },
+                    { id: "manufactured", label: "Manufactured", icon: Factory },
+                  ] as const
+                ).map((option) => {
                   const selected = typeValue === option.id;
                   const Icon = option.icon;
-                  const selectedStyle = option.id === "manufactured"
-                    ? "border-violet-500 bg-violet-50 text-violet-700 ring-violet-500/10"
-                    : "border-accent bg-accent-bg text-accent-deep ring-accent/10";
+                  const selectedStyle =
+                    option.id === "manufactured"
+                      ? "border-violet-500 bg-violet-50 text-violet-700 ring-violet-500/10"
+                      : "border-accent bg-accent-bg text-accent-deep ring-accent/10";
                   return (
                     <button
                       key={option.id}
                       type="button"
                       role="radio"
                       aria-checked={selected}
-                      className={selected
-                        ? `grid h-[38px] grid-cols-[14px_minmax(0,1fr)_12px] items-center gap-1.5 rounded-lg border px-2 text-[11px] font-bold ring-2 ${selectedStyle}`
-                        : "grid h-[38px] grid-cols-[14px_minmax(0,1fr)_12px] items-center gap-1.5 rounded-lg border border-line bg-paper px-2 text-[11px] font-semibold text-sub hover:border-accent/50 hover:bg-bg"
+                      className={
+                        selected
+                          ? `grid h-[38px] grid-cols-[14px_minmax(0,1fr)_12px] items-center gap-1.5 rounded-lg border px-2 text-[11px] font-bold ring-2 ${selectedStyle}`
+                          : "grid h-[38px] grid-cols-[14px_minmax(0,1fr)_12px] items-center gap-1.5 rounded-lg border border-line bg-paper px-2 text-[11px] font-semibold text-sub hover:border-accent/50 hover:bg-bg"
                       }
-                      onClick={() => patch({
-                        isManufactured: option.id === "manufactured",
-                        components: option.id === "manufactured" ? product.components : [],
-                      })}
+                      onClick={() =>
+                        patch({
+                          isManufactured: option.id === "manufactured",
+                          components: option.id === "manufactured" ? product.components : [],
+                        })
+                      }
                     >
                       <Icon size={14} />
                       <span className="text-center">{option.label}</span>
@@ -738,9 +899,16 @@ export function ProductForm({
                         <span>Retail</span>
                       </div>
                       {sellUnits.map((row) => (
-                        <div key={row.id} className="product-fifo-row [display:grid] [grid-template-columns:minmax(64px,_1fr)_repeat(4,_minmax(52px,_1fr))] [gap:4px] [padding:7px_8px] [font-size:11px] [font-variant-numeric:tabular-nums]">
+                        <div
+                          key={row.id}
+                          className="product-fifo-row [display:grid] [grid-template-columns:minmax(64px,_1fr)_repeat(4,_minmax(52px,_1fr))] [gap:4px] [padding:7px_8px] [font-size:11px] [font-variant-numeric:tabular-nums]"
+                        >
                           <span>{row.name || unitLabel(row.symbol || product.unit)}</span>
-                          <span>{money(priceFromStock(sellUnits, stockSymbol, sellingLot.purchasePrice, row))}</span>
+                          <span>
+                            {money(
+                              priceFromStock(sellUnits, stockSymbol, sellingLot.purchasePrice, row),
+                            )}
+                          </span>
                           <span>{money(row.min)}</span>
                           <span>{money(row.wholesale)}</span>
                           <span>{money(row.price)}</span>
@@ -750,7 +918,13 @@ export function ProductForm({
                     {queuedLots.length > 0 ? (
                       <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
                         <span>
-                          Next {queuedLots.map((l) => `${l.lotNumber} ${money(l.purchasePrice)}/${unitLabel(stockSymbol)}`).join(" · ")}
+                          Next{" "}
+                          {queuedLots
+                            .map(
+                              (l) =>
+                                `${l.lotNumber} ${money(l.purchasePrice)}/${unitLabel(stockSymbol)}`,
+                            )
+                            .join(" · ")}
                         </span>
                       </p>
                     ) : null}
@@ -762,6 +936,50 @@ export function ProductForm({
                   </p>
                 )}
               </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {section === "branches" ? (
+        <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
+          <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
+            <strong>{PRODUCT_COPY.branchesTitle}</strong>
+            <span>{PRODUCT_COPY.branchesHint}</span>
+          </p>
+          <div className="rounded-lg border border-line bg-bg/40 p-3">
+            <div className="flex items-center justify-between gap-3 text-[12px]">
+              <span className="font-semibold text-sub">{PRODUCT_COPY.branchesTotal}</span>
+              <strong className="tabular-nums text-ink">
+                {formatStockQty(branchTotal)} {unitLabel(product.unit || base.symbol || "pc")}
+              </strong>
+            </div>
+          </div>
+          <div className="product-small-list [display:grid] [gap:10px]">
+            {branches.length === 0 ? (
+              <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
+                {PRODUCT_COPY.branchesEmpty}
+              </p>
+            ) : (
+              branches.map((branch) => (
+                <div
+                  key={branch.id}
+                  className="product-small-card [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <strong className="text-[13px] text-ink">{branch.name}</strong>
+                  </div>
+                  <UnitQtyFields
+                    label="Quantity"
+                    units={sellUnits}
+                    stockSymbol={product.unit || base.symbol || "pc"}
+                    value={branchQuantities[branch.id] ?? 0}
+                    onChange={(qty) =>
+                      setBranchQuantities((current) => ({ ...current, [branch.id]: qty }))
+                    }
+                  />
+                </div>
+              ))
             )}
           </div>
         </div>
@@ -787,12 +1005,18 @@ export function ProductForm({
           {priceLot ? (
             <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
               <strong>{priceLot.lotNumber}</strong>
-              <span>Supplier {supplierName(priceLot.supplierId) || "—"}. Cost is this lot’s buy price. Min / wholesale / retail are sell prices.</span>
+              <span>
+                Supplier {supplierName(priceLot.supplierId) || "—"}. Cost is this lot’s buy price.
+                Min / wholesale / retail are sell prices.
+              </span>
             </p>
           ) : (
             <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
               <strong>Units & prices</strong>
-              <span>Add a pack or another unit if you need it. Extra prices fill in from the product unit.</span>
+              <span>
+                Add a pack or another unit if you need it. Extra prices fill in from the product
+                unit.
+              </span>
             </p>
           )}
           <div className="product-small-list [display:grid] [gap:10px]">
@@ -801,8 +1025,14 @@ export function ProductForm({
               return (
                 <div
                   key={row.id}
-                  ref={(element) => { unitCards.current[row.id] = element; }}
-                  className={isBase ? "product-small-card relative [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:#f8fafc] is-base" : "product-small-card relative [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:#f8fafc]"}
+                  ref={(element) => {
+                    unitCards.current[row.id] = element;
+                  }}
+                  className={
+                    isBase
+                      ? "product-small-card relative [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)] is-base"
+                      : "product-small-card relative [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)]"
+                  }
                 >
                   <div className="product-small-top [display:grid] [grid-template-columns:minmax(0,_1.1fr)_minmax(90px,_1fr)_36px] [gap:8px] [align-items:end]">
                     <Field label={isBase ? "Product unit" : "Sell as"}>
@@ -813,12 +1043,21 @@ export function ProductForm({
                             setBaseUnit(v);
                             return;
                           }
-                          setExtraField(row.id, { symbol: v, name: unitLabel(v), kind: extraKind(v) });
+                          setExtraField(row.id, {
+                            symbol: v,
+                            name: unitLabel(v),
+                            kind: extraKind(v),
+                          });
                         }}
                         placeholder="Pack, Meter, Gaz…"
                         searchPlaceholder="Type to search"
                         options={unitRows
-                          .filter((u) => !sellUnits.some((other) => other.id !== row.id && other.symbol === u.symbol))
+                          .filter(
+                            (u) =>
+                              !sellUnits.some(
+                                (other) => other.id !== row.id && other.symbol === u.symbol,
+                              ),
+                          )
                           .map((u) => ({ value: u.symbol, label: u.name }))}
                         clearable={false}
                       />
@@ -831,13 +1070,18 @@ export function ProductForm({
                       <Field label={containsLabel(base, pack, row)}>
                         <TextInput
                           inputMode="decimal"
+                          maxLength={FIELD_LIMITS.qty}
                           placeholder="90"
                           value={numStr(row.contains)}
-                          onChange={(e) => setExtraField(row.id, { contains: numVal(e.target.value) })}
+                          onChange={(e) =>
+                            setExtraField(row.id, { contains: numVal(e.target.value) })
+                          }
                         />
                       </Field>
                     )}
-                    {isBase ? <span /> : (
+                    {isBase ? (
+                      <span />
+                    ) : (
                       <Button
                         size="icon"
                         variant="ghost"
@@ -876,27 +1120,43 @@ export function ProductForm({
             onClick={() => setUnits([...sellUnits, newExtraUnit()])}
           >
             Add unit
-            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Ctrl+N</kbd>
+            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+              Ctrl+N
+            </kbd>
           </Button>
         </div>
       ) : null}
 
       {section === "recipe" ? (
         <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
-          <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">Select a component, choose its unit when needed, then enter the quantity.</p>
+          <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
+            Select a component, choose its unit when needed, then enter the quantity.
+          </p>
           <div className="product-unit-table relative grid gap-2 overflow-visible is-recipe">
             {product.components.length === 0 ? (
-              <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">No components yet.</p>
+              <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
+                No components yet.
+              </p>
             ) : (
               product.components.map((line) => (
                 <ProductQuantityPicker
                   key={line.id}
                   products={catalog.filter((row) => row.id !== product.id)}
                   value={line}
-                  onChange={(next) => patch({
-                    components: product.components.map((component) => component.id === line.id ? { ...component, ...next } : component),
-                  })}
-                  onRemove={() => patch({ components: product.components.filter((component) => component.id !== line.id) })}
+                  onChange={(next) =>
+                    patch({
+                      components: product.components.map((component) =>
+                        component.id === line.id ? { ...component, ...next } : component,
+                      ),
+                    })
+                  }
+                  onRemove={() =>
+                    patch({
+                      components: product.components.filter(
+                        (component) => component.id !== line.id,
+                      ),
+                    })
+                  }
                   recipeTone
                 />
               ))
@@ -906,11 +1166,18 @@ export function ProductForm({
             className="product-inline-add [align-self:flex-start]"
             icon={<Plus size={14} />}
             onClick={() =>
-              patch({ components: [...product.components, { id: crypto.randomUUID(), productId: "", quantity: 1 }] })
+              patch({
+                components: [
+                  ...product.components,
+                  { id: crypto.randomUUID(), productId: "", quantity: 1 },
+                ],
+              })
             }
           >
             Add component
-            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Ctrl+N</kbd>
+            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+              Ctrl+N
+            </kbd>
           </Button>
         </div>
       ) : null}
@@ -919,11 +1186,17 @@ export function ProductForm({
         <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
           <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
             <strong>Open lots</strong>
-            <span>Each lot has its own cost. Qty and damage can be Pack, Meter, Gaz — they convert to stock.</span>
+            <span>
+              Each lot has its own cost. Qty and damage can be Pack, Meter, Gaz — they convert to
+              stock.
+            </span>
           </p>
           <div className="product-small-list [display:grid] [gap:10px]">
-            {lotDraft.filter((l) => l.remainingQuantity > 0 || l.damagedQuantity > 0).length === 0 ? (
-              <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">No open lots. Receive stock from Products → Lots.</p>
+            {lotDraft.filter((l) => l.remainingQuantity > 0 || l.damagedQuantity > 0).length ===
+            0 ? (
+              <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
+                No open lots. Receive stock from Products → Lots.
+              </p>
             ) : (
               lotDraft
                 .filter((l) => l.remainingQuantity > 0 || l.damagedQuantity > 0)
@@ -931,47 +1204,61 @@ export function ProductForm({
                   const opened = lotOpened[lot.id] ?? lot.remainingQuantity;
                   const changed = Math.abs(lot.remainingQuantity - opened) > 1e-6;
                   return (
-                  <div key={lot.id} className="product-small-card [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:#f8fafc]">
-                    <div className="product-lot-head [display:flex] [align-items:baseline] [justify-content:space-between] [gap:8px]">
-                      <strong>{lot.lotNumber}</strong>
-                      <span>{supplierName(lot.supplierId) || "No supplier"}</span>
-                    </div>
-                    <Field label="Supplier">
-                      <SearchableSelect
-                        value={lot.supplierId}
-                        onChange={(v) =>
-                          setLotDraft((prev) => prev.map((row) => (row.id === lot.id ? { ...row, supplierId: v } : row)))
+                    <div
+                      key={lot.id}
+                      className="product-small-card [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)]"
+                    >
+                      <div className="product-lot-head [display:flex] [align-items:baseline] [justify-content:space-between] [gap:8px]">
+                        <strong>{lot.lotNumber}</strong>
+                        <span>{supplierName(lot.supplierId) || "No supplier"}</span>
+                      </div>
+                      <Field label="Supplier">
+                        <SearchableSelect
+                          value={lot.supplierId}
+                          onChange={(v) =>
+                            setLotDraft((prev) =>
+                              prev.map((row) =>
+                                row.id === lot.id ? { ...row, supplierId: v } : row,
+                              ),
+                            )
+                          }
+                          placeholder="Choose supplier"
+                          searchPlaceholder="Search suppliers"
+                          options={suppliers
+                            .filter((s) => s.isActive)
+                            .map((s) => ({ value: s.id, label: s.name }))}
+                          clearable={false}
+                        />
+                      </Field>
+                      <UnitQtyFields
+                        label="Qty left"
+                        units={sellUnits}
+                        stockSymbol={stockSymbol}
+                        value={lot.remainingQuantity}
+                        onChange={(n) =>
+                          setLotDraft((prev) =>
+                            prev.map((row) => (row.id === lot.id ? setLotQty(row, n) : row)),
+                          )
                         }
-                        placeholder="Choose supplier"
-                        searchPlaceholder="Search suppliers"
-                        options={suppliers.filter((s) => s.isActive).map((s) => ({ value: s.id, label: s.name }))}
-                        clearable={false}
                       />
-                    </Field>
-                    <UnitQtyFields
-                      label="Qty left"
-                      units={sellUnits}
-                      stockSymbol={stockSymbol}
-                      value={lot.remainingQuantity}
-                      onChange={(n) =>
-                        setLotDraft((prev) => prev.map((row) => (row.id === lot.id ? setLotQty(row, n) : row)))
-                      }
-                    />
-                    {changed ? (
-                      <p className="product-lot-adjusted [margin:0] [font-size:11px] [font-weight:600] [color:var(--teal,_#0f766e)]">
-                        Adjusted {formatMixedQty(product, opened)} → {formatMixedQty(product, lot.remainingQuantity)}
-                      </p>
-                    ) : null}
-                    <UnitQtyFields
-                      label="Damaged"
-                      units={sellUnits}
-                      stockSymbol={stockSymbol}
-                      value={lot.damagedQuantity}
-                      onChange={(n) =>
-                        setLotDraft((prev) => prev.map((row) => (row.id === lot.id ? setLotDamage(row, n) : row)))
-                      }
-                    />
-                  </div>
+                      {changed ? (
+                        <p className="product-lot-adjusted [margin:0] [font-size:11px] [font-weight:600] [color:var(--teal,_#0f766e)]">
+                          Adjusted {formatMixedQty(product, opened)} →{" "}
+                          {formatMixedQty(product, lot.remainingQuantity)}
+                        </p>
+                      ) : null}
+                      <UnitQtyFields
+                        label="Damaged"
+                        units={sellUnits}
+                        stockSymbol={stockSymbol}
+                        value={lot.damagedQuantity}
+                        onChange={(n) =>
+                          setLotDraft((prev) =>
+                            prev.map((row) => (row.id === lot.id ? setLotDamage(row, n) : row)),
+                          )
+                        }
+                      />
+                    </div>
                   );
                 })
             )}
@@ -981,10 +1268,12 @@ export function ProductForm({
 
       {section === "warranty" ? (
         <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
-          <div className="product-flag [display:flex] [align-items:center] [padding:8px_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:#f8fafc]">
+          <div className="product-flag [display:flex] [align-items:center] [padding:8px_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)]">
             <Toggle
               checked={Boolean(product.warrantyEnabled)}
-              onChange={(v) => patch({ warrantyEnabled: v, warrantyQty: v ? product.warrantyQty || 12 : 0 })}
+              onChange={(v) =>
+                patch({ warrantyEnabled: v, warrantyQty: v ? product.warrantyQty || 12 : 0 })
+              }
               label="Warranty enabled"
             />
           </div>
@@ -993,6 +1282,7 @@ export function ProductForm({
               <Field label="Duration">
                 <TextInput
                   inputMode="numeric"
+                  maxLength={FIELD_LIMITS.shortNumber}
                   placeholder="12"
                   value={numStr(product.warrantyQty)}
                   onChange={(e) => patch({ warrantyQty: numVal(e.target.value) })}
@@ -1022,7 +1312,9 @@ export function ProductForm({
               </Field>
             </div>
           ) : (
-            <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">Turn warranty on only when this product is covered.</p>
+            <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
+              Turn warranty on only when this product is covered.
+            </p>
           )}
         </div>
       ) : null}
@@ -1040,13 +1332,17 @@ export function ProductForm({
           <span />
         )}
         <div className="product-form-actions [display:flex] [gap:8px] [flex-shrink:0]">
-          <Button onClick={onClose}>
+          <Button onClick={onClose} disabled={saving}>
             Cancel
-            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Esc</kbd>
+            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+              Esc
+            </kbd>
           </Button>
-          <Button variant="primary" onClick={save}>
-            Save product
-            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">F12</kbd>
+          <Button variant="primary" onClick={() => void save()} disabled={saving}>
+            {saving ? "Saving…" : "Save product"}
+            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+              F12
+            </kbd>
           </Button>
         </div>
       </div>

@@ -10,8 +10,9 @@ use crate::backend::{
     context::RequestContext,
     dto::{
         ClaimListQuery, ClaimResponse, CreateClaimRequest, CreateReturnRequest,
-        CustomerLedgerResponse, CustomerPaymentRequest, CustomerPaymentResponse, Paginated,
-        ReturnListQuery, ReturnResponse,
+        CustomerLedgerEntryResponse, CustomerLedgerListQuery, CustomerLedgerResponse,
+        CustomerPaymentRequest, CustomerPaymentResponse, Paginated, ReturnListQuery,
+        ReturnResponse,
     },
     errors::AppError,
     services::CreditService,
@@ -27,14 +28,22 @@ pub async fn get_customer_ledger(
     ))
 }
 
+pub async fn list_customer_ledgers(
+    State(state): State<AppState>,
+    Query(query): Query<CustomerLedgerListQuery>,
+) -> Result<Json<Paginated<CustomerLedgerEntryResponse>>, AppError> {
+    Ok(Json(
+        CreditService::list_customer_ledgers(&state.db, query).await?,
+    ))
+}
+
 pub async fn create_customer_payment(
     State(state): State<AppState>,
     ctx: RequestContext,
     Path(id): Path<String>,
     Json(request): Json<CustomerPaymentRequest>,
 ) -> Result<(StatusCode, Json<CustomerPaymentResponse>), AppError> {
-    let payment =
-        CreditService::customer_payment(&state.db, &ctx, parse_id(&id)?, request).await?;
+    let payment = CreditService::customer_payment(&state.db, &ctx, parse_id(&id)?, request).await?;
     Ok((StatusCode::CREATED, Json(payment)))
 }
 

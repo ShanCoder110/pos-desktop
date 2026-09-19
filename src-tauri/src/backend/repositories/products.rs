@@ -1,14 +1,14 @@
+use rust_decimal::{prelude::ToPrimitive, Decimal};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
     DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult, QueryFilter, Statement,
 };
-use rust_decimal::{prelude::ToPrimitive, Decimal};
 use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::backend::{
     constants::ERROR_INVALID_CATEGORY_ID,
-    dto::{ProductListQuery, ProductResponse, ProductSellUnitResponse},
+    dto::{ProductBranchStockResponse, ProductListQuery, ProductResponse, ProductSellUnitResponse},
     entities::{product, product_lot, product_unit, Product, ProductUnit},
     errors::AppError,
     util::parse_uuid,
@@ -44,6 +44,14 @@ struct CountRow {
     count: i64,
 }
 
+#[derive(Debug, FromQueryResult)]
+struct BranchStockRow {
+    product_id: Uuid,
+    branch_id: Uuid,
+    branch_name: String,
+    quantity: Decimal,
+}
+
 pub struct ProductRepository;
 
 impl ProductRepository {
@@ -75,8 +83,7 @@ impl ProductRepository {
             Some("sku") => "p.sku",
             Some("stock") => "stock",
             Some("cost") => "current_cost",
-            Some("createdAt") => "p.created_at",
-            _ => "p.name",
+            _ => "p.created_at",
         };
         let direction = query.page.sort_direction.unwrap_or_default().sql();
         let (projection, mut projection_values) = projection_sql(branch_id);
@@ -227,19 +234,19 @@ impl ProductRepository {
 fn projection_sql(branch_id: Option<Uuid>) -> (String, Vec<sea_orm::Value>) {
     let (stock_expr, damaged_expr, mut values) = if let Some(branch_id) = branch_id {
         (
-            "COALESCE((SELECT SUM(bl.remaining_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND bl.branch_id = ?), 0)".to_owned(),
-            "COALESCE((SELECT SUM(bl.damaged_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND bl.branch_id = ?), 0)".to_owned(),
+            "CAST(COALESCE((SELECT SUM(bl.remaining_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND bl.branch_id = ?), 0) AS REAL)".to_owned(),
+            "CAST(COALESCE((SELECT SUM(bl.damaged_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND bl.branch_id = ?), 0) AS REAL)".to_owned(),
             vec![branch_id.into(), branch_id.into()],
         )
     } else {
         (
-            "COALESCE((SELECT SUM(bl.remaining_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL), 0)".to_owned(),
-            "COALESCE((SELECT SUM(bl.damaged_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL), 0)".to_owned(),
+            "CAST(COALESCE((SELECT SUM(bl.remaining_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL), 0) AS REAL)".to_owned(),
+            "CAST(COALESCE((SELECT SUM(bl.damaged_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL), 0) AS REAL)".to_owned(),
             Vec::new(),
         )
     };
     let sql = format!(
-        "SELECT p.id, p.category_id, p.base_unit_id, p.name, p.sku, p.barcode, p.product_type, p.minimum_stock, p.warranty_duration, p.warranty_unit, p.warranty_note, p.is_active, p.created_at, p.updated_at, c.name AS category, u.symbol AS unit_symbol, {stock_expr} AS stock, {damaged_expr} AS damaged, COALESCE((SELECT pl.purchase_price_per_base FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL ORDER BY pl.received_date DESC, pl.created_at DESC LIMIT 1), 0) AS current_cost, (SELECT pl.supplier_id FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL ORDER BY pl.received_date DESC, pl.created_at DESC LIMIT 1) AS supplier_id, COALESCE((SELECT COUNT(*) FROM warranty_claim_items wci WHERE wci.product_id = p.id), 0) AS claims FROM products p JOIN product_categories c ON c.id = p.category_id JOIN units u ON u.id = p.base_unit_id"
+        "SELECT p.id, p.category_id, p.base_unit_id, p.name, p.sku, p.barcode, p.product_type, p.minimum_stock, p.warranty_duration, p.warranty_unit, p.warranty_note, p.is_active, p.created_at, p.updated_at, c.name AS category, u.symbol AS unit_symbol, {stock_expr} AS stock, {damaged_expr} AS damaged, CAST(COALESCE((SELECT pl.purchase_price_per_base FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL ORDER BY pl.received_date DESC, pl.created_at DESC LIMIT 1), 0) AS REAL) AS current_cost, (SELECT pl.supplier_id FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL ORDER BY pl.received_date DESC, pl.created_at DESC LIMIT 1) AS supplier_id, COALESCE((SELECT COUNT(*) FROM warranty_claim_items wci WHERE wci.product_id = p.id), 0) AS claims FROM products p JOIN product_categories c ON c.id = p.category_id JOIN units u ON u.id = p.base_unit_id"
     );
     let _ = &mut values;
     (sql, values)
@@ -284,11 +291,7 @@ fn build_conditions(
         parts.push(stock_compare(branch_id, &mut values, "> 0"));
     }
     if query.low_stock == Some(true) {
-        parts.push(stock_compare(
-            branch_id,
-            &mut values,
-            "< p.minimum_stock",
-        ));
+        parts.push(stock_compare(branch_id, &mut values, "< p.minimum_stock"));
     }
     if let Some(min_price) = query.min_price {
         parts.push("EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.retail_price >= ? AND pu.deleted_at IS NULL)".to_owned());
@@ -301,11 +304,7 @@ fn build_conditions(
     Ok((parts.join(" AND "), values))
 }
 
-fn stock_compare(
-    branch_id: Option<Uuid>,
-    values: &mut Vec<sea_orm::Value>,
-    op: &str,
-) -> String {
+fn stock_compare(branch_id: Option<Uuid>, values: &mut Vec<sea_orm::Value>, op: &str) -> String {
     if let Some(branch_id) = branch_id {
         values.push(branch_id.into());
         format!(
@@ -318,6 +317,42 @@ fn stock_compare(
     }
 }
 
+async fn load_branch_stocks(
+    database: &DatabaseConnection,
+    product_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<ProductBranchStockResponse>>, AppError> {
+    if product_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders = product_ids
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT pl.product_id, bl.branch_id, b.name AS branch_name, CAST(SUM(bl.remaining_base_quantity) AS REAL) AS quantity FROM branch_lots bl INNER JOIN product_lots pl ON pl.id = bl.product_lot_id AND pl.deleted_at IS NULL INNER JOIN branches b ON b.id = bl.branch_id AND b.deleted_at IS NULL WHERE pl.product_id IN ({placeholders}) GROUP BY pl.product_id, bl.branch_id, b.name HAVING quantity > 0 ORDER BY b.name"
+    );
+    let values: Vec<sea_orm::Value> = product_ids.iter().map(|id| (*id).into()).collect();
+    let rows = BranchStockRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        sql,
+        values,
+    ))
+    .all(database)
+    .await?;
+    let mut map: HashMap<Uuid, Vec<ProductBranchStockResponse>> = HashMap::new();
+    for row in rows {
+        map.entry(row.product_id)
+            .or_default()
+            .push(ProductBranchStockResponse {
+                branch_id: row.branch_id.to_string(),
+                branch_name: row.branch_name,
+                quantity: decimal(row.quantity),
+            });
+    }
+    Ok(map)
+}
+
 async fn hydrate(
     database: &DatabaseConnection,
     rows: Vec<ProductProjection>,
@@ -326,6 +361,7 @@ async fn hydrate(
         return Ok(Vec::new());
     }
     let ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
+    let branch_stocks = load_branch_stocks(database, &ids).await?;
     let unit_models = ProductUnit::find()
         .filter(product_unit::Column::ProductId.is_in(ids))
         .filter(product_unit::Column::DeletedAt.is_null())
@@ -398,9 +434,15 @@ async fn hydrate(
                 })
                 .collect();
             let is_linear = is_linear_unit(&row.unit_symbol)
-                || sell_units.iter().any(|unit| {
-                    is_linear_unit(&unit.symbol) || is_linear_name(&unit.name)
-                });
+                || sell_units
+                    .iter()
+                    .any(|unit| is_linear_unit(&unit.symbol) || is_linear_name(&unit.name));
+            let branch_stock = branch_stocks.get(&row.id).cloned().unwrap_or_default();
+            let total_stock = if branch_stock.is_empty() {
+                decimal(row.stock)
+            } else {
+                branch_stock.iter().map(|entry| entry.quantity).sum()
+            };
             ProductResponse {
                 id: row.id.to_string(),
                 name: row.name,
@@ -428,6 +470,8 @@ async fn hydrate(
                 claims: row.claims,
                 damaged: decimal(row.damaged),
                 stock: decimal(row.stock),
+                total_stock,
+                branch_stock,
                 components: Vec::new(),
                 sell_units,
                 is_active: row.is_active,
@@ -444,7 +488,9 @@ fn is_linear_unit(symbol: &str) -> bool {
 
 fn is_linear_name(name: &str) -> bool {
     let lower = name.to_lowercase();
-    lower.contains("meter") || lower.contains("gaz") || lower.split_whitespace().any(|part| part == "m")
+    lower.contains("meter")
+        || lower.contains("gaz")
+        || lower.split_whitespace().any(|part| part == "m")
 }
 
 fn decimal(value: Decimal) -> f64 {

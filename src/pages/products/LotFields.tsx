@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Field, MoneyInput, SelectInput, TextInput } from "@/components/common";
+import { FIELD_LIMITS } from "@/shared/constants/fields";
 import type { ProductSellUnit } from "@/shared/types";
 import {
   baseUnit,
@@ -86,16 +87,21 @@ export function UnitQtyFields({
 
   return (
     <div className="unit-qty [display:grid] [gap:8px]">
-      <span className="unit-qty-label [font-size:11px] [font-weight:700] [color:var(--muted)]">{label}</span>
+      <span className="unit-qty-label [font-size:11px] [font-weight:700] [color:var(--muted)]">
+        {label}
+      </span>
       <UnitGrid units={units}>
         {(unit) => (
           <Field label={unit.name || unitLabel(unit.symbol || stockSymbol)}>
             <TextInput
               inputMode="decimal"
+              maxLength={FIELD_LIMITS.qty}
               placeholder="0"
               readOnly={disabled}
               value={
-                editingId === unit.id ? draft : displayQty(qtyInUnit(units, stockSymbol, unit, value))
+                editingId === unit.id
+                  ? draft
+                  : displayQty(qtyInUnit(units, stockSymbol, unit, value))
               }
               onFocus={() => {
                 setEditingId(unit.id);
@@ -204,6 +210,7 @@ export function LotUnitLines({
             <Field label="Received">
               <TextInput
                 inputMode="decimal"
+                maxLength={FIELD_LIMITS.qty}
                 placeholder="0"
                 value={qtyValue("received", unit)}
                 onFocus={() => {
@@ -218,6 +225,7 @@ export function LotUnitLines({
               <Field label="Left">
                 <TextInput
                   inputMode="decimal"
+                  maxLength={FIELD_LIMITS.qty}
                   placeholder="0"
                   value={qtyValue("left", unit)}
                   onFocus={() => {
@@ -232,6 +240,7 @@ export function LotUnitLines({
             <Field label="Damaged">
               <TextInput
                 inputMode="decimal"
+                maxLength={FIELD_LIMITS.qty}
                 placeholder="0"
                 value={qtyValue("damaged", unit)}
                 onFocus={() => {
@@ -285,7 +294,9 @@ export function UnitPriceFields({
 
   return (
     <div className="unit-qty [display:grid] [gap:8px]">
-      <span className="unit-qty-label [font-size:11px] [font-weight:700] [color:var(--muted)]">{label}</span>
+      <span className="unit-qty-label [font-size:11px] [font-weight:700] [color:var(--muted)]">
+        {label}
+      </span>
       <UnitGrid units={units}>
         {(unit) => (
           <Field label={unit.name || unitLabel(unit.symbol || stockSymbol)}>
@@ -293,7 +304,13 @@ export function UnitPriceFields({
               placeholder="0.00"
               value={numStr(prices[unit.id] ?? 0)}
               onChange={(event) => {
-                const next = cascadeDownPrices(units, stockSymbol, prices, unit, numVal(event.target.value));
+                const next = cascadeDownPrices(
+                  units,
+                  stockSymbol,
+                  prices,
+                  unit,
+                  numVal(event.target.value),
+                );
                 setPrices(next);
                 onChange(stockPriceFromMap(units, stockSymbol, next));
               }}
@@ -322,14 +339,22 @@ export function LinkedUnitBoxes({
   const asPrice = stockPrice != null;
   return (
     <div className="unit-qty [display:grid] [gap:8px]">
-      <span className="unit-qty-label [font-size:11px] [font-weight:700] [color:var(--muted)]">{label}</span>
+      <span className="unit-qty-label [font-size:11px] [font-weight:700] [color:var(--muted)]">
+        {label}
+      </span>
       <div className="unit-qty-grid [display:grid] [grid-template-columns:repeat(auto-fit,_minmax(110px,_1fr))] [gap:8px_10px]">
         {ordered.map((u) => (
           <Field key={u.id} label={u.name || unitLabel(u.symbol || stockSymbol)}>
             {asPrice ? (
-              <MoneyInput disabled value={String(priceFromStock(units, stockSymbol, stockPrice, u))} />
+              <MoneyInput
+                disabled
+                value={String(priceFromStock(units, stockSymbol, stockPrice, u))}
+              />
             ) : (
-              <TextInput disabled value={formatStockQty(qtyInUnit(units, stockSymbol, u, stockQty ?? 0))} />
+              <TextInput
+                disabled
+                value={formatStockQty(qtyInUnit(units, stockSymbol, u, stockQty ?? 0))}
+              />
             )}
           </Field>
         ))}

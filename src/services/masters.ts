@@ -12,8 +12,7 @@ export interface MasterRecord {
   notes?: string;
   isActive: boolean;
   precision?: number;
-  creditLimit?: number;
-  paymentTermsDays?: number;
+  balance?: number;
   isWalkIn?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -28,31 +27,50 @@ export interface MasterPayload {
   notes?: string;
   isActive?: boolean;
   precision?: number;
-  creditLimit?: number;
-  paymentTermsDays?: number;
   isWalkIn?: boolean;
+  previousBalance?: number;
 }
 
 export type MasterResource = "categories" | "units" | "suppliers" | "customers";
+
+export type MasterListParams = {
+  page?: number;
+  perPage?: number;
+  search?: string;
+  isActive?: boolean;
+  name?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  notes?: string;
+  balance?: string;
+};
 
 const pathFor = (resource: MasterResource) => API_ROUTES[resource];
 
 export function listMasterRecords(
   resource: MasterResource,
-  params: { page?: number; perPage?: number; search?: string; isActive?: boolean } = {},
+  params: MasterListParams = {},
   signal?: AbortSignal,
 ) {
-  return apiRequest<PaginatedResponse<MasterRecord>>(
-    `${pathFor(resource)}${queryString(params)}`,
-    { signal },
-  );
+  return apiRequest<PaginatedResponse<MasterRecord>>(`${pathFor(resource)}${queryString(params)}`, {
+    signal,
+  });
 }
 
-export async function listAllMasterRecords(resource: MasterResource, signal?: AbortSignal) {
+export async function listAllMasterRecords(
+  resource: MasterResource,
+  params: Omit<MasterListParams, "page" | "perPage"> = {},
+  signal?: AbortSignal,
+) {
   const records: MasterRecord[] = [];
   let page = 1;
   for (;;) {
-    const response = await listMasterRecords(resource, { page, perPage: MAX_PAGE_SIZE }, signal);
+    const response = await listMasterRecords(
+      resource,
+      { ...params, page, perPage: MAX_PAGE_SIZE },
+      signal,
+    );
     records.push(...response.data);
     if (!response.meta.hasNextPage) return records;
     page += 1;

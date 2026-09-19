@@ -9,10 +9,12 @@ import {
   LayoutDashboard,
   Package,
   Receipt,
+  Trash2,
   Truck,
   Users,
   Wallet,
   UserCog,
+  UserRound,
 } from "lucide-react";
 
 export type NavItem = {
@@ -30,7 +32,7 @@ export const managementNav: { label: string; items: NavItem[] }[] = [
     label: "SALES",
     items: [
       { to: routes.sales, label: "Sales", icon: Receipt },
-      { to: routes.credit, label: "Credit / Udhaar", icon: BookOpen },
+      { to: routes.credit, label: "Customer credit", icon: BookOpen },
     ],
   },
   {
@@ -42,12 +44,13 @@ export const managementNav: { label: string; items: NavItem[] }[] = [
     items: [
       { to: routes.customers, label: "Customers", icon: Users },
       { to: routes.suppliers, label: "Suppliers", icon: Truck },
-      { to: routes.employees, label: "Staff", icon: UserCog },
+      { to: routes.employees, label: "Employees", icon: UserCog },
     ],
   },
   {
     label: "OPERATIONS",
     items: [
+      { to: routes.trash, label: "Trash", icon: Trash2 },
       { to: routes.shops, label: "Branches", icon: Building2 },
       { to: routes.production, label: "Production", icon: Factory },
       { to: routes.expenses, label: "Expenses", icon: Wallet },
@@ -57,6 +60,10 @@ export const managementNav: { label: string; items: NavItem[] }[] = [
   {
     label: "REPORTING",
     items: [{ to: routes.reports, label: "Reports", icon: BarChart3 }],
+  },
+  {
+    label: "MANAGEMENT",
+    items: [{ to: routes.users, label: "Users", icon: UserRound }],
   },
 ];
 
@@ -68,7 +75,7 @@ export const pageMeta: Record<string, { title: string; subtitle?: string }> = {
   [routes.salesProducts]: { title: "Sales", subtitle: "Paid, credit, partial, and repair sales" },
   [routes.invoices]: { title: "Sales", subtitle: "Completed bills from the counter" },
   [routes.returns]: { title: "Sales", subtitle: "Refunds and replacements against invoices" },
-  [routes.credit]: { title: "Credit / Udhaar", subtitle: "Customer khata. + owes, − advance" },
+  [routes.credit]: { title: "Customer credit", subtitle: "Customer balance. + owes, − advance" },
   [routes.products]: { title: "Products", subtitle: "Catalog, lots, units, and transfers" },
   [routes.productsClaims]: { title: "Sales", subtitle: "Products with claims" },
   [routes.productsLow]: { title: "Products", subtitle: "Plan stock replenishment" },
@@ -79,23 +86,49 @@ export const pageMeta: Record<string, { title: string; subtitle?: string }> = {
   [routes.categories]: { title: "Products", subtitle: "Groups used on the catalog" },
   [routes.transfers]: { title: "Products", subtitle: "Move lots between branches" },
   [routes.reorder]: { title: "Lots", subtitle: "Receive stock as a new lot" },
-  [routes.customers]: { title: "Customers", subtitle: "Khata, credit limit, and collections" },
+  [routes.customers]: { title: "Customers", subtitle: "Balance, credit sales, and collections" },
   [routes.suppliers]: { title: "Suppliers", subtitle: "Purchasing contacts and stock sources" },
-  [routes.employees]: { title: "Staff", subtitle: "Users, roles, and permissions" },
+  [routes.employees]: {
+    title: "Employees",
+    subtitle: "Staff payouts and ledger. Owner is under Users.",
+  },
+  [routes.users]: { title: "Users", subtitle: "Sign-in accounts and roles" },
+  [routes.trash]: { title: "Trash", subtitle: "Restore or permanently delete removed records" },
   [routes.production]: { title: "Production", subtitle: "BOM jobs, damage, and commission" },
   [routes.repair]: { title: "Production", subtitle: "BOM jobs, damage, and commission" },
   [routes.expenses]: { title: "Expenses", subtitle: "Money leaving the shop" },
   [routes.transactions]: { title: "Transactions", subtitle: "Cash in and cash out" },
   [routes.shops]: { title: "Branches", subtitle: "Store, warehouse, repair, production" },
   [routes.reports]: { title: "Reports", subtitle: "Period sales, expenses, stock, and PDF export" },
-  [routes.analytics]: { title: "Reports", subtitle: "Period sales, expenses, stock, and PDF export" },
+  [routes.analytics]: {
+    title: "Reports",
+    subtitle: "Period sales, expenses, stock, and PDF export",
+  },
   [routes.settings]: { title: "Settings", subtitle: "Shop profile, receipt, printer, and sync" },
-  [routes.settingsReceipt]: { title: "Settings", subtitle: "Shop profile, receipt, printer, and sync" },
-  [routes.settingsProducts]: { title: "Settings", subtitle: "Shop profile, receipt, printer, and sync" },
-  [routes.settingsLocalization]: { title: "Settings", subtitle: "Shop profile, receipt, printer, and sync" },
-  [routes.settingsPrinter]: { title: "Settings", subtitle: "Shop profile, receipt, printer, and sync" },
-  [routes.settingsDevices]: { title: "Settings", subtitle: "Shop profile, receipt, printer, and sync" },
-  [routes.settingsSync]: { title: "Settings", subtitle: "Shop profile, receipt, printer, and sync" },
+  [routes.settingsReceipt]: {
+    title: "Settings",
+    subtitle: "Shop profile, receipt, printer, and sync",
+  },
+  [routes.settingsProducts]: {
+    title: "Settings",
+    subtitle: "Shop profile, receipt, printer, and sync",
+  },
+  [routes.settingsLocalization]: {
+    title: "Settings",
+    subtitle: "Shop profile, receipt, printer, and sync",
+  },
+  [routes.settingsPrinter]: {
+    title: "Settings",
+    subtitle: "Shop profile, receipt, printer, and sync",
+  },
+  [routes.settingsDevices]: {
+    title: "Settings",
+    subtitle: "Shop profile, receipt, printer, and sync",
+  },
+  [routes.settingsSync]: {
+    title: "Settings",
+    subtitle: "Shop profile, receipt, printer, and sync",
+  },
 };
 
 export const navGroups = managementNav;

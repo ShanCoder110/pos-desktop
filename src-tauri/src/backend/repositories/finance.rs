@@ -90,6 +90,7 @@ struct LocalizationRow {
     currency_code: String,
     language: String,
     expiry_reminder_days: i32,
+    payout_deduct_from: Option<String>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -125,7 +126,7 @@ impl FinanceRepository {
     ) -> Result<Vec<ExpenseCategoryResponse>, AppError> {
         let rows = CategoryRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, name, is_active, created_at, updated_at FROM expense_categories WHERE deleted_at IS NULL ORDER BY name ASC",
+            "SELECT id, name, is_active, created_at, updated_at FROM expense_categories WHERE deleted_at IS NULL ORDER BY created_at DESC",
             [],
         ))
         .all(database)
@@ -198,7 +199,7 @@ impl FinanceRepository {
         let rows = ExpenseRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
             format!(
-                "SELECT id, branch_id, category_id, amount, payment_method, description, expense_date, money_transaction_id, created_at FROM expenses WHERE {conditions} ORDER BY expense_date DESC, created_at DESC LIMIT ? OFFSET ?"
+                "SELECT id, branch_id, category_id, amount, payment_method, description, expense_date, money_transaction_id, created_at FROM expenses WHERE {conditions} ORDER BY created_at DESC LIMIT ? OFFSET ?"
             ),
             values,
         ))
@@ -232,7 +233,10 @@ impl FinanceRepository {
         let now = now_utc();
         let amount = money_value(request.amount);
         let method = request.payment_method.trim().to_uppercase();
-        if !matches!(method.as_str(), "CASH" | "CARD" | "BANK" | "MOBILE" | "OTHER") {
+        if !matches!(
+            method.as_str(),
+            "CASH" | "CARD" | "BANK" | "MOBILE" | "OTHER"
+        ) {
             return Err(AppError::Validation("Invalid paymentMethod.".into()));
         }
         let expense_date = match &request.expense_date {
@@ -326,7 +330,7 @@ impl FinanceRepository {
         let rows = MoneyRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
             format!(
-                "SELECT id, branch_id, cash_session_id, direction, type AS transaction_type, amount, payment_method, reference_type, reference_id, party_type, party_id, notes, occurred_at, created_at FROM money_transactions WHERE {conditions} ORDER BY occurred_at DESC LIMIT ? OFFSET ?"
+                "SELECT id, branch_id, cash_session_id, direction, type AS transaction_type, amount, payment_method, reference_type, reference_id, party_type, party_id, notes, occurred_at, created_at FROM money_transactions WHERE {conditions} ORDER BY created_at DESC LIMIT ? OFFSET ?"
             ),
             values,
         ))
@@ -362,7 +366,7 @@ impl FinanceRepository {
         let today = now_utc().date_naive().to_string();
         let today_sales = DecimalRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT COALESCE(SUM(total), 0) AS value FROM invoices WHERE branch_id = ? AND status = ? AND deleted_at IS NULL AND date(completed_at) = ?",
+            "SELECT CAST(COALESCE(SUM(total), 0) AS REAL) AS value FROM invoices WHERE branch_id = ? AND status = ? AND deleted_at IS NULL AND date(completed_at) = ?",
             [
                 branch_id.into(),
                 INVOICE_STATUS_COMPLETED.into(),
@@ -376,12 +380,13 @@ impl FinanceRepository {
 
         let credit = DecimalRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT COALESCE(SUM(balance_after), 0) AS value FROM (
+            "SELECT CAST(COALESCE(SUM(balance_after), 0) AS REAL) AS value FROM (
                 SELECT customer_id, balance_after,
                        ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY occurred_at DESC, created_at DESC) AS rn
                 FROM customer_ledger_entries
+                WHERE branch_id = ?
               ) t WHERE rn = 1 AND balance_after > 0",
-            [],
+            [branch_id.into()],
         ))
         .one(database)
         .await;
@@ -391,8 +396,8 @@ impl FinanceRepository {
             _ => {
                 DecimalRow::find_by_statement(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
-                    "SELECT COALESCE(SUM(debit - credit), 0) AS value FROM customer_ledger_entries",
-                    [],
+                    "SELECT CAST(COALESCE(SUM(debit - credit), 0) AS REAL) AS value FROM customer_ledger_entries WHERE branch_id = ?",
+                    [branch_id.into()],
                 ))
                 .one(database)
                 .await?
@@ -441,6 +446,7 @@ impl FinanceRepository {
 
     pub async fn analytics(
         database: &DatabaseConnection,
+        branch_id: Uuid,
         query: &AnalyticsQuery,
     ) -> Result<AnalyticsReportResponse, AppError> {
         let from = query
@@ -458,8 +464,9 @@ impl FinanceRepository {
 
         let sales_by_day = DaySalesRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT date(completed_at) AS day, COALESCE(SUM(total), 0) AS total FROM invoices WHERE status = ? AND deleted_at IS NULL AND date(completed_at) >= ? AND date(completed_at) <= ? GROUP BY date(completed_at) ORDER BY day ASC",
+            "SELECT date(completed_at) AS day, CAST(COALESCE(SUM(total), 0) AS REAL) AS total FROM invoices WHERE branch_id = ? AND status = ? AND deleted_at IS NULL AND date(completed_at) >= ? AND date(completed_at) <= ? GROUP BY date(completed_at) ORDER BY day ASC",
             [
+                branch_id.into(),
                 INVOICE_STATUS_COMPLETED.into(),
                 from.to_string().into(),
                 to.to_string().into(),
@@ -470,8 +477,9 @@ impl FinanceRepository {
 
         let top_products = TopProductRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT ii.product_id, ii.product_name, COALESCE(SUM(ii.base_quantity), 0) AS quantity, COALESCE(SUM(ii.line_total), 0) AS revenue FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE i.status = ? AND i.deleted_at IS NULL AND date(i.completed_at) >= ? AND date(i.completed_at) <= ? GROUP BY ii.product_id, ii.product_name ORDER BY revenue DESC LIMIT 10",
+            "SELECT ii.product_id, ii.product_name, CAST(COALESCE(SUM(ii.base_quantity), 0) AS REAL) AS quantity, CAST(COALESCE(SUM(ii.line_total), 0) AS REAL) AS revenue FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE i.branch_id = ? AND i.status = ? AND i.deleted_at IS NULL AND date(i.completed_at) >= ? AND date(i.completed_at) <= ? GROUP BY ii.product_id, ii.product_name ORDER BY revenue DESC LIMIT 10",
             [
+                branch_id.into(),
                 INVOICE_STATUS_COMPLETED.into(),
                 from.to_string().into(),
                 to.to_string().into(),
@@ -505,7 +513,7 @@ impl FinanceRepository {
     ) -> Result<LocalizationSettingsResponse, AppError> {
         let row = LocalizationRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, currency_symbol, currency_code, language, expiry_reminder_days, updated_at FROM localization_settings LIMIT 1",
+            "SELECT id, currency_symbol, currency_code, language, expiry_reminder_days, payout_deduct_from, updated_at FROM localization_settings LIMIT 1",
             [],
         ))
         .one(database)
@@ -528,6 +536,7 @@ impl FinanceRepository {
             currency_code: "PKR".into(),
             language: "EN".into(),
             expiry_reminder_days: 30,
+            payout_deduct_from: "PROFIT".into(),
             updated_at: now.to_rfc3339(),
         })
     }
@@ -566,15 +575,28 @@ impl FinanceRepository {
                 "expiryReminderDays cannot be negative.".into(),
             ));
         }
+        let payout_deduct_from = request
+            .payout_deduct_from
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_uppercase())
+            .unwrap_or_else(|| current.payout_deduct_from.clone());
+        if payout_deduct_from != "PROFIT" && payout_deduct_from != "REVENUE" {
+            return Err(AppError::Validation(
+                "payoutDeductFrom must be PROFIT or REVENUE.".into(),
+            ));
+        }
         database
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "UPDATE localization_settings SET currency_symbol = ?, currency_code = ?, language = ?, expiry_reminder_days = ?, updated_at = ? WHERE id = ?",
+                "UPDATE localization_settings SET currency_symbol = ?, currency_code = ?, language = ?, expiry_reminder_days = ?, payout_deduct_from = ?, updated_at = ? WHERE id = ?",
                 [
                     symbol.into(),
                     code.into(),
                     language.into(),
                     days.into(),
+                    payout_deduct_from.into(),
                     now.into(),
                     parse_uuid(&current.id, "id")?.into(),
                 ],
@@ -750,11 +772,7 @@ impl FinanceRepository {
                             .clone()
                             .unwrap_or(current.branch_name)
                             .into(),
-                        request
-                            .branch_phone
-                            .clone()
-                            .or(current.branch_phone)
-                            .into(),
+                        request.branch_phone.clone().or(current.branch_phone).into(),
                         now.into(),
                         branch_id.into(),
                     ],
@@ -807,6 +825,10 @@ fn map_localization(row: LocalizationRow) -> LocalizationSettingsResponse {
         currency_code: row.currency_code,
         language: row.language,
         expiry_reminder_days: row.expiry_reminder_days,
+        payout_deduct_from: row
+            .payout_deduct_from
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "PROFIT".to_owned()),
         updated_at: row.updated_at.to_rfc3339(),
     }
 }

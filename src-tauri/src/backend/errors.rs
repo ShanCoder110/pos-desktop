@@ -9,9 +9,10 @@ use tracing::error;
 use validator::ValidationErrors;
 
 use super::constants::{
-    ERROR_CONFLICT_CODE, ERROR_DATABASE_CODE, ERROR_DUPLICATE_CUSTOMER_PHONE, ERROR_DUPLICATE_RECORD,
-    ERROR_FORBIDDEN_CODE, ERROR_INTERNAL, ERROR_INTERNAL_CODE, ERROR_NOT_FOUND_CODE,
-    ERROR_UNAUTHORIZED_CODE, ERROR_VALIDATION_CODE, LOG_TARGET,
+    CODE_CONFLICT, CODE_CUSTOMER_PHONE_DUPLICATE, CODE_DATABASE, CODE_FORBIDDEN, CODE_INTERNAL,
+    CODE_NOT_FOUND, CODE_SUPPLIER_PHONE_DUPLICATE, CODE_UNAUTHORIZED, CODE_VALIDATION,
+    ERROR_DUPLICATE_CUSTOMER_PHONE, ERROR_DUPLICATE_RECORD, ERROR_DUPLICATE_SUPPLIER_PHONE,
+    ERROR_INTERNAL, LOG_TARGET,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +27,9 @@ pub enum AppError {
     Forbidden(&'static str),
     #[error("{0}")]
     Conflict(String),
+    /// Conflict with a stable machine-readable `code` for frontend matching.
+    #[error("{message}")]
+    ConflictCoded { code: &'static str, message: String },
     #[error(transparent)]
     Database(#[from] DbErr),
     #[error("{0}")]
@@ -50,6 +54,13 @@ impl AppError {
     pub fn internal(error: impl std::fmt::Display) -> Self {
         Self::Internal(error.to_string())
     }
+
+    pub fn conflict_coded(code: &'static str, message: impl Into<String>) -> Self {
+        Self::ConflictCoded {
+            code,
+            message: message.into(),
+        }
+    }
 }
 
 impl From<ValidationErrors> for AppError {
@@ -63,55 +74,60 @@ impl IntoResponse for AppError {
         let (status, code, message, details) = match &self {
             Self::Validation(message) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
-                ERROR_VALIDATION_CODE,
+                CODE_VALIDATION,
                 message.clone(),
                 None,
             ),
             Self::NotFound(message) => (
                 StatusCode::NOT_FOUND,
-                ERROR_NOT_FOUND_CODE,
+                CODE_NOT_FOUND,
                 (*message).to_string(),
                 None,
             ),
             Self::Unauthorized(message) => (
                 StatusCode::UNAUTHORIZED,
-                ERROR_UNAUTHORIZED_CODE,
+                CODE_UNAUTHORIZED,
                 (*message).to_string(),
                 None,
             ),
             Self::Forbidden(message) => (
                 StatusCode::FORBIDDEN,
-                ERROR_FORBIDDEN_CODE,
+                CODE_FORBIDDEN,
                 (*message).to_string(),
                 None,
             ),
-            Self::Conflict(message) => (
-                StatusCode::CONFLICT,
-                ERROR_CONFLICT_CODE,
-                message.clone(),
-                None,
-            ),
+            Self::Conflict(message) => (StatusCode::CONFLICT, CODE_CONFLICT, message.clone(), None),
+            Self::ConflictCoded { code, message } => {
+                (StatusCode::CONFLICT, *code, message.clone(), None)
+            }
             Self::Database(error_value) => {
                 error!(target: LOG_TARGET, error = %error_value, "database request failed");
                 let text = error_value.to_string().to_lowercase();
                 if text.contains("ux_customers_phone") || text.contains("customers.phone") {
                     (
                         StatusCode::CONFLICT,
-                        ERROR_CONFLICT_CODE,
+                        CODE_CUSTOMER_PHONE_DUPLICATE,
                         ERROR_DUPLICATE_CUSTOMER_PHONE.to_string(),
+                        None,
+                    )
+                } else if text.contains("ux_suppliers_phone") || text.contains("suppliers.phone") {
+                    (
+                        StatusCode::CONFLICT,
+                        CODE_SUPPLIER_PHONE_DUPLICATE,
+                        ERROR_DUPLICATE_SUPPLIER_PHONE.to_string(),
                         None,
                     )
                 } else if text.contains("unique") {
                     (
                         StatusCode::CONFLICT,
-                        ERROR_CONFLICT_CODE,
+                        CODE_CONFLICT,
                         ERROR_DUPLICATE_RECORD.to_string(),
                         None,
                     )
                 } else {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        ERROR_DATABASE_CODE,
+                        CODE_DATABASE,
                         ERROR_INTERNAL.to_string(),
                         None,
                     )
@@ -121,7 +137,7 @@ impl IntoResponse for AppError {
                 error!(target: LOG_TARGET, error = %error_value, "internal request failure");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    ERROR_INTERNAL_CODE,
+                    CODE_INTERNAL,
                     ERROR_INTERNAL.to_string(),
                     None,
                 )

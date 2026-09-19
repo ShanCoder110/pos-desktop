@@ -7,14 +7,15 @@ use uuid::Uuid;
 use crate::backend::{
     constants::{
         DEFAULT_LOT_PREFIX, ERROR_PO_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND, ERROR_SUPPLIER_NOT_FOUND,
-        LEDGER_PAYMENT, LEDGER_PURCHASE, LOT_SOURCE_PURCHASE, PAYMENT_DIRECTION_OUT,
-        REFERENCE_GOODS_RECEIPT, SEQUENCE_KIND_LOT, STOCK_MOVEMENT_PURCHASE,
+        LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LEDGER_PURCHASE, LOT_SOURCE_PURCHASE,
+        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, REFERENCE_GOODS_RECEIPT, SEQUENCE_KIND_LOT,
+        STOCK_MOVEMENT_PURCHASE,
     },
     context::RequestContext,
     dto::{
         CreatePurchaseOrderRequest, PurchaseOrderItemResponse, PurchaseOrderListQuery,
         PurchaseOrderResponse, ReceivePurchaseOrderRequest, SupplierLedgerEntryResponse,
-        SupplierPaymentRequest, SupplierPaymentResponse,
+        SupplierLedgerListQuery, SupplierPaymentRequest, SupplierPaymentResponse,
     },
     errors::AppError,
     repositories::SequenceRepository,
@@ -72,6 +73,24 @@ struct UnitRow {
 #[derive(Debug, FromQueryResult)]
 struct BalanceRow {
     balance_after: Decimal,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct LedgerListRow {
+    id: Uuid,
+    supplier_id: Uuid,
+    supplier_name: String,
+    branch_id: Uuid,
+    entry_type: String,
+    purchase_order_id: Option<Uuid>,
+    goods_receipt_id: Option<Uuid>,
+    money_transaction_id: Option<Uuid>,
+    debit: Decimal,
+    credit: Decimal,
+    balance_after: Decimal,
+    notes: Option<String>,
+    occurred_at: chrono::DateTime<chrono::Utc>,
+    created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -239,10 +258,7 @@ impl PurchasingRepository {
         Ok(po_id)
     }
 
-    pub async fn mark_ordered(
-        transaction: &DatabaseTransaction,
-        id: Uuid,
-    ) -> Result<(), AppError> {
+    pub async fn mark_ordered(transaction: &DatabaseTransaction, id: Uuid) -> Result<(), AppError> {
         let header = load_header(transaction, id).await?;
         if header.status != "DRAFT" {
             return Err(AppError::Conflict(format!(
@@ -296,14 +312,16 @@ impl PurchasingRepository {
                 items
                     .into_iter()
                     .filter_map(|item| {
-                        let remaining = quantity(item.ordered_base_quantity - item.received_base_quantity);
+                        let remaining =
+                            quantity(item.ordered_base_quantity - item.received_base_quantity);
                         (remaining > Decimal::ZERO).then_some((item, remaining, None))
                     })
                     .collect()
             } else {
                 let mut plan = Vec::new();
                 for input in &request.items {
-                    let item_id = parse_uuid(&input.purchase_order_item_id, "items.purchaseOrderItemId")?;
+                    let item_id =
+                        parse_uuid(&input.purchase_order_item_id, "items.purchaseOrderItemId")?;
                     let item = items
                         .iter()
                         .find(|row| row.id == item_id)
@@ -312,7 +330,8 @@ impl PurchasingRepository {
                     let unit = load_unit(transaction, item.product_id, item.unit_id).await?;
                     let displayed = quantity(input.quantity);
                     let base_qty = quantity(displayed * unit.conversion_to_base);
-                    let remaining = quantity(item.ordered_base_quantity - item.received_base_quantity);
+                    let remaining =
+                        quantity(item.ordered_base_quantity - item.received_base_quantity);
                     if base_qty > remaining {
                         return Err(AppError::Validation(
                             "Receive quantity exceeds remaining ordered quantity.".into(),
@@ -494,7 +513,7 @@ impl PurchasingRepository {
 
         let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
+            "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
             [header.supplier_id.into()],
         ))
         .one(transaction)
@@ -532,11 +551,12 @@ impl PurchasingRepository {
         .await?
         .map(|row| row.count)
         .unwrap_or(0);
-        let (status, completed_at): (&str, Option<chrono::DateTime<chrono::Utc>>) = if remaining == 0 {
-            ("COMPLETED", Some(now))
-        } else {
-            ("PARTIAL", None)
-        };
+        let (status, completed_at): (&str, Option<chrono::DateTime<chrono::Utc>>) =
+            if remaining == 0 {
+                ("COMPLETED", Some(now))
+            } else {
+                ("PARTIAL", None)
+            };
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
@@ -555,7 +575,7 @@ impl PurchasingRepository {
         ensure_supplier(database, supplier_id).await?;
         let rows = LedgerRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, supplier_id, branch_id, type AS entry_type, purchase_order_id, goods_receipt_id, money_transaction_id, debit, credit, balance_after, notes, occurred_at, created_at FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at ASC, created_at ASC",
+            "SELECT id, supplier_id, branch_id, type AS entry_type, purchase_order_id, goods_receipt_id, money_transaction_id, CAST(debit AS REAL) AS debit, CAST(credit AS REAL) AS credit, CAST(balance_after AS REAL) AS balance_after, notes, occurred_at, created_at FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at ASC, created_at ASC",
             [supplier_id.into()],
         ))
         .all(database)
@@ -565,6 +585,7 @@ impl PurchasingRepository {
             .map(|row| SupplierLedgerEntryResponse {
                 id: row.id.to_string(),
                 supplier_id: row.supplier_id.to_string(),
+                supplier_name: None,
                 branch_id: row.branch_id.to_string(),
                 entry_type: row.entry_type,
                 purchase_order_id: row.purchase_order_id.map(|v| v.to_string()),
@@ -580,6 +601,125 @@ impl PurchasingRepository {
             .collect())
     }
 
+    pub async fn list_supplier_ledgers(
+        database: &DatabaseConnection,
+        query: &SupplierLedgerListQuery,
+    ) -> Result<(Vec<SupplierLedgerEntryResponse>, u64), AppError> {
+        let page = query.page.clone().normalized();
+        let mut parts = vec!["1 = 1".to_owned()];
+        let mut values = Vec::new();
+        if let Some(search) = &page.search {
+            let pattern = format!("%{}%", search.to_lowercase());
+            parts.push("(lower(s.name) LIKE ? OR lower(sle.type) LIKE ? OR lower(COALESCE(sle.notes, '')) LIKE ?)".to_owned());
+            values.push(pattern.clone().into());
+            values.push(pattern.clone().into());
+            values.push(pattern.into());
+        }
+        if let Some(supplier) = query
+            .supplier
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push("lower(s.name) LIKE ?".to_owned());
+            values.push(format!("%{}%", supplier.to_lowercase()).into());
+        }
+        if let Some(entry_type) = query
+            .entry_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push("sle.type = ?".to_owned());
+            values.push(entry_type.to_uppercase().into());
+        }
+        if let Some(notes) = page.notes.as_deref() {
+            parts.push("lower(COALESCE(sle.notes, '')) LIKE ?".to_owned());
+            values.push(format!("%{}%", notes.to_lowercase()).into());
+        }
+        if let Some(balance) = page.balance.as_deref() {
+            match balance.to_ascii_lowercase().as_str() {
+                "payable" | "owes" => parts.push("sle.balance_after > 0".to_owned()),
+                "advance" => parts.push("sle.balance_after < 0".to_owned()),
+                "settled" => parts.push("sle.balance_after = 0".to_owned()),
+                _ => {}
+            }
+        }
+        if let Some(debit) = query.debit {
+            parts.push("sle.debit >= ?".to_owned());
+            values.push(debit.into());
+        }
+        if let Some(credit) = query.credit {
+            parts.push("sle.credit >= ?".to_owned());
+            values.push(credit.into());
+        }
+        if let Some(from) = query
+            .occurred_from
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push("date(sle.occurred_at) >= date(?)".to_owned());
+            values.push(from.into());
+        }
+        if let Some(to) = query
+            .occurred_to
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push("date(sle.occurred_at) <= date(?)".to_owned());
+            values.push(to.into());
+        }
+        let where_sql = parts.join(" AND ");
+        let count_sql = format!(
+            "SELECT COUNT(*) AS count FROM supplier_ledger_entries sle INNER JOIN suppliers s ON s.id = sle.supplier_id WHERE {where_sql}"
+        );
+        let total = CountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            count_sql,
+            values.clone(),
+        ))
+        .one(database)
+        .await?
+        .map(|row| row.count.max(0) as u64)
+        .unwrap_or(0);
+        let sql = format!(
+            "SELECT sle.id, sle.supplier_id, s.name AS supplier_name, sle.branch_id, sle.type AS entry_type, sle.purchase_order_id, sle.goods_receipt_id, sle.money_transaction_id, CAST(sle.debit AS REAL) AS debit, CAST(sle.credit AS REAL) AS credit, CAST(sle.balance_after AS REAL) AS balance_after, sle.notes, sle.occurred_at, sle.created_at FROM supplier_ledger_entries sle INNER JOIN suppliers s ON s.id = sle.supplier_id WHERE {where_sql} ORDER BY sle.created_at DESC, sle.id DESC LIMIT ? OFFSET ?"
+        );
+        let mut page_values = values;
+        page_values.push((page.per_page as i64).into());
+        page_values.push((page.offset() as i64).into());
+        let rows = LedgerListRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            sql,
+            page_values,
+        ))
+        .all(database)
+        .await?;
+        Ok((
+            rows.into_iter()
+                .map(|row| SupplierLedgerEntryResponse {
+                    id: row.id.to_string(),
+                    supplier_id: row.supplier_id.to_string(),
+                    supplier_name: Some(row.supplier_name),
+                    branch_id: row.branch_id.to_string(),
+                    entry_type: row.entry_type,
+                    purchase_order_id: row.purchase_order_id.map(|value| value.to_string()),
+                    goods_receipt_id: row.goods_receipt_id.map(|value| value.to_string()),
+                    money_transaction_id: row.money_transaction_id.map(|value| value.to_string()),
+                    debit: decimal(row.debit),
+                    credit: decimal(row.credit),
+                    balance_after: decimal(row.balance_after),
+                    notes: row.notes,
+                    occurred_at: row.occurred_at.to_rfc3339(),
+                    created_at: row.created_at.to_rfc3339(),
+                })
+                .collect(),
+            total,
+        ))
+    }
+
     pub async fn supplier_payment(
         transaction: &DatabaseTransaction,
         context: &RequestContext,
@@ -591,11 +731,42 @@ impl PurchasingRepository {
         let now = now_utc();
         let amount = money_value(request.amount);
         let method = request.payment_method.trim().to_uppercase();
-        if !matches!(method.as_str(), "CASH" | "CARD" | "BANK" | "MOBILE" | "OTHER") {
+        if !matches!(
+            method.as_str(),
+            "CASH" | "CARD" | "BANK" | "MOBILE" | "OTHER"
+        ) {
             return Err(AppError::Validation("Invalid paymentMethod.".into()));
         }
         let money_id = Uuid::new_v4();
         let ledger_id = Uuid::new_v4();
+        let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
+            [supplier_id.into()],
+        ))
+        .one(transaction)
+        .await?
+        .map(|row| row.balance_after)
+        .unwrap_or(Decimal::ZERO);
+        // Positive balance = we owe supplier (pay out). Negative = advance (receive back).
+        let paying_out = previous >= Decimal::ZERO;
+        let (direction, entry_type, debit, credit, balance_after) = if paying_out {
+            (
+                PAYMENT_DIRECTION_OUT,
+                LEDGER_PAYMENT_MADE,
+                Decimal::ZERO,
+                amount,
+                previous - amount,
+            )
+        } else {
+            (
+                PAYMENT_DIRECTION_IN,
+                LEDGER_PAYMENT_RECEIVED,
+                amount,
+                Decimal::ZERO,
+                previous + amount,
+            )
+        };
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
@@ -604,7 +775,7 @@ impl PurchasingRepository {
                     money_id.into(),
                     context.branch_id.into(),
                     cash_session_id.into(),
-                    PAYMENT_DIRECTION_OUT.into(),
+                    direction.into(),
                     amount.into(),
                     method.clone().into(),
                     supplier_id.into(),
@@ -616,27 +787,18 @@ impl PurchasingRepository {
                 ],
             ))
             .await?;
-        let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-            [supplier_id.into()],
-        ))
-        .one(transaction)
-        .await?
-        .map(|row| row.balance_after)
-        .unwrap_or(Decimal::ZERO);
-        let balance_after = previous - amount;
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "INSERT INTO supplier_ledger_entries (id, supplier_id, branch_id, type, purchase_order_id, goods_receipt_id, money_transaction_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, 0, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO supplier_ledger_entries (id, supplier_id, branch_id, type, purchase_order_id, goods_receipt_id, money_transaction_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     ledger_id.into(),
                     supplier_id.into(),
                     context.branch_id.into(),
-                    LEDGER_PAYMENT.into(),
+                    entry_type.into(),
                     money_id.into(),
-                    amount.into(),
+                    debit.into(),
+                    credit.into(),
                     balance_after.into(),
                     trimmed(&request.notes)
                         .unwrap_or_else(|| format!("Supplier payment {}", request.reference_number.as_deref().unwrap_or("")))
@@ -750,10 +912,7 @@ async fn hydrate_po(
     })
 }
 
-async fn load_header(
-    database: &impl ConnectionTrait,
-    id: Uuid,
-) -> Result<PoHeader, AppError> {
+async fn load_header(database: &impl ConnectionTrait, id: Uuid) -> Result<PoHeader, AppError> {
     PoHeader::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
         "SELECT id, branch_id, supplier_id, order_number, status, order_date, expected_date, subtotal, discount, tax, total, notes, ordered_at, completed_at, created_at, updated_at FROM purchase_orders WHERE id = ? AND deleted_at IS NULL LIMIT 1",

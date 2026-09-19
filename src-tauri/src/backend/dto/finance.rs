@@ -137,6 +137,7 @@ pub struct LocalizationSettingsResponse {
     pub currency_code: String,
     pub language: String,
     pub expiry_reminder_days: i32,
+    pub payout_deduct_from: String,
     pub updated_at: String,
 }
 
@@ -147,6 +148,7 @@ pub struct UpdateLocalizationRequest {
     pub currency_code: Option<String>,
     pub language: Option<String>,
     pub expiry_reminder_days: Option<i32>,
+    pub payout_deduct_from: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]

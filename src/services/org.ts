@@ -41,9 +41,27 @@ export interface UserResponse {
   defaultBranchId?: string | null;
   isActive: boolean;
   lastLoginAt?: string | null;
+  totalPaid: number;
   permissions: { id: string; permissionKey: string; isAllowed: boolean }[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface UserPermissionPayload {
+  permissionKey: string;
+  isAllowed: boolean;
+}
+
+export interface UserRequestPayload {
+  name: string;
+  username?: string;
+  password?: string;
+  phone: string;
+  email: string;
+  role: string;
+  defaultBranchId: string;
+  isActive: boolean;
+  permissions?: UserPermissionPayload[];
 }
 
 export interface DeviceResponse {
@@ -84,10 +102,15 @@ export function mapUser(row: UserResponse): StaffUser {
     id: row.id,
     name: row.name,
     username: row.username,
+    email: row.email ?? "",
     role: (row.role as UserRole) || "CASHIER",
     branchId: row.defaultBranchId ?? "",
     phone: row.phone ?? "",
+    totalPaid: row.totalPaid ?? 0,
     isActive: row.isActive,
+    permissions: Object.fromEntries(
+      (row.permissions ?? []).map((perm) => [perm.permissionKey, perm.isAllowed]),
+    ),
   };
 }
 
@@ -113,29 +136,57 @@ export async function listAllBranches(signal?: AbortSignal): Promise<BranchRespo
 }
 
 export function listUsers(
-  params: { page?: number; perPage?: number; search?: string } = {},
+  params: {
+    page?: number;
+    perPage?: number;
+    search?: string;
+    role?: string;
+    staffOnly?: boolean;
+    isActive?: boolean;
+  } = {},
   signal?: AbortSignal,
 ) {
-  return apiRequest<PaginatedResponse<UserResponse>>(
-    `${API_ROUTES.users}${queryString(params)}`,
-    { signal },
-  );
+  const { staffOnly, ...rest } = params;
+  const query = staffOnly ? { ...rest, staffOnly: true } : rest;
+  return apiRequest<PaginatedResponse<UserResponse>>(`${API_ROUTES.users}${queryString(query)}`, {
+    signal,
+  });
 }
 
-export async function listAllUsers(signal?: AbortSignal): Promise<UserResponse[]> {
+export async function listAllUsers(
+  params: Omit<Parameters<typeof listUsers>[0], "page" | "perPage"> = {},
+  signal?: AbortSignal,
+): Promise<UserResponse[]> {
   const rows: UserResponse[] = [];
   let page = 1;
   for (;;) {
-    const response = await listUsers({ page, perPage: MAX_PAGE_SIZE }, signal);
+    const response = await listUsers({ ...params, page, perPage: MAX_PAGE_SIZE }, signal);
     rows.push(...response.data);
     if (!response.meta.hasNextPage) return rows;
     page += 1;
   }
 }
 
+export function createUser(payload: UserRequestPayload) {
+  return apiRequest<UserResponse>(API_ROUTES.users, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateUser(id: string, payload: UserRequestPayload) {
+  return apiRequest<UserResponse>(API_ROUTES.userById(id), {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteUser(id: string) {
+  return apiRequest<void>(API_ROUTES.userById(id), { method: "DELETE" });
+}
+
 export function listDevices(signal?: AbortSignal) {
-  return apiRequest<DeviceResponse[] | PaginatedResponse<DeviceResponse>>(
-    API_ROUTES.devices,
-    { signal },
-  ).then((payload) => (Array.isArray(payload) ? payload : payload.data ?? []));
+  return apiRequest<DeviceResponse[] | PaginatedResponse<DeviceResponse>>(API_ROUTES.devices, {
+    signal,
+  }).then((payload) => (Array.isArray(payload) ? payload : (payload.data ?? [])));
 }

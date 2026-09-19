@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   ChevronDown,
   ArrowDown,
@@ -35,6 +35,7 @@ import {
   Td,
   THead,
   Th,
+  Tooltip,
   TruncatedTooltip,
   toaster,
 } from "@/components/common";
@@ -42,28 +43,50 @@ import type { FilterChip } from "@/components/common/FilterPicker";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { ProductForm } from "@/pages/products/ProductForm";
 import { useDebounce } from "@/hooks/useDebounce";
-import { blankProduct, lotTotals, openingLot } from "@/pages/products/productLots";
-import { formatStockQty, qtyUnits, stockBreakdown, unitLabel } from "@/pages/products/productQty";
+import { blankProduct } from "@/pages/products/productLots";
+import { formatStockQty, qtyUnits, unitLabel } from "@/pages/products/productQty";
 import { matchesHealth, useProductsHub } from "@/pages/products/ProductsLayout";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
-import { DEFAULT_PRODUCT_COLUMNS, DEFAULT_REORDER_COLUMNS, PRODUCT_HEALTH_FROM_LABEL, PRODUCT_HEALTH_LABEL, PRODUCT_TABLE_COLUMNS, REORDER_PRODUCT_COLUMNS } from "@/shared/constants/products";
-import { routes } from "@/shared/constants/routes";
+import {
+  DEFAULT_PRODUCT_COLUMNS,
+  DEFAULT_REORDER_COLUMNS,
+  PRODUCT_COPY,
+  PRODUCT_HEALTH_FROM_LABEL,
+  PRODUCT_HEALTH_LABEL,
+  PRODUCT_INSIGHT_METRICS,
+  PRODUCT_TABLE_COLUMNS,
+  REORDER_PRODUCT_COLUMNS,
+  productsHref,
+  type ProductInsightMetric,
+} from "@/shared/constants/products";
 import { useSettings } from "@/shared/settings";
 import type { Product } from "@/shared/types";
-import { searchAllProducts } from "@/services/products";
+import type { InvoiceRow } from "@/shared/domain/types";
+import { ensureSession } from "@/services/auth";
+import { listAllRepairs, type RepairResponse } from "@/services/repairs";
+import {
+  createProduct,
+  deleteProduct,
+  searchAllProducts,
+  updateProduct,
+} from "@/services/products";
+import {
+  buildCreateProductPayload,
+  buildUpdateProductPayload,
+  resolveCategoryId,
+} from "@/pages/products/productPayload";
+import { listAllInvoices } from "@/services/sales";
+import {
+  buildProductSalesStats,
+  formatInsightMetricValue,
+  insightMetricDetails,
+  insightMetricLabel,
+  insightMetricValue,
+  productSalesStats,
+} from "@/pages/products/productSalesStats";
 import { exportProductsCsv, exportProductsExcel, printProducts } from "@/utils/exportFile";
-import { money } from "@/utils/format";
-
-function nextSku(existing: Product[]) {
-  const used = new Set(existing.map((r) => r.sku));
-  let i = existing.length + 1;
-  let sku = `P-${String(i).padStart(4, "0")}`;
-  while (used.has(sku)) {
-    i += 1;
-    sku = `P-${String(i).padStart(4, "0")}`;
-  }
-  return sku;
-}
+import { money, shortError } from "@/utils/format";
+import { branchStockTooltip, productTotalStock } from "@/utils/productStock";
 
 type PriceField = "cost" | "min" | "wholesale" | "retail";
 
@@ -122,18 +145,6 @@ function stockLabel(row: Product) {
   return "In stock";
 }
 
-function soldQty(_id: string) {
-  return 0;
-}
-
-function salesAmount(id: string) {
-  return soldQty(id);
-}
-
-function profitOf(row: Product) {
-  return (row.retail - row.cost) * soldQty(row.id);
-}
-
 function minAmount(raw: string) {
   const n = Number(String(raw).replace(/[^\d.-]/g, ""));
   return Number.isFinite(n) ? n : 0;
@@ -152,21 +163,40 @@ function ExportMenu({ rows, shopName }: { rows: Product[]; shopName: string }) {
         </Button>
       }
     >
-      <div className="ui-pop-list [display:grid] [max-height:240px] [overflow:auto]" onClick={() => setOpen(false)}>
-        <button type="button" className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]" onClick={() => exportProductsCsv(rows)}>
+      <div
+        className="ui-pop-list [display:grid] [max-height:240px] [overflow:auto]"
+        onClick={() => setOpen(false)}
+      >
+        <button
+          type="button"
+          className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"
+          onClick={() => exportProductsCsv(rows)}
+        >
           <FileText size={14} />
           CSV
         </button>
-        <button type="button" className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]" onClick={() => exportProductsExcel(rows)}>
+        <button
+          type="button"
+          className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"
+          onClick={() => exportProductsExcel(rows)}
+        >
           <FileSpreadsheet size={14} />
           Excel
         </button>
         <div className="ui-pop-sep [height:1px] [margin:6px_4px] [background:var(--line)]" />
-        <button type="button" className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]" onClick={() => printProducts(rows, "thermal", shopName)}>
+        <button
+          type="button"
+          className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"
+          onClick={() => printProducts(rows, "thermal", shopName)}
+        >
           <Receipt size={14} />
           Thermal printer
         </button>
-        <button type="button" className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]" onClick={() => printProducts(rows, "a4", shopName)}>
+        <button
+          type="button"
+          className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"
+          onClick={() => printProducts(rows, "a4", shopName)}
+        >
           <Printer size={14} />
           A4
         </button>
@@ -181,36 +211,67 @@ export function ProductsPage() {
     setActions,
     health,
     setHealth,
+    section,
     sectionKpi,
     lots,
     setLots,
     products: rows,
-    setProducts: setRows,
     categories,
+    units,
     suppliers,
+    loading,
+    refreshHub,
   } = useProductsHub();
   const categoryOptions = categories.map((c) => c.name);
   const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.name ?? "";
 
-  const location = useLocation();
   const navigate = useNavigate();
-  const tab = location.pathname.endsWith("/low") ? "low" : "all";
+  const tab = section === "low" ? "low" : "all";
   const [q, setQ] = useState("");
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [cols, setCols] = useState<string[]>(tab === "low" ? DEFAULT_REORDER_COLUMNS : DEFAULT_PRODUCT_COLUMNS);
+  const [cols, setCols] = useState<string[]>(
+    tab === "low" ? DEFAULT_REORDER_COLUMNS : DEFAULT_PRODUCT_COLUMNS,
+  );
   const [view, setView] = useState<HubView>("table");
   const [chartLimit, setChartLimit] = useState<"10" | "20" | "50" | "all">("10");
   const [chartProductId, setChartProductId] = useState("");
   const [remoteRows, setRemoteRows] = useState<Product[]>([]);
   const [profitSort, setProfitSort] = useState<"asc" | "desc" | null>(null);
+  const [insightMetric, setInsightMetric] = useState<ProductInsightMetric>("profit");
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [repairJobs, setRepairJobs] = useState<RepairResponse[]>([]);
+  const [productLoading, setProductLoading] = useState({ saving: false, deleting: false });
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<Product | null>(null);
   const [remove, setRemove] = useState<Product | null>(null);
   const [blocked, setBlocked] = useState(false);
   const debouncedGlobalQuery = useDebounce(q.trim(), 320);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        await ensureSession();
+        const [invoiceRows, repairs] = await Promise.all([
+          listAllInvoices(controller.signal).catch(() => [] as InvoiceRow[]),
+          listAllRepairs(controller.signal).catch(() => [] as RepairResponse[]),
+        ]);
+        if (controller.signal.aborted) return;
+        setInvoices(invoiceRows);
+        setRepairJobs(repairs);
+      } catch {
+        if (controller.signal.aborted) return;
+      }
+    })();
+    return () => controller.abort();
+  }, []);
+
+  const salesStats = useMemo(
+    () => buildProductSalesStats(rows, invoices, repairJobs),
+    [rows, invoices, repairJobs],
+  );
 
   useEffect(() => {
     if (debouncedGlobalQuery.length < 2) {
@@ -227,11 +288,6 @@ export function ProductsPage() {
   }, [debouncedGlobalQuery]);
 
   useEffect(() => {
-    const t = window.setTimeout(() => setLoading(false), 450);
-    return () => window.clearTimeout(t);
-  }, []);
-
-  useEffect(() => {
     setPage(1);
     setSelected([]);
   }, [tab, sectionKpi]);
@@ -244,7 +300,10 @@ export function ProductsPage() {
     setChips((prev) => {
       const without = prev.filter((c) => c.field !== "health");
       if (!health) return without;
-      return [...without, { field: "health", label: "Health", value: PRODUCT_HEALTH_LABEL[health] }];
+      return [
+        ...without,
+        { field: "health", label: "Health", value: PRODUCT_HEALTH_LABEL[health] },
+      ];
     });
     setPage(1);
   }, [health]);
@@ -265,14 +324,16 @@ export function ProductsPage() {
           const key = PRODUCT_HEALTH_FROM_LABEL[chip.value];
           if (!key || !matchesHealth(r, key)) return false;
         }
-        if (chip.field === "name" && !r.name.toLowerCase().includes(chip.value.toLowerCase())) return false;
-        if (chip.field === "sku" && !r.sku.toLowerCase().includes(chip.value.toLowerCase())) return false;
+        if (chip.field === "name" && !r.name.toLowerCase().includes(chip.value.toLowerCase()))
+          return false;
+        if (chip.field === "sku" && !r.sku.toLowerCase().includes(chip.value.toLowerCase()))
+          return false;
         if (chip.field === "category" && r.category !== chip.value) return false;
         if (chip.field === "sales") {
-          if (salesAmount(r.id) < minAmount(chip.value)) return false;
+          if (productSalesStats(r.id, salesStats).sales < minAmount(chip.value)) return false;
         }
         if (chip.field === "profit") {
-          if (profitOf(r) < minAmount(chip.value)) return false;
+          if (productSalesStats(r.id, salesStats).profit < minAmount(chip.value)) return false;
         }
         if (chip.field === "cost" && r.cost < minAmount(chip.value)) return false;
         if (chip.field === "minimumPrice" && r.min < minAmount(chip.value)) return false;
@@ -297,40 +358,41 @@ export function ProductsPage() {
       return true;
     });
     return list;
-  }, [searchRows, q, tab, chips, sectionKpi]);
+  }, [searchRows, q, tab, chips, sectionKpi, salesStats]);
 
   const ordered = useMemo(() => {
     if (!profitSort) return filtered;
-    return [...filtered].sort((a, b) => profitSort === "asc" ? profitOf(a) - profitOf(b) : profitOf(b) - profitOf(a));
-  }, [filtered, profitSort]);
+    return [...filtered].sort((a, b) => {
+      const left = productSalesStats(a.id, salesStats).profit;
+      const right = productSalesStats(b.id, salesStats).profit;
+      return profitSort === "asc" ? left - right : right - left;
+    });
+  }, [filtered, profitSort, salesStats]);
 
   const pageCount = pageSize === PAGE_SIZE_ALL ? Math.max(ordered.length, 1) : pageSize;
   const pages = Math.max(1, Math.ceil(ordered.length / pageCount));
   const shown =
-    pageSize === PAGE_SIZE_ALL
-      ? ordered
-      : ordered.slice((page - 1) * pageSize, page * pageSize);
+    pageSize === PAGE_SIZE_ALL ? ordered : ordered.slice((page - 1) * pageSize, page * pageSize);
   const chartData = useMemo(() => {
-    return filtered.map((product) => {
-      const stockValue = product.stock * product.cost;
-      return {
-        id: product.id,
-        label: product.name,
-        value: stockValue,
-        details: [
-          { label: "Stock value", value: money(stockValue) },
-          { label: "Quantity remaining", value: `${formatStockQty(product.stock)} ${unitLabel(product.unit)}` },
-          { label: "Cost price", value: money(product.cost) },
-          { label: "Retail price", value: money(product.retail) },
-        ],
-      };
-    });
-  }, [filtered]);
+    return filtered
+      .map((product) => {
+        const stats = productSalesStats(product.id, salesStats);
+        const value = insightMetricValue(product, stats, insightMetric);
+        return {
+          id: product.id,
+          label: product.name,
+          value,
+          details: insightMetricDetails(product, stats),
+        };
+      })
+      .sort((a, b) => b.value - a.value);
+  }, [filtered, insightMetric, salesStats]);
   const chartProduct = searchRows.find((product) => product.id === chartProductId);
   const chartProductPoint = chartData.find((point) => point.id === chartProductId);
-  const latestLot = (productId: string) => [...lots]
-    .filter((lot) => lot.productId === productId)
-    .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))[0];
+  const latestLot = (productId: string) =>
+    [...lots]
+      .filter((lot) => lot.productId === productId)
+      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))[0];
   const show = (id: string) => cols.includes(id);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
@@ -346,21 +408,59 @@ export function ProductsPage() {
     setPage(1);
   }
 
-  function commit(next: Product) {
+  async function commit(
+    next: Product,
+    branchQuantities: Record<string, number> = {},
+  ): Promise<boolean> {
     const isNewRow = !rows.some((r) => r.id === next.id);
-    const saved: Product = {
-      ...next,
-      sku: settings.autoSku && !next.sku.trim() ? nextSku(rows.filter((r) => r.id !== next.id)) : next.sku.trim(),
-    };
-    if (isNewRow && saved.stock > 0) {
-      const lot = openingLot(saved, lots);
-      setLots((prev) => [...prev, lot]);
-      const totals = lotTotals([lot]);
-      saved.stock = totals.stock;
-      saved.damaged = totals.damaged;
+    const category = resolveCategoryId(next, categories);
+    if (!category) {
+      toaster.error(PRODUCT_COPY.categoryRequired);
+      return false;
     }
-    setRows((prev) => (prev.some((r) => r.id === saved.id) ? prev.map((r) => (r.id === saved.id ? saved : r)) : [...prev, saved]));
-    return true;
+    if (!units.some((row) => row.symbol === next.unit)) {
+      toaster.error(PRODUCT_COPY.unitRequired);
+      return false;
+    }
+    setProductLoading((current) => ({ ...current, saving: true }));
+    try {
+      if (isNewRow) {
+        const payload = buildCreateProductPayload(next, {
+          categoryId: category.id,
+          units,
+          branchQuantities,
+        });
+        if (!payload) {
+          toaster.error(PRODUCT_COPY.unitRequired);
+          return false;
+        }
+        const created = await createProduct(payload);
+        next.id = created.id;
+        next.categoryId = created.categoryId;
+        next.category = created.category;
+        next.sku = created.sku;
+      } else {
+        const payload = buildUpdateProductPayload(next, {
+          categoryId: category.id,
+          units,
+        });
+        if (!payload) {
+          toaster.error(PRODUCT_COPY.unitRequired);
+          return false;
+        }
+        const updated = await updateProduct(next.id, payload);
+        next.categoryId = updated.categoryId;
+        next.category = updated.category;
+        setLots((prev) => [...prev.filter((lot) => lot.productId !== next.id)]);
+      }
+      await refreshHub();
+      return true;
+    } catch (error) {
+      toaster.error(shortError(error, PRODUCT_COPY.saveFailed));
+      return false;
+    } finally {
+      setProductLoading((current) => ({ ...current, saving: false }));
+    }
   }
 
   const picked = rows.filter((r) => selected.includes(r.id));
@@ -399,7 +499,9 @@ export function ProductsPage() {
         <ExportMenu rows={filtered} shopName={settings.shopName} />
         <Button variant="primary" icon={<Plus size={14} />} onClick={openNew}>
           Add Product
-          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">F2</kbd>
+          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+            F2
+          </kbd>
         </Button>
       </>,
     );
@@ -409,7 +511,13 @@ export function ProductsPage() {
   const isNew = !edit || !rows.some((r) => r.id === edit.id);
 
   return (
-    <div className={edit ? "products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden] is-drawer-open" : "products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]"}>
+    <div
+      className={
+        edit
+          ? "products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden] is-drawer-open"
+          : "products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]"
+      }
+    >
       <Table
         toolbar={
           <HubToolbar
@@ -418,10 +526,8 @@ export function ProductsPage() {
             onCols={setCols}
             chips={chips}
             onApply={(chip) => {
-              setLoading(true);
               setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
               setPage(1);
-              window.setTimeout(() => setLoading(false), 220);
             }}
             onRemove={removeChip}
             onClear={clearChips}
@@ -429,16 +535,50 @@ export function ProductsPage() {
               { id: "name", label: "Name" },
               { id: "sku", label: "SKU" },
               { id: "category", label: "Category", options: categoryOptions, searchable: true },
-              { id: "sales", label: "Total sales", placeholder: "Min amount e.g. 5000", numeric: true },
+              {
+                id: "sales",
+                label: "Total sales",
+                placeholder: "Min amount e.g. 5000",
+                numeric: true,
+              },
               { id: "profit", label: "Profit", placeholder: "Min amount e.g. 1000", numeric: true },
-              { id: "stock", label: "Stock status", options: ["In stock", "Low stock", "Out of stock"] },
-              { id: "stockQty", label: "Stock quantity", placeholder: "Minimum quantity", numeric: true },
-              { id: "stockValue", label: "Stock value", placeholder: "Minimum stock value", numeric: true },
+              {
+                id: "stock",
+                label: "Stock status",
+                options: ["In stock", "Low stock", "Out of stock"],
+              },
+              {
+                id: "stockQty",
+                label: "Stock quantity",
+                placeholder: "Minimum quantity",
+                numeric: true,
+              },
+              {
+                id: "stockValue",
+                label: "Stock value",
+                placeholder: "Minimum stock value",
+                numeric: true,
+              },
               { id: "cost", label: "Cost price", placeholder: "Minimum cost", numeric: true },
-              { id: "minimumPrice", label: "Minimum price", placeholder: "Minimum amount", numeric: true },
-              { id: "wholesale", label: "Wholesale price", placeholder: "Minimum wholesale", numeric: true },
+              {
+                id: "minimumPrice",
+                label: "Minimum price",
+                placeholder: "Minimum amount",
+                numeric: true,
+              },
+              {
+                id: "wholesale",
+                label: "Wholesale price",
+                placeholder: "Minimum wholesale",
+                numeric: true,
+              },
               { id: "retail", label: "Retail price", placeholder: "Minimum retail", numeric: true },
-              { id: "margin", label: "Margin %", placeholder: "Minimum margin percentage", numeric: true },
+              {
+                id: "margin",
+                label: "Margin %",
+                placeholder: "Minimum margin percentage",
+                numeric: true,
+              },
             ]}
             search={q}
             onSearch={(v) => {
@@ -448,19 +588,48 @@ export function ProductsPage() {
             searchPlaceholder="Search by name, SKU, category"
             view={view}
             onView={setView}
+            insightControls={
+              <SearchableSelect
+                className="w-[190px] [&_.ui-combo-field]:h-8 [&_.ui-combo-input]:text-[11px]"
+                value={insightMetric}
+                options={PRODUCT_INSIGHT_METRICS.map((metric) => ({
+                  value: metric.id,
+                  label: metric.label,
+                }))}
+                onChange={(value) => {
+                  setInsightMetric(value as ProductInsightMetric);
+                  setChartProductId("");
+                }}
+                clearable={false}
+                searchable={false}
+                placeholder="Metric"
+              />
+            }
             trailing={
               selected.length > 0 ? (
                 <BulkActions count={selected.length}>
-                  <BulkAction icon={<FileText size={14} />} onClick={() => exportProductsCsv(picked, "selected-products.csv")}>
+                  <BulkAction
+                    icon={<FileText size={14} />}
+                    onClick={() => exportProductsCsv(picked, "selected-products.csv")}
+                  >
                     CSV
                   </BulkAction>
-                  <BulkAction icon={<FileSpreadsheet size={14} />} onClick={() => exportProductsExcel(picked, "selected-products.xls")}>
+                  <BulkAction
+                    icon={<FileSpreadsheet size={14} />}
+                    onClick={() => exportProductsExcel(picked, "selected-products.xls")}
+                  >
                     Excel
                   </BulkAction>
-                  <BulkAction icon={<Receipt size={14} />} onClick={() => printProducts(picked, "thermal", settings.shopName)}>
+                  <BulkAction
+                    icon={<Receipt size={14} />}
+                    onClick={() => printProducts(picked, "thermal", settings.shopName)}
+                  >
                     Thermal printer
                   </BulkAction>
-                  <BulkAction icon={<Printer size={14} />} onClick={() => printProducts(picked, "a4", settings.shopName)}>
+                  <BulkAction
+                    icon={<Printer size={14} />}
+                    onClick={() => printProducts(picked, "a4", settings.shopName)}
+                  >
                     A4
                   </BulkAction>
                   <BulkAction
@@ -481,11 +650,11 @@ export function ProductsPage() {
           view === "insights" ? (
             <HubChart
               type="bar"
-              title="Inventory value by product"
-              subtitle={`${chartLimit === "all" ? "All" : chartLimit} of ${filtered.length} matching products · click a bar for details`}
+              title={insightMetricLabel(insightMetric)}
+              subtitle={`${chartLimit === "all" ? "All" : chartLimit} of ${filtered.length} matching products · completed sales · click a bar for details`}
               data={chartData}
               maxItems={chartLimit === "all" ? null : Number(chartLimit)}
-              formatValue={money}
+              formatValue={(value) => formatInsightMetricValue(insightMetric, value)}
               selectedId={chartProductId}
               onPointClick={(point) => setChartProductId(point.id ?? "")}
               controls={
@@ -506,38 +675,77 @@ export function ProductsPage() {
                   />
                 </div>
               }
-              sidePanel={chartProduct ? (
-                <aside key={chartProduct.id} className="w-[320px] shrink-0 animate-[slideInRight_.2s_ease-out] bg-bg/20 p-4">
-                  <div className="mb-4 flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-accent-deep">Product details</span>
-                      <h3 className="mt-1 truncate text-[16px] font-extrabold text-ink">{chartProduct.name}</h3>
-                      <p className="mt-1 text-[10px] text-muted">{chartProduct.sku} · {chartProduct.category}</p>
-                    </div>
-                    <Button size="icon" variant="ghost" aria-label="Close product details" onClick={() => setChartProductId("")}><X size={15} /></Button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(chartProductPoint?.details ?? []).map((detail) => (
-                      <div key={detail.label} className="rounded-lg border border-line bg-bg/50 p-2.5">
-                        <span className="block text-[9px] font-semibold text-muted">{detail.label}</span>
-                        <strong className="mt-1 block text-[12px] tabular-nums text-ink">{detail.value}</strong>
+              sidePanel={
+                chartProduct ? (
+                  <aside
+                    key={chartProduct.id}
+                    className="w-[320px] shrink-0 animate-[slideInRight_.2s_ease-out] bg-bg/20 p-4"
+                  >
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-accent-deep">
+                          Product details
+                        </span>
+                        <h3 className="mt-1 truncate text-[16px] font-extrabold text-ink">
+                          {chartProduct.name}
+                        </h3>
+                        <p className="mt-1 text-[10px] text-muted">
+                          {chartProduct.sku} · {chartProduct.category}
+                        </p>
                       </div>
-                    ))}
-                  </div>
-                  <div className="mt-4 rounded-xl border border-line p-3">
-                    <h4 className="mb-3 text-[11px] font-bold text-ink">Pricing</h4>
-                    <div className="grid gap-2 text-[10px]">
-                      {[['Cost', chartProduct.cost], ['Minimum', chartProduct.min], ['Wholesale', chartProduct.wholesale], ['Retail', chartProduct.retail]].map(([label, value]) => (
-                        <div key={String(label)} className="flex justify-between gap-4"><span className="text-muted">{label}</span><b className="tabular-nums text-ink">{money(Number(value))}</b></div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        aria-label="Close product details"
+                        onClick={() => setChartProductId("")}
+                      >
+                        <X size={15} />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(chartProductPoint?.details ?? []).map((detail) => (
+                        <div
+                          key={detail.label}
+                          className="rounded-lg border border-line bg-bg/50 p-2.5"
+                        >
+                          <span className="block text-[9px] font-semibold text-muted">
+                            {detail.label}
+                          </span>
+                          <strong className="mt-1 block text-[12px] tabular-nums text-ink">
+                            {detail.value}
+                          </strong>
+                        </div>
                       ))}
                     </div>
-                  </div>
-                  <div className="mt-3 rounded-xl border border-line p-3 text-[10px]">
-                    <div className="flex justify-between gap-4"><span className="text-muted">Status</span><Badge tone={stockTone(chartProduct)}>{stockLabel(chartProduct)}</Badge></div>
-                    <div className="mt-2 flex justify-between gap-4"><span className="text-muted">Minimum stock</span><b>{formatStockQty(chartProduct.minimumStock ?? 20)}</b></div>
-                  </div>
-                </aside>
-              ) : null}
+                    <div className="mt-4 rounded-xl border border-line p-3">
+                      <h4 className="mb-3 text-[11px] font-bold text-ink">Pricing</h4>
+                      <div className="grid gap-2 text-[10px]">
+                        {[
+                          ["Cost", chartProduct.cost],
+                          ["Minimum", chartProduct.min],
+                          ["Wholesale", chartProduct.wholesale],
+                          ["Retail", chartProduct.retail],
+                        ].map(([label, value]) => (
+                          <div key={String(label)} className="flex justify-between gap-4">
+                            <span className="text-muted">{label}</span>
+                            <b className="tabular-nums text-ink">{money(Number(value))}</b>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-xl border border-line p-3 text-[10px]">
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted">Status</span>
+                        <Badge tone={stockTone(chartProduct)}>{stockLabel(chartProduct)}</Badge>
+                      </div>
+                      <div className="mt-2 flex justify-between gap-4">
+                        <span className="text-muted">Minimum stock</span>
+                        <b>{formatStockQty(chartProduct.minimumStock ?? 20)}</b>
+                      </div>
+                    </div>
+                  </aside>
+                ) : null
+              }
             />
           ) : undefined
         }
@@ -561,7 +769,8 @@ export function ProductsPage() {
               <Checkbox
                 checked={allShownSelected}
                 onChange={(e) => {
-                  if (e.target.checked) setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
+                  if (e.target.checked)
+                    setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
                   else setSelected((s) => s.filter((id) => !shown.some((r) => r.id === id)));
                 }}
               />
@@ -583,10 +792,20 @@ export function ProductsPage() {
                   className="inline-flex items-center gap-1 border-0 bg-transparent p-0 font:inherit text-inherit"
                   aria-label="Sort by profit"
                   aria-pressed={Boolean(profitSort)}
-                  onClick={() => setProfitSort((current) => current === null ? "desc" : current === "desc" ? "asc" : null)}
+                  onClick={() =>
+                    setProfitSort((current) =>
+                      current === null ? "desc" : current === "desc" ? "asc" : null,
+                    )
+                  }
                 >
                   Profit
-                  {profitSort === "desc" ? <ArrowDown size={12} /> : profitSort === "asc" ? <ArrowUp size={12} /> : <ArrowUpDown size={12} />}
+                  {profitSort === "desc" ? (
+                    <ArrowDown size={12} />
+                  ) : profitSort === "asc" ? (
+                    <ArrowUp size={12} />
+                  ) : (
+                    <ArrowUpDown size={12} />
+                  )}
                 </button>
               </Th>
             ) : null}
@@ -599,99 +818,164 @@ export function ProductsPage() {
           </tr>
         </THead>
         <tbody>
-          {loading ? (
+          {loading.hub ? (
             <TableRowsSkeleton
               columnCount={cols.length}
-              rows={pageSize === PAGE_SIZE_ALL ? Math.min(Math.max(filtered.length, 6), 12) : pageSize}
+              rows={
+                pageSize === PAGE_SIZE_ALL ? Math.min(Math.max(filtered.length, 6), 12) : pageSize
+              }
               selectable
               hasActions
             />
           ) : (
             shown.map((row) => {
-            const tone = stockTone(row);
-            const pct = marginPct(row);
-            const lastLot = latestLot(row.id);
-            const minimumStock = row.minimumStock ?? 20;
-            const recommended = Math.max(0, minimumStock * 2 - row.stock);
-            return (
-              <tr key={row.id} className={`is-${tone}`}>
-                <Td className="ui-check-col">
-                  <Checkbox
-                    checked={selected.includes(row.id)}
-                    onChange={(e) => {
-                      setSelected((s) => (e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id)));
-                    }}
-                  />
-                </Td>
-                <Td>
-                  <TruncatedTooltip text={row.name} />
-                  {row.isLinear ? <span className="sub">Sold by meter</span> : null}
-                  {row.isManufactured ? <span className="sub">Production</span> : null}
-                </Td>
-                {show("sku") ? <Td>{row.sku || "—"}</Td> : null}
-                {show("category") ? <Td>{row.category}</Td> : null}
-                {show("supplier") ? <Td>{lastLot ? supplierName(lastLot.supplierId) || "—" : "—"}</Td> : null}
-                {show("cost") ? <Td numeric><UnitPrice row={row} field="cost" /></Td> : null}
-                {show("min") ? <Td numeric><UnitPrice row={row} field="min" /></Td> : null}
-                {show("wholesale") ? <Td numeric><UnitPrice row={row} field="wholesale" /></Td> : null}
-                {show("retail") ? <Td numeric><UnitPrice row={row} field="retail" /></Td> : null}
-                {show("margin") ? (
-                  <Td numeric>
-                    <span style={{ color: pct >= 0 ? "var(--sale)" : "var(--danger)", fontWeight: 700 }}>
-                      {pct >= 0 ? "+" : ""}
-                      {pct.toFixed(1)}%
-                    </span>
-                  </Td>
-                ) : null}
-                {show("sales") ? <Td numeric>{money(salesAmount(row.id))}</Td> : null}
-                {show("profit") ? (
-                  <Td numeric>
-                    <span className={profitOf(row) >= 0 ? "font-bold text-sale" : "font-bold text-danger"}>
-                      {money(profitOf(row))}
-                    </span>
-                  </Td>
-                ) : null}
-                {show("stock") ? (
-                  <Td numeric>
-                    <div className="product-qty [display:grid] [gap:1px] [justify-items:end] [font-variant-numeric:tabular-nums]">
-                      {stockBreakdown(row).map((q) => (
-                        <span key={q.id || q.name}>
-                          {formatStockQty(q.qty)} {q.name}
-                        </span>
-                      ))}
-                    </div>
-                  </Td>
-                ) : null}
-                {show("minStock") ? <Td numeric>{formatStockQty(minimumStock)}</Td> : null}
-                {show("recommended") ? <Td numeric><strong>{formatStockQty(recommended)}</strong></Td> : null}
-                {show("lastCost") ? <Td numeric>{lastLot ? money(lastLot.purchasePrice) : money(row.cost)}</Td> : null}
-                {show("status") ? (
-                  <Td>
-                    <Badge tone={tone}>{stockLabel(row)}</Badge>
-                  </Td>
-                ) : null}
-                <Td>
-                  {tab === "low" ? (
-                    <Button size="sm" variant="primary" onClick={() => navigate(routes.lots, { state: { addLotProductId: row.id } })}>Add lot</Button>
-                  ) : <Menu>
-                    <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
-                      Edit
-                    </MenuItem>
-                    <MenuItem
-                      danger
-                      icon={<Trash2 size={14} />}
-                      onClick={() => {
-                        if (row.stock > 0 || row.claims > 0) setBlocked(true);
-                        else setRemove(row);
+              const tone = stockTone(row);
+              const pct = marginPct(row);
+              const lastLot = latestLot(row.id);
+              const minimumStock = row.minimumStock ?? 20;
+              const recommended = Math.max(0, minimumStock * 2 - row.stock);
+              return (
+                <tr key={row.id} className={`is-${tone}`}>
+                  <Td className="ui-check-col">
+                    <Checkbox
+                      checked={selected.includes(row.id)}
+                      onChange={(e) => {
+                        setSelected((s) =>
+                          e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
+                        );
                       }}
-                    >
-                      Delete
-                    </MenuItem>
-                  </Menu>}
-                </Td>
-              </tr>
-            );
-          })
+                    />
+                  </Td>
+                  <Td>
+                    <TruncatedTooltip text={row.name} />
+                    {row.isLinear ? <span className="sub">Sold by meter</span> : null}
+                    {row.isManufactured ? <span className="sub">Production</span> : null}
+                  </Td>
+                  {show("sku") ? <Td>{row.sku || "—"}</Td> : null}
+                  {show("category") ? <Td>{row.category}</Td> : null}
+                  {show("supplier") ? (
+                    <Td>{lastLot ? supplierName(lastLot.supplierId) || "—" : "—"}</Td>
+                  ) : null}
+                  {show("cost") ? (
+                    <Td numeric>
+                      <UnitPrice row={row} field="cost" />
+                    </Td>
+                  ) : null}
+                  {show("min") ? (
+                    <Td numeric>
+                      <UnitPrice row={row} field="min" />
+                    </Td>
+                  ) : null}
+                  {show("wholesale") ? (
+                    <Td numeric>
+                      <UnitPrice row={row} field="wholesale" />
+                    </Td>
+                  ) : null}
+                  {show("retail") ? (
+                    <Td numeric>
+                      <UnitPrice row={row} field="retail" />
+                    </Td>
+                  ) : null}
+                  {show("margin") ? (
+                    <Td numeric>
+                      <span
+                        style={{
+                          color: pct >= 0 ? "var(--sale)" : "var(--danger)",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {pct >= 0 ? "+" : ""}
+                        {pct.toFixed(1)}%
+                      </span>
+                    </Td>
+                  ) : null}
+                  {show("sales") ? (
+                    <Td numeric>{money(productSalesStats(row.id, salesStats).sales)}</Td>
+                  ) : null}
+                  {show("profit") ? (
+                    <Td numeric>
+                      <span
+                        className={
+                          productSalesStats(row.id, salesStats).profit >= 0
+                            ? "font-bold text-sale"
+                            : "font-bold text-danger"
+                        }
+                      >
+                        {money(productSalesStats(row.id, salesStats).profit)}
+                      </span>
+                    </Td>
+                  ) : null}
+                  {show("stock") ? (
+                    <Td numeric>
+                      <Tooltip
+                        content={branchStockTooltip(row)
+                          .split("\n")
+                          .map((line) => (
+                            <span key={line} className="block">
+                              {line}
+                            </span>
+                          ))}
+                      >
+                        <div className="product-qty [display:grid] [gap:1px] [justify-items:end] [font-variant-numeric:tabular-nums] [cursor:help]">
+                          <span>
+                            {formatStockQty(productTotalStock(row))} {unitLabel(row.unit)}
+                          </span>
+                          {(row.branchStock?.length ?? 0) > 1 ? (
+                            <small className="text-muted">
+                              {row.branchStock?.filter((entry) => entry.quantity > 0).length ?? 0}{" "}
+                              branches
+                            </small>
+                          ) : null}
+                        </div>
+                      </Tooltip>
+                    </Td>
+                  ) : null}
+                  {show("minStock") ? <Td numeric>{formatStockQty(minimumStock)}</Td> : null}
+                  {show("recommended") ? (
+                    <Td numeric>
+                      <strong>{formatStockQty(recommended)}</strong>
+                    </Td>
+                  ) : null}
+                  {show("lastCost") ? (
+                    <Td numeric>{lastLot ? money(lastLot.purchasePrice) : money(row.cost)}</Td>
+                  ) : null}
+                  {show("status") ? (
+                    <Td>
+                      <Badge tone={tone}>{stockLabel(row)}</Badge>
+                    </Td>
+                  ) : null}
+                  <Td>
+                    {tab === "low" ? (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={() =>
+                          navigate(productsHref("lots"), { state: { addLotProductId: row.id } })
+                        }
+                      >
+                        Add lot
+                      </Button>
+                    ) : (
+                      <Menu>
+                        <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
+                          Edit
+                        </MenuItem>
+                        <MenuItem
+                          danger
+                          icon={<Trash2 size={14} />}
+                          onClick={() => {
+                            if (row.stock > 0 || row.claims > 0) setBlocked(true);
+                            else setRemove(row);
+                          }}
+                        >
+                          Delete
+                        </MenuItem>
+                      </Menu>
+                    )}
+                  </Td>
+                </tr>
+              );
+            })
           )}
         </tbody>
       </Table>
@@ -705,19 +989,34 @@ export function ProductsPage() {
         subtitle={
           <p className="product-keys [display:flex] [flex-wrap:wrap] [gap:8px_12px] [margin:0] [font-size:11px] [color:var(--muted)]">
             <span>
-              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Tab</kbd> Move
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+                Tab
+              </kbd>{" "}
+              Move
             </span>
             <span>
-              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Shift + Tab</kbd> Back
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+                Shift + Tab
+              </kbd>{" "}
+              Back
             </span>
             <span>
-              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Enter</kbd> Select
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+                Enter
+              </kbd>{" "}
+              Select
             </span>
             <span>
-              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">F12</kbd> Save
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+                F12
+              </kbd>{" "}
+              Save
             </span>
             <span>
-              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">Esc</kbd> Close
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+                Esc
+              </kbd>{" "}
+              Close
             </span>
           </p>
         }
@@ -730,6 +1029,7 @@ export function ProductsPage() {
             onChange={setEdit}
             onCommit={commit}
             onClose={() => setEdit(null)}
+            saving={productLoading.saving}
           />
         ) : null}
       </Drawer>
@@ -749,12 +1049,24 @@ export function ProductsPage() {
         body={`${remove?.name ?? "This product"} will be removed from the catalog.`}
         onCancel={() => setRemove(null)}
         onConfirm={() => {
-          if (remove) {
-            setRows((p) => p.filter((r) => r.id !== remove.id));
-            setSelected((s) => s.filter((id) => id !== remove.id));
-            toaster.success("Product deleted");
+          if (!remove) {
+            setRemove(null);
+            return;
           }
-          setRemove(null);
+          setProductLoading((current) => ({ ...current, deleting: true }));
+          void deleteProduct(remove.id)
+            .then(() => refreshHub())
+            .then(() => {
+              setSelected((selectedIds) => selectedIds.filter((id) => id !== remove.id));
+              toaster.success(PRODUCT_COPY.deleted);
+              setRemove(null);
+            })
+            .catch((error) => {
+              toaster.error(shortError(error, PRODUCT_COPY.deleteFailed));
+            })
+            .finally(() => {
+              setProductLoading((current) => ({ ...current, deleting: false }));
+            });
         }}
       />
     </div>

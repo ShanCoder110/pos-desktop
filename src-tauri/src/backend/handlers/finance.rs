@@ -64,16 +64,17 @@ pub async fn reports_dashboard(
     State(state): State<AppState>,
     ctx: RequestContext,
 ) -> Result<Json<DashboardReportResponse>, AppError> {
-    Ok(Json(
-        FinanceService::dashboard(&state.db, &ctx).await?,
-    ))
+    Ok(Json(FinanceService::dashboard(&state.db, &ctx).await?))
 }
 
 pub async fn reports_analytics(
     State(state): State<AppState>,
+    ctx: RequestContext,
     Query(query): Query<AnalyticsQuery>,
 ) -> Result<Json<AnalyticsReportResponse>, AppError> {
-    Ok(Json(FinanceService::analytics(&state.db, query).await?))
+    Ok(Json(
+        FinanceService::analytics(&state.db, &ctx, query).await?,
+    ))
 }
 
 pub async fn get_localization(
@@ -116,9 +117,7 @@ pub async fn get_profile_settings(
     State(state): State<AppState>,
     ctx: RequestContext,
 ) -> Result<Json<ProfileSettingsResponse>, AppError> {
-    Ok(Json(
-        FinanceService::get_profile(&state.db, &ctx).await?,
-    ))
+    Ok(Json(FinanceService::get_profile(&state.db, &ctx).await?))
 }
 
 pub async fn update_profile_settings(

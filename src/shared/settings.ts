@@ -21,6 +21,7 @@ export const defaultSettings: ShopSettings = {
   currencyCode: "PKR",
   language: "EN",
   expiryReminderDays: 30,
+  payoutDeductFrom: "PROFIT",
   invoicePrefix: "INV",
   skuPrefix: "P",
   lotPrefix: "L",

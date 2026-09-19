@@ -6,10 +6,9 @@ use uuid::Uuid;
 
 use crate::backend::{
     constants::{
-        ERROR_INSUFFICIENT_STOCK, ERROR_PRODUCT_NOT_FOUND, ERROR_REPAIR_NOT_FOUND, LEDGER_CREDIT_SALE,
-        PAYMENT_DIRECTION_IN, PAYMENT_STATUS_COMPLETED, PAYMENT_STATUS_CREDIT,
-        PAYMENT_STATUS_PAID, PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_UNPAID, REFERENCE_REPAIR,
-        STOCK_MOVEMENT_REPAIR_USE,
+        ERROR_INSUFFICIENT_STOCK, ERROR_PRODUCT_NOT_FOUND, ERROR_REPAIR_NOT_FOUND, LEDGER_SALE,
+        PAYMENT_DIRECTION_IN, PAYMENT_STATUS_COMPLETED, PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID,
+        PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_UNPAID, REFERENCE_REPAIR, STOCK_MOVEMENT_REPAIR_USE,
     },
     context::RequestContext,
     dto::{
@@ -422,7 +421,7 @@ impl RepairRepository {
                             Uuid::new_v4().into(),
                             customer_id.into(),
                             header.branch_id.into(),
-                            LEDGER_CREDIT_SALE.into(),
+                            LEDGER_SALE.into(),
                             credit.into(),
                             balance_after.into(),
                             format!("Repair credit {id}").into(),

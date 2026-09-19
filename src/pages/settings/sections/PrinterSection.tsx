@@ -1,4 +1,5 @@
 import { Field, SelectInput, TextInput, Toggle } from "@/components/common";
+import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { SettingsSection } from "@/pages/settings/SettingsSection";
 import { useSettingsForm } from "@/shared/settings";
 import type { PaperWidth } from "@/shared/types";
@@ -17,7 +18,10 @@ export function PrinterSection() {
       onReset={reset}
     >
       <Field label="Printer name" hint="OS printer name. Does not sync to cloud">
-        <TextInput value={draft.printerName} onChange={(e) => patch({ printerName: e.target.value })} />
+        <TextInput
+          value={draft.printerName}
+          onChange={(e) => patch({ printerName: e.target.value })}
+        />
       </Field>
       <div className="settings-row">
         <Field label="Paper width" hint="Override the slip paper size on this machine only">
@@ -33,6 +37,7 @@ export function PrinterSection() {
         <Field label="Copies">
           <TextInput
             inputMode="numeric"
+            maxLength={FIELD_LIMITS.copies}
             value={String(draft.copies)}
             onChange={(e) => patch({ copies: Math.max(1, Number(e.target.value) || 1) })}
           />

@@ -9,13 +9,33 @@ use crate::backend::{
     constants::ERROR_INVALID_ID,
     context::RequestContext,
     dto::{
-        CashSessionCloseRequest, CashSessionOpenRequest, CashSessionResponse, LoginRequest,
-        LoginResponse, LogoutResponse, MeResponse,
+        AuthStatusResponse, CashSessionCloseRequest, CashSessionOpenRequest, CashSessionResponse,
+        LoginRequest, LoginResponse, LogoutResponse, MeResponse, RefreshRequest, SetupRequest,
     },
     errors::AppError,
     services::AuthService,
     AppState,
 };
+
+pub async fn auth_status(
+    State(state): State<AppState>,
+) -> Result<Json<AuthStatusResponse>, AppError> {
+    Ok(Json(AuthService::status(&state.db).await?))
+}
+
+pub async fn setup(
+    State(state): State<AppState>,
+    Json(request): Json<SetupRequest>,
+) -> Result<Json<LoginResponse>, AppError> {
+    Ok(Json(AuthService::setup(&state.db, request).await?))
+}
+
+pub async fn refresh(
+    State(state): State<AppState>,
+    Json(request): Json<RefreshRequest>,
+) -> Result<Json<LoginResponse>, AppError> {
+    Ok(Json(AuthService::refresh(&state.db, request).await?))
+}
 
 pub async fn login(
     State(state): State<AppState>,

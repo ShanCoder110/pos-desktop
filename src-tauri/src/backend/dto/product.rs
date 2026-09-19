@@ -95,6 +95,9 @@ pub struct CreateProductRequest {
     pub sell_units: Vec<ProductUnitInput>,
     #[validate(nested)]
     pub opening_stock: Option<OpeningStockInput>,
+    #[validate(nested)]
+    #[serde(default)]
+    pub opening_stocks: Vec<OpeningStockInput>,
 }
 
 #[derive(Clone, Debug, Deserialize, Validate)]
@@ -111,6 +114,14 @@ pub struct UpdateProductRequest {
     pub is_active: Option<bool>,
     #[validate(nested)]
     pub sell_units: Option<Vec<ProductUnitInput>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductBranchStockResponse {
+    pub branch_id: String,
+    pub branch_name: String,
+    pub quantity: f64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -157,6 +168,8 @@ pub struct ProductResponse {
     pub claims: i64,
     pub damaged: f64,
     pub stock: f64,
+    pub total_stock: f64,
+    pub branch_stock: Vec<ProductBranchStockResponse>,
     pub components: Vec<serde_json::Value>,
     pub sell_units: Vec<ProductSellUnitResponse>,
     pub is_active: bool,

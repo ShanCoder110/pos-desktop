@@ -16,6 +16,7 @@ import {
   Pagination,
   SearchableSelect,
   Table,
+  TableRowsSkeleton,
   Td,
   THead,
   Th,
@@ -38,7 +39,6 @@ import { money } from "@/utils/format";
 import { listMasterRecords, createMasterRecord } from "@/services/masters";
 import { receiveLot, receivePayloadFromLot } from "@/services/lots";
 
-
 function newLot(rows: ProductLotRow[]): ProductLotRow {
   return {
     id: crypto.randomUUID(),
@@ -58,7 +58,15 @@ function newLot(rows: ProductLotRow[]): ProductLotRow {
   };
 }
 
-function LotQty({ product, qty, tone }: { product?: Product; qty: number; tone?: "ok" | "danger" }) {
+function LotQty({
+  product,
+  qty,
+  tone,
+}: {
+  product?: Product;
+  qty: number;
+  tone?: "ok" | "danger";
+}) {
   const rows = product ? qtyBreakdown(product, qty) : [{ id: "qty", name: "", qty }];
   return (
     <div className="product-qty [display:grid] [gap:1px] [justify-items:end] [font-variant-numeric:tabular-nums]">
@@ -112,6 +120,7 @@ export function LotsPage() {
     refreshHub,
     refreshLots,
     refreshProducts,
+    loading: hubLoading,
   } = useProductsHub();
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
@@ -127,7 +136,7 @@ export function LotsPage() {
   const [apiSupplierIds, setApiSupplierIds] = useState<Set<string>>(() => new Set());
   const [chartProductId, setChartProductId] = useState("");
   const [chartLotId, setChartLotId] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState({ suppliers: true, saving: false });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -141,6 +150,7 @@ export function LotsPage() {
             email: record.email ?? "",
             address: record.address ?? "",
             notes: record.notes ?? "",
+            currentBalance: record.balance ?? 0,
             isActive: record.isActive,
           })),
         );
@@ -149,7 +159,8 @@ export function LotsPage() {
       .catch(() => {
         setSupplierRows([]);
         setApiSupplierIds(new Set());
-      });
+      })
+      .finally(() => setLoading((current) => ({ ...current, suppliers: false })));
     return () => controller.abort();
   }, []);
 
@@ -177,8 +188,11 @@ export function LotsPage() {
     const productId = (location.state as { addLotProductId?: string } | null)?.addLotProductId;
     if (!productId) return;
     setEdit(newLotForProduct(productId));
-    navigate(location.pathname, { replace: true, state: null });
-  }, [location.pathname, location.state]);
+    navigate(
+      { pathname: location.pathname, search: location.search },
+      { replace: true, state: null },
+    );
+  }, [location.pathname, location.search, location.state]);
 
   useEffect(() => {
     setChartLotId("");
@@ -209,6 +223,7 @@ export function LotsPage() {
       email: "",
       address: "",
       notes: "Added while receiving stock",
+      currentBalance: 0,
       isActive: true,
     };
     setSupplierRows((current) => [...current, supplier]);
@@ -217,14 +232,16 @@ export function LotsPage() {
 
   function writeLots(nextLots: ProductLotRow[], productIds: string[]) {
     setRows(nextLots);
-    setProducts((prev) => productIds.reduce((acc, id) => syncProductStock(acc, nextLots, id), prev));
+    setProducts((prev) =>
+      productIds.reduce((acc, id) => syncProductStock(acc, nextLots, id), prev),
+    );
   }
 
   async function saveLot(lot: ProductLotRow) {
     const exists = rows.some((row) => row.id === lot.id);
     if (!exists) {
-      if (saving) return;
-      setSaving(true);
+      if (loading.saving) return;
+      setLoading((current) => ({ ...current, saving: true }));
       try {
         let supplierId = lot.supplierId;
         if (supplierId && !apiSupplierIds.has(supplierId)) {
@@ -247,6 +264,7 @@ export function LotsPage() {
                       email: created.email ?? "",
                       address: created.address ?? "",
                       notes: created.notes ?? "",
+                      currentBalance: created.balance ?? 0,
                       isActive: created.isActive,
                     }
                   : row,
@@ -261,7 +279,7 @@ export function LotsPage() {
       } catch (error) {
         toaster.error(error instanceof Error ? error.message : "Could not receive lot");
       } finally {
-        setSaving(false);
+        setLoading((current) => ({ ...current, saving: false }));
       }
       return;
     }
@@ -270,11 +288,16 @@ export function LotsPage() {
     const next = {
       ...lot,
       damagedQuantity,
-      remainingQuantity: Math.max(0, Math.min(lot.remainingQuantity, lot.originalQuantity - damagedQuantity)),
+      remainingQuantity: Math.max(
+        0,
+        Math.min(lot.remainingQuantity, lot.originalQuantity - damagedQuantity),
+      ),
     };
     const previous = rows.find((row) => row.id === next.id);
     const list = rows.map((row) => (row.id === next.id ? next : row));
-    writeLots(list, [...new Set([next.productId, previous?.productId].filter(Boolean) as string[])]);
+    writeLots(list, [
+      ...new Set([next.productId, previous?.productId].filter(Boolean) as string[]),
+    ]);
     setProducts((current) =>
       current.map((product) => {
         if (product.id !== next.productId) return product;
@@ -348,7 +371,8 @@ export function LotsPage() {
     return rows.filter((r) => {
       if (!dateInRange(r.receivedAt, dateRange)) return false;
       if (needle) {
-        const text = `${r.lotNumber} ${productLabel(r.productId)} ${supplierLabel(r.supplierId)}`.toLowerCase();
+        const text =
+          `${r.lotNumber} ${productLabel(r.productId)} ${supplierLabel(r.supplierId)}`.toLowerCase();
         if (!text.includes(needle)) return false;
       }
       if (sectionKpi === "open") return r.remainingQuantity > 0;
@@ -363,7 +387,10 @@ export function LotsPage() {
     const lots = filtered
       .filter((lot) => lot.productId === chartProductId)
       .slice()
-      .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt) || a.lotNumber.localeCompare(b.lotNumber));
+      .sort(
+        (a, b) =>
+          a.receivedAt.localeCompare(b.receivedAt) || a.lotNumber.localeCompare(b.lotNumber),
+      );
     return lots.map((lot, index) => {
       const previous = lots[index - 1];
       const change = previous ? lot.purchasePrice - previous.purchasePrice : 0;
@@ -396,7 +423,8 @@ export function LotsPage() {
   const chartProduct = productOf(chartProductId);
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
-  const shown = pageSize === PAGE_SIZE_ALL ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
+  const shown =
+    pageSize === PAGE_SIZE_ALL ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
   const show = (id: string) => cols.includes(id);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
@@ -440,7 +468,10 @@ export function LotsPage() {
                 <SearchableSelect
                   className="w-[240px] [&_.ui-combo-field]:h-8 [&_.ui-combo-input]:text-[11px]"
                   value={chartProductId}
-                  options={products.map((product) => ({ value: product.id, label: `${product.name} · ${product.sku}` }))}
+                  options={products.map((product) => ({
+                    value: product.id,
+                    label: `${product.name} · ${product.sku}`,
+                  }))}
                   onChange={setChartProductId}
                   placeholder="Choose product"
                   searchPlaceholder="Search products"
@@ -455,12 +486,18 @@ export function LotsPage() {
                     danger
                     icon={<Trash2 size={14} />}
                     onClick={() => {
-                      const blocked = rows.find((r) => selected.includes(r.id) && r.remainingQuantity < r.originalQuantity);
+                      const blocked = rows.find(
+                        (r) => selected.includes(r.id) && r.remainingQuantity < r.originalQuantity,
+                      );
                       if (blocked) {
                         setRemove(blocked);
                         return;
                       }
-                      const ids = [...new Set(rows.filter((r) => selected.includes(r.id)).map((r) => r.productId))];
+                      const ids = [
+                        ...new Set(
+                          rows.filter((r) => selected.includes(r.id)).map((r) => r.productId),
+                        ),
+                      ];
                       writeLots(
                         rows.filter((r) => !selected.includes(r.id)),
                         ids,
@@ -494,12 +531,23 @@ export function LotsPage() {
                   <aside className="w-[320px] shrink-0 bg-bg/20 p-4">
                     <div className="mb-4 flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <span className="text-[10px] font-bold uppercase tracking-wide text-accent-deep">Price history</span>
-                        <h3 className="mt-1 truncate text-[16px] font-extrabold text-ink">{chartProduct.name}</h3>
-                        <p className="mt-1 text-[10px] text-muted">{chartProduct.sku} · cost per {chartProduct.unit || "unit"}</p>
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-accent-deep">
+                          Price history
+                        </span>
+                        <h3 className="mt-1 truncate text-[16px] font-extrabold text-ink">
+                          {chartProduct.name}
+                        </h3>
+                        <p className="mt-1 text-[10px] text-muted">
+                          {chartProduct.sku} · cost per {chartProduct.unit || "unit"}
+                        </p>
                       </div>
                       {chartLotId ? (
-                        <Button size="icon" variant="ghost" aria-label="Clear lot" onClick={() => setChartLotId("")}>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label="Clear lot"
+                          onClick={() => setChartLotId("")}
+                        >
                           <X size={15} />
                         </Button>
                       ) : null}
@@ -508,13 +556,20 @@ export function LotsPage() {
                       <div className="mb-3 flex items-center gap-2 rounded-lg border border-line bg-paper px-2.5 py-2 text-[10px]">
                         <TrendingUp size={14} style={{ color: "var(--danger)" }} />
                         <span className="text-muted">
-                          {chartIncreases.map((row) => `${row.lot.lotNumber} ${shortDate(row.lot.receivedAt)} ${signedMoney(row.change)}`).join(" · ")}
+                          {chartIncreases
+                            .map(
+                              (row) =>
+                                `${row.lot.lotNumber} ${shortDate(row.lot.receivedAt)} ${signedMoney(row.change)}`,
+                            )
+                            .join(" · ")}
                         </span>
                       </div>
                     ) : null}
                     <div className="grid gap-2">
                       {chartHistory.length === 0 ? (
-                        <p className="m-0 text-[11px] text-muted">No lots for this product in the current filters.</p>
+                        <p className="m-0 text-[11px] text-muted">
+                          No lots for this product in the current filters.
+                        </p>
                       ) : (
                         chartHistory.map(({ lot, change, previous }) => {
                           const active = chartLotId === lot.id;
@@ -527,11 +582,25 @@ export function LotsPage() {
                             >
                               <span className="flex items-center justify-between gap-3">
                                 <strong className="text-[11px] text-ink">{lot.lotNumber}</strong>
-                                <b className="text-[11px] tabular-nums text-ink">{money(lot.purchasePrice)}</b>
+                                <b className="text-[11px] tabular-nums text-ink">
+                                  {money(lot.purchasePrice)}
+                                </b>
                               </span>
                               <span className="flex items-center justify-between gap-3 text-[10px] text-muted">
-                                <span>{shortDate(lot.receivedAt)} · {supplierLabel(lot.supplierId)}</span>
-                                <span style={{ color: change > 0 ? "var(--danger)" : change < 0 ? "var(--sale)" : undefined, fontWeight: change > 0 ? 700 : undefined }}>
+                                <span>
+                                  {shortDate(lot.receivedAt)} · {supplierLabel(lot.supplierId)}
+                                </span>
+                                <span
+                                  style={{
+                                    color:
+                                      change > 0
+                                        ? "var(--danger)"
+                                        : change < 0
+                                          ? "var(--sale)"
+                                          : undefined,
+                                    fontWeight: change > 0 ? 700 : undefined,
+                                  }}
+                                >
                                   {previous ? signedMoney(change) : "Opening"}
                                 </span>
                               </span>
@@ -566,7 +635,8 @@ export function LotsPage() {
               <Checkbox
                 checked={allShownSelected}
                 onChange={(e) => {
-                  if (e.target.checked) setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
+                  if (e.target.checked)
+                    setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
                   else setSelected((s) => s.filter((id) => !shown.some((r) => r.id === id)));
                 }}
               />
@@ -582,56 +652,65 @@ export function LotsPage() {
           </tr>
         </THead>
         <tbody>
-          {shown.length === 0 ? <EmptyRow cols={cols.length + 2} /> : null}
-          {shown.map((row) => (
-            <tr key={row.id}>
-              <Td className="ui-check-col">
-                <Checkbox
-                  checked={selected.includes(row.id)}
-                  onChange={(e) => {
-                    setSelected((s) => (e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id)));
-                  }}
-                />
-              </Td>
-              <Td>{row.lotNumber}</Td>
-              {show("product") ? <Td>{productLabel(row.productId)}</Td> : null}
-              {show("supplier") ? <Td>{supplierLabel(row.supplierId)}</Td> : null}
-              {show("cost") ? (
-                <Td numeric>
-                  <LotCost product={productOf(row.productId)} price={row.purchasePrice} />
-                </Td>
-              ) : null}
-              {show("original") ? (
-                <Td numeric>
-                  <LotQty product={productOf(row.productId)} qty={row.originalQuantity} />
-                </Td>
-              ) : null}
-              {show("left") ? (
-                <Td numeric>
-                  <LotQty
-                    product={productOf(row.productId)}
-                    qty={row.remainingQuantity}
-                    tone={row.remainingQuantity <= 0 ? "danger" : "ok"}
-                  />
-                </Td>
-              ) : null}
-              {show("damaged") ? (
-                <Td numeric>
-                  <LotQty product={productOf(row.productId)} qty={row.damagedQuantity} />
-                </Td>
-              ) : null}
-              <Td>
-                <Menu>
-                  <MenuItem icon={<Pencil size={14} />} onClick={() => setEdit(row)}>
-                    Edit
-                  </MenuItem>
-                  <MenuItem danger icon={<Trash2 size={14} />} onClick={() => removeRow(row)}>
-                    Delete
-                  </MenuItem>
-                </Menu>
-              </Td>
-            </tr>
-          ))}
+          {hubLoading.hub || hubLoading.lots ? (
+            <TableRowsSkeleton columnCount={cols.length} rows={6} selectable hasActions />
+          ) : null}
+          {!hubLoading.hub && !hubLoading.lots && shown.length === 0 ? (
+            <EmptyRow cols={cols.length + 2} />
+          ) : null}
+          {!hubLoading.hub && !hubLoading.lots
+            ? shown.map((row) => (
+                <tr key={row.id}>
+                  <Td className="ui-check-col">
+                    <Checkbox
+                      checked={selected.includes(row.id)}
+                      onChange={(e) => {
+                        setSelected((s) =>
+                          e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
+                        );
+                      }}
+                    />
+                  </Td>
+                  <Td>{row.lotNumber}</Td>
+                  {show("product") ? <Td>{productLabel(row.productId)}</Td> : null}
+                  {show("supplier") ? <Td>{supplierLabel(row.supplierId)}</Td> : null}
+                  {show("cost") ? (
+                    <Td numeric>
+                      <LotCost product={productOf(row.productId)} price={row.purchasePrice} />
+                    </Td>
+                  ) : null}
+                  {show("original") ? (
+                    <Td numeric>
+                      <LotQty product={productOf(row.productId)} qty={row.originalQuantity} />
+                    </Td>
+                  ) : null}
+                  {show("left") ? (
+                    <Td numeric>
+                      <LotQty
+                        product={productOf(row.productId)}
+                        qty={row.remainingQuantity}
+                        tone={row.remainingQuantity <= 0 ? "danger" : "ok"}
+                      />
+                    </Td>
+                  ) : null}
+                  {show("damaged") ? (
+                    <Td numeric>
+                      <LotQty product={productOf(row.productId)} qty={row.damagedQuantity} />
+                    </Td>
+                  ) : null}
+                  <Td>
+                    <Menu>
+                      <MenuItem icon={<Pencil size={14} />} onClick={() => setEdit(row)}>
+                        Edit
+                      </MenuItem>
+                      <MenuItem danger icon={<Trash2 size={14} />} onClick={() => removeRow(row)}>
+                        Delete
+                      </MenuItem>
+                    </Menu>
+                  </Td>
+                </tr>
+              ))
+            : null}
         </tbody>
       </Table>
 

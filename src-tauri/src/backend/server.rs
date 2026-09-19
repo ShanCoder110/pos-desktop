@@ -15,25 +15,30 @@ use tower_http::{
 use tracing::info;
 
 use super::{
+    config::Config,
     constants::{
-        ALLOWED_API_ORIGINS, API_HOST, API_PORT, API_PREFIX, AUTH_LOGIN_ROUTE, AUTH_LOGOUT_ROUTE,
-        AUTH_ME_ROUTE, BRANCHES_ROUTE, BRANCH_BY_ID_ROUTE, CASH_SESSIONS_CURRENT_ROUTE,
-        CASH_SESSIONS_OPEN_ROUTE, CASH_SESSION_CLOSE_ROUTE, CATEGORIES_ROUTE, CATEGORY_BY_ID_ROUTE,
-        CLAIMS_ROUTE, CLAIM_BY_ID_ROUTE, CUSTOMERS_ROUTE, CUSTOMER_BY_ID_ROUTE,
-        CUSTOMER_LEDGER_ROUTE, CUSTOMER_PAYMENTS_ROUTE, DEVICES_ROUTE, DEVICE_PRINTER_ROUTE,
-        EXPENSES_ROUTE, EXPENSE_CATEGORIES_ROUTE, HEALTH_ROUTE, INVOICES_ROUTE, INVOICE_BY_ID_ROUTE,
-        INVOICE_VOID_ROUTE, LOG_TARGET, LOTS_RECEIVE_ROUTE, LOTS_ROUTE, LOT_BY_ID_ROUTE,
-        PRODUCTION_BY_ID_ROUTE, PRODUCTION_COMPLETE_ROUTE, PRODUCTION_ROUTE, PRODUCTION_START_ROUTE,
-        PRODUCTS_ROUTE, PRODUCT_BY_ID_ROUTE, PRODUCT_SEARCH_ROUTE, PURCHASE_ORDERS_ROUTE,
-        PURCHASE_ORDER_BY_ID_ROUTE, PURCHASE_ORDER_ORDER_ROUTE, PURCHASE_ORDER_RECEIVE_ROUTE,
-        REPAIRS_ROUTE, REPAIR_BY_ID_ROUTE, REPAIR_COMPLETE_ROUTE, REPAIR_DELIVER_ROUTE,
-        REPAIR_START_ROUTE, REPORTS_ANALYTICS_ROUTE, REPORTS_DASHBOARD_ROUTE, RETURNS_ROUTE,
-        RETURN_BY_ID_ROUTE, SALES_COMPLETE_ROUTE, SALES_HOLDS_ROUTE, SALES_HOLD_BY_ID_ROUTE,
-        SETTINGS_LOCALIZATION_ROUTE, SETTINGS_PROFILE_ROUTE, SETTINGS_RECEIPT_ROUTE, STOCK_ROUTE,
-        STOCK_MOVEMENTS_ROUTE, SUPPLIERS_ROUTE, SUPPLIER_BY_ID_ROUTE, SUPPLIER_LEDGER_ROUTE,
-        SUPPLIER_PAYMENTS_ROUTE, SYNC_STATUS_ROUTE, TRANSACTIONS_ROUTE, TRANSFERS_ROUTE,
-        TRANSFER_BY_ID_ROUTE, TRANSFER_RECEIVE_ROUTE, TRANSFER_SEND_ROUTE, UNITS_ROUTE,
-        UNIT_BY_ID_ROUTE, USERS_ROUTE, USER_BY_ID_ROUTE,
+        ALLOWED_API_ORIGINS, API_PREFIX, AUTH_LOGIN_ROUTE, AUTH_LOGOUT_ROUTE, AUTH_ME_ROUTE,
+        AUTH_REFRESH_ROUTE, AUTH_SETUP_ROUTE, AUTH_STATUS_ROUTE, BRANCHES_ROUTE,
+        BRANCH_BY_ID_ROUTE, CASH_SESSIONS_CURRENT_ROUTE, CASH_SESSIONS_OPEN_ROUTE,
+        CASH_SESSION_CLOSE_ROUTE, CATEGORIES_ROUTE, CATEGORY_BY_ID_ROUTE, CLAIMS_ROUTE,
+        CLAIM_BY_ID_ROUTE, CUSTOMERS_ROUTE, CUSTOMER_ADJUST_BALANCE_ROUTE, CUSTOMER_BY_ID_ROUTE,
+        CUSTOMER_LEDGERS_ROUTE, CUSTOMER_LEDGER_ROUTE, CUSTOMER_PAYMENTS_ROUTE, DEVICES_ROUTE,
+        DEVICE_PRINTER_ROUTE, EXPENSES_ROUTE, EXPENSE_CATEGORIES_ROUTE, HEALTH_ROUTE,
+        INVOICES_ROUTE, INVOICE_BY_ID_ROUTE, INVOICE_VOID_ROUTE, LOG_TARGET, LOTS_RECEIVE_ROUTE,
+        LOTS_ROUTE, LOT_BY_ID_ROUTE, PRODUCTION_BY_ID_ROUTE, PRODUCTION_COMPLETE_ROUTE,
+        PRODUCTION_ROUTE, PRODUCTION_START_ROUTE, PRODUCTS_ROUTE, PRODUCT_BY_ID_ROUTE,
+        PRODUCT_SEARCH_ROUTE, PURCHASE_ORDERS_ROUTE, PURCHASE_ORDER_BY_ID_ROUTE,
+        PURCHASE_ORDER_ORDER_ROUTE, PURCHASE_ORDER_RECEIVE_ROUTE, REPAIRS_ROUTE,
+        REPAIR_BY_ID_ROUTE, REPAIR_COMPLETE_ROUTE, REPAIR_DELIVER_ROUTE, REPAIR_START_ROUTE,
+        REPORTS_ANALYTICS_ROUTE, REPORTS_DASHBOARD_ROUTE, RETURNS_ROUTE, RETURN_BY_ID_ROUTE,
+        SALES_COMPLETE_ROUTE, SALES_HOLDS_ROUTE, SALES_HOLD_BY_ID_ROUTE,
+        SETTINGS_LOCALIZATION_ROUTE, SETTINGS_PROFILE_ROUTE, SETTINGS_RECEIPT_ROUTE,
+        STAFF_LEDGERS_ROUTE, STOCK_MOVEMENTS_ROUTE, STOCK_ROUTE, SUPPLIERS_ROUTE,
+        SUPPLIER_ADJUST_BALANCE_ROUTE, SUPPLIER_BY_ID_ROUTE, SUPPLIER_LEDGERS_ROUTE,
+        SUPPLIER_LEDGER_ROUTE, SUPPLIER_PAYMENTS_ROUTE, SYNC_STATUS_ROUTE, TRANSACTIONS_ROUTE,
+        TRANSFERS_ROUTE, TRANSFER_BY_ID_ROUTE, TRANSFER_RECEIVE_ROUTE, TRANSFER_SEND_ROUTE,
+        TRASH_PURGE_ROUTE, TRASH_RESTORE_ROUTE, TRASH_ROUTE, UNITS_ROUTE, UNIT_BY_ID_ROUTE,
+        USERS_ROUTE, USER_BY_ID_ROUTE, USER_LEDGER_ROUTE, USER_PAYOUTS_ROUTE,
     },
     db,
     errors::AppError,
@@ -49,10 +54,19 @@ pub async fn start_at(path: PathBuf) -> Result<(), AppError> {
 }
 
 async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
-    let state = AppState { db: database };
+    let config = Config::load().map_err(AppError::internal)?;
+    let host = config.api_host.clone();
+    let port = config.api_port;
+    let state = AppState {
+        db: database,
+        config: std::sync::Arc::new(config.clone()),
+    };
     let api = Router::new()
         .route(HEALTH_ROUTE, get(health))
         // Auth / till
+        .route(AUTH_STATUS_ROUTE, get(handlers::auth_status))
+        .route(AUTH_SETUP_ROUTE, post(handlers::setup))
+        .route(AUTH_REFRESH_ROUTE, post(handlers::refresh))
         .route(AUTH_LOGIN_ROUTE, post(handlers::login))
         .route(AUTH_LOGOUT_ROUTE, post(handlers::logout))
         .route(AUTH_ME_ROUTE, get(handlers::me))
@@ -69,8 +83,13 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
         )
         .route(
             USER_BY_ID_ROUTE,
-            get(handlers::get_user).put(handlers::update_user),
+            get(handlers::get_user)
+                .put(handlers::update_user)
+                .delete(handlers::delete_user),
         )
+        .route(STAFF_LEDGERS_ROUTE, get(handlers::list_staff_ledgers))
+        .route(USER_LEDGER_ROUTE, get(handlers::get_user_ledger))
+        .route(USER_PAYOUTS_ROUTE, post(handlers::create_staff_payout))
         .route(
             BRANCHES_ROUTE,
             get(handlers::list_branches).post(handlers::create_branch),
@@ -126,10 +145,15 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
                 .put(handlers::update_supplier)
                 .delete(handlers::delete_supplier),
         )
+        .route(SUPPLIER_LEDGERS_ROUTE, get(handlers::list_supplier_ledgers))
         .route(SUPPLIER_LEDGER_ROUTE, get(handlers::get_supplier_ledger))
         .route(
             SUPPLIER_PAYMENTS_ROUTE,
             post(handlers::create_supplier_payment),
+        )
+        .route(
+            SUPPLIER_ADJUST_BALANCE_ROUTE,
+            post(handlers::adjust_supplier_balance),
         )
         .route(
             CUSTOMERS_ROUTE,
@@ -141,11 +165,19 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
                 .put(handlers::update_customer)
                 .delete(handlers::delete_customer),
         )
+        .route(CUSTOMER_LEDGERS_ROUTE, get(handlers::list_customer_ledgers))
         .route(CUSTOMER_LEDGER_ROUTE, get(handlers::get_customer_ledger))
         .route(
             CUSTOMER_PAYMENTS_ROUTE,
             post(handlers::create_customer_payment),
         )
+        .route(
+            CUSTOMER_ADJUST_BALANCE_ROUTE,
+            post(handlers::adjust_customer_balance),
+        )
+        .route(TRASH_ROUTE, get(handlers::list_trash))
+        .route(TRASH_RESTORE_ROUTE, post(handlers::restore_trash))
+        .route(TRASH_PURGE_ROUTE, post(handlers::purge_trash))
         // Lots / stock
         .route(LOTS_RECEIVE_ROUTE, post(handlers::receive_lot))
         .route(LOTS_ROUTE, get(handlers::list_lots))
@@ -157,8 +189,14 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
             PURCHASE_ORDERS_ROUTE,
             get(handlers::list_purchase_orders).post(handlers::create_purchase_order),
         )
-        .route(PURCHASE_ORDER_BY_ID_ROUTE, get(handlers::get_purchase_order))
-        .route(PURCHASE_ORDER_ORDER_ROUTE, post(handlers::order_purchase_order))
+        .route(
+            PURCHASE_ORDER_BY_ID_ROUTE,
+            get(handlers::get_purchase_order),
+        )
+        .route(
+            PURCHASE_ORDER_ORDER_ROUTE,
+            post(handlers::order_purchase_order),
+        )
         .route(
             PURCHASE_ORDER_RECEIVE_ROUTE,
             post(handlers::receive_purchase_order),
@@ -204,7 +242,10 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
         )
         .route(PRODUCTION_BY_ID_ROUTE, get(handlers::get_production))
         .route(PRODUCTION_START_ROUTE, post(handlers::start_production))
-        .route(PRODUCTION_COMPLETE_ROUTE, post(handlers::complete_production))
+        .route(
+            PRODUCTION_COMPLETE_ROUTE,
+            post(handlers::complete_production),
+        )
         .route(
             REPAIRS_ROUTE,
             get(handlers::list_repairs).post(handlers::create_repair),
@@ -259,10 +300,10 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
                 .allow_headers(Any),
         )
         .layer(TraceLayer::new_for_http());
-    let listener = tokio::net::TcpListener::bind((API_HOST, API_PORT))
+    let listener = tokio::net::TcpListener::bind((host.as_str(), port))
         .await
         .map_err(AppError::internal)?;
-    info!(target: LOG_TARGET, host = API_HOST, port = API_PORT, "backend API listening");
+    info!(target: LOG_TARGET, host = %host, port, "backend API listening");
     axum::serve(listener, router)
         .await
         .map_err(AppError::internal)

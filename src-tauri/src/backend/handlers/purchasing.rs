@@ -10,8 +10,8 @@ use crate::backend::{
     context::RequestContext,
     dto::{
         CreatePurchaseOrderRequest, Paginated, PurchaseOrderListQuery, PurchaseOrderResponse,
-        ReceivePurchaseOrderRequest, SupplierLedgerEntryResponse, SupplierPaymentRequest,
-        SupplierPaymentResponse,
+        ReceivePurchaseOrderRequest, SupplierLedgerEntryResponse, SupplierLedgerListQuery,
+        SupplierPaymentRequest, SupplierPaymentResponse,
     },
     errors::AppError,
     services::PurchasingService,
@@ -60,6 +60,15 @@ pub async fn receive_purchase_order(
 ) -> Result<Json<PurchaseOrderResponse>, AppError> {
     Ok(Json(
         PurchasingService::receive(&state.db, &ctx, parse_id(&id)?, request).await?,
+    ))
+}
+
+pub async fn list_supplier_ledgers(
+    State(state): State<AppState>,
+    Query(query): Query<SupplierLedgerListQuery>,
+) -> Result<Json<Paginated<SupplierLedgerEntryResponse>>, AppError> {
+    Ok(Json(
+        PurchasingService::list_supplier_ledgers(&state.db, query).await?,
     ))
 }
 

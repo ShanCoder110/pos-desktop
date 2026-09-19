@@ -7,14 +7,7 @@ export type Unit = "pc" | "m";
 export type InvoiceStatus = "paid" | "partial" | "credit" | "held";
 export type RepairStatus = "open" | "done" | "delivered";
 export type ReturnKind = "refund" | "exchange" | "claim" | "damage";
-export type TxnKind =
-  | "sale"
-  | "credit"
-  | "purchase"
-  | "expense"
-  | "salary"
-  | "return"
-  | "repair";
+export type TxnKind = "sale" | "credit" | "purchase" | "expense" | "salary" | "return" | "repair";
 
 export interface ShopSettings {
   shopName: string;
@@ -36,6 +29,7 @@ export interface ShopSettings {
   currencyCode: string;
   language: AppLanguage;
   expiryReminderDays: number;
+  payoutDeductFrom: "PROFIT" | "REVENUE";
   invoicePrefix: string;
   skuPrefix: string;
   lotPrefix: string;
@@ -95,6 +89,12 @@ export interface BomLine {
   baseQuantity?: number;
 }
 
+export interface ProductBranchStock {
+  branchId: string;
+  branchName: string;
+  quantity: number;
+}
+
 export interface ProductSellUnit {
   id: string;
   name: string;
@@ -141,6 +141,8 @@ export interface Product {
   claims: number;
   damaged: number;
   stock: number;
+  totalStock?: number;
+  branchStock?: ProductBranchStock[];
   components: BomLine[];
   sellUnits?: ProductSellUnit[];
   isActive?: boolean;

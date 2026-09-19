@@ -3,6 +3,7 @@ import { AlertTriangle, Check, Package, Search, X } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
 import type { Product } from "@/shared/types";
 import { money, cn } from "@/utils/format";
+import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { toaster } from "@/components/common/Toast";
 
 export function ProductSearch({
@@ -112,9 +113,12 @@ export function ProductSearch({
           aria-expanded={open}
           aria-controls={listId}
           aria-autocomplete="list"
-          aria-activedescendant={open && results[highlighted] ? `${listId}-${results[highlighted].id}` : undefined}
+          aria-activedescendant={
+            open && results[highlighted] ? `${listId}-${results[highlighted].id}` : undefined
+          }
           className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] text-ink outline-none shadow-none"
           placeholder={placeholder}
+          maxLength={FIELD_LIMITS.search}
           value={open ? query : selected ? `${selected.name} · ${selected.sku}` : query}
           onFocus={() => {
             if (disabled) return;
@@ -164,15 +168,19 @@ export function ProductSearch({
           }}
         />
         {selected && !open ? (
-          <span className={cn(
-            "hidden shrink-0 rounded-md px-2 py-1 text-[10px] font-bold sm:inline",
-            showInventory && selected.stock <= 0
-              ? "bg-red-50 text-danger"
-              : showInventory && isLowStock(selected)
-                ? "bg-amber-50 text-amber-700"
-                : "bg-accent-bg text-accent-deep",
-          )}>
-            {showInventory ? `${selected.stock} ${unitLabelForProduct(selected)}` : selected.category}
+          <span
+            className={cn(
+              "hidden shrink-0 rounded-md px-2 py-1 text-[10px] font-bold sm:inline",
+              showInventory && selected.stock <= 0
+                ? "bg-red-50 text-danger"
+                : showInventory && isLowStock(selected)
+                  ? "bg-amber-50 text-amber-700"
+                  : "bg-accent-bg text-accent-deep",
+            )}
+          >
+            {showInventory
+              ? `${selected.stock} ${unitLabelForProduct(selected)}`
+              : selected.category}
           </span>
         ) : null}
         {clearable && selected && !open ? (
@@ -207,46 +215,54 @@ export function ProductSearch({
                 const out = product.stock <= 0;
                 const low = !out && isLowStock(product);
                 return (
-                <button
-                  id={`${listId}-${product.id}`}
-                  key={product.id}
-                  type="button"
-                  role="option"
-                  aria-selected={product.id === value}
-                  tabIndex={-1}
-                  className={cn(
-                    "flex min-h-12 w-full items-center gap-3 rounded-lg border-0 px-2.5 py-2 text-left",
-                    index === highlighted ? "bg-accent-bg" : "bg-transparent hover:bg-bg",
-                    blockOutOfStock && out && "opacity-65",
-                  )}
-                  onMouseEnter={() => setHighlighted(index)}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => pick(product)}
-                >
-                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-bg text-sub">
-                    <Package size={15} />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <strong className="block truncate text-[12px] font-bold text-ink">{product.name}</strong>
-                    <small className="mt-0.5 block truncate text-[10px] text-muted">
-                      {product.sku} · {product.category}
-                      {showCost ? ` · Cost ${money(product.cost)}` : ""}
-                    </small>
-                  </span>
-                  {showInventory ? (
-                    <span className={cn(
-                      "grid shrink-0 justify-items-end gap-0.5 text-[10px] font-bold",
-                      out ? "text-danger" : low ? "text-amber-700" : "text-accent-deep",
-                    )}>
-                      <span className="inline-flex items-center gap-1">
-                        {(out || low) ? <AlertTriangle size={11} /> : null}
-                        {out ? "Out of stock" : low ? "Low stock" : "Available"}
-                      </span>
-                      <small className="font-semibold text-muted">{product.stock} {unitLabelForProduct(product)}</small>
+                  <button
+                    id={`${listId}-${product.id}`}
+                    key={product.id}
+                    type="button"
+                    role="option"
+                    aria-selected={product.id === value}
+                    tabIndex={-1}
+                    className={cn(
+                      "flex min-h-12 w-full items-center gap-3 rounded-lg border-0 px-2.5 py-2 text-left",
+                      index === highlighted ? "bg-accent-bg" : "bg-transparent hover:bg-bg",
+                      blockOutOfStock && out && "opacity-65",
+                    )}
+                    onMouseEnter={() => setHighlighted(index)}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => pick(product)}
+                  >
+                    <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-bg text-sub">
+                      <Package size={15} />
                     </span>
-                  ) : null}
-                  {product.id === value ? <Check className="shrink-0 text-accent" size={15} /> : null}
-                </button>
+                    <span className="min-w-0 flex-1">
+                      <strong className="block truncate text-[12px] font-bold text-ink">
+                        {product.name}
+                      </strong>
+                      <small className="mt-0.5 block truncate text-[10px] text-muted">
+                        {product.sku} · {product.category}
+                        {showCost ? ` · Cost ${money(product.cost)}` : ""}
+                      </small>
+                    </span>
+                    {showInventory ? (
+                      <span
+                        className={cn(
+                          "grid shrink-0 justify-items-end gap-0.5 text-[10px] font-bold",
+                          out ? "text-danger" : low ? "text-amber-700" : "text-accent-deep",
+                        )}
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          {out || low ? <AlertTriangle size={11} /> : null}
+                          {out ? "Out of stock" : low ? "Low stock" : "Available"}
+                        </span>
+                        <small className="font-semibold text-muted">
+                          {product.stock} {unitLabelForProduct(product)}
+                        </small>
+                      </span>
+                    ) : null}
+                    {product.id === value ? (
+                      <Check className="shrink-0 text-accent" size={15} />
+                    ) : null}
+                  </button>
                 );
               })}
             </div>

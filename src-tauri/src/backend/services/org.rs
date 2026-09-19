@@ -3,23 +3,27 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::backend::{
+    config::Config,
     constants::{
-        DEFAULT_INVOICE_PREFIX, DEFAULT_LOT_PREFIX, DEFAULT_PRODUCTION_PREFIX, DEFAULT_REPAIR_PREFIX,
-        DEFAULT_SKU_PREFIX, ERROR_BRANCH_NOT_FOUND, ERROR_DEVICE_NOT_FOUND, ERROR_USER_NOT_FOUND,
-        SEED_WALK_IN_CUSTOMER_ID,
+        CODE_USERNAME_DUPLICATE, CODE_USER_EMAIL_DUPLICATE, CODE_USER_PHONE_DUPLICATE,
+        DEFAULT_INVOICE_PREFIX, DEFAULT_LOT_PREFIX, DEFAULT_PRODUCTION_PREFIX,
+        DEFAULT_REPAIR_PREFIX, DEFAULT_SKU_PREFIX, ERROR_BRANCH_NOT_FOUND,
+        ERROR_CANNOT_DELETE_OWNER, ERROR_DEVICE_NOT_FOUND, ERROR_DUPLICATE_USER_EMAIL,
+        ERROR_DUPLICATE_USER_PHONE, ERROR_USER_BRANCH_REQUIRED, ERROR_USER_EMAIL_REQUIRED,
+        ERROR_USER_NOT_FOUND, ERROR_USER_PHONE_REQUIRED, SEED_WALK_IN_CUSTOMER_ID,
     },
     context::RequestContext,
     dto::{
         BranchRequest, BranchResponse, DevicePrinterRequest, DevicePrinterResponse, DeviceResponse,
-        PageQuery, Paginated, PaginationMeta, UserRequest, UserResponse,
+        PageQuery, Paginated, PaginationMeta, UserListQuery, UserRequest, UserResponse,
     },
     errors::AppError,
     repositories::OrgRepository,
     security::hash_password,
-    util::{now_utc, parse_optional_uuid, parse_uuid, trimmed},
+    util::{now_utc, optional_pk_mobile, parse_optional_uuid, parse_uuid, trimmed},
 };
 
-const ALLOWED_ROLES: &[&str] = &["OWNER", "MANAGER", "CASHIER", "TECHNICIAN", "ACCOUNTANT"];
+const ALLOWED_ROLES: &[&str] = &["OWNER", "MANAGER", "CASHIER", "TECHNICIAN", "PARTNER"];
 const ALLOWED_BRANCH_TYPES: &[&str] = &["STORE", "WAREHOUSE", "REPAIR", "PRODUCTION"];
 const ALLOWED_PAPER_WIDTHS: &[&str] = &["MM_58", "MM_80", "A4"];
 
@@ -29,13 +33,13 @@ impl OrgService {
     pub async fn list_users(
         database: &DatabaseConnection,
         _ctx: &RequestContext,
-        query: PageQuery,
+        mut query: UserListQuery,
     ) -> Result<Paginated<UserResponse>, AppError> {
-        let query = query.normalized();
+        query.page = query.page.normalized();
         let (data, total) = OrgRepository::list_users(database, &query).await?;
         Ok(Paginated {
             data,
-            meta: PaginationMeta::new(total, query.page, query.per_page),
+            meta: PaginationMeta::new(total, query.page.page, query.page.per_page),
         })
     }
 
@@ -60,29 +64,35 @@ impl OrgService {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| AppError::Validation("password is required.".into()))?;
+            .unwrap_or_else(|| Config::get().default_staff_password.expose());
+        let email = trimmed(&request.email)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| AppError::Validation(ERROR_USER_EMAIL_REQUIRED.into()))?;
+        let phone = optional_pk_mobile(request.phone.as_deref())?
+            .ok_or_else(|| AppError::Validation(ERROR_USER_PHONE_REQUIRED.into()))?;
         let role = normalize_role(&request.role)?;
         let default_branch_id =
-            parse_optional_uuid(request.default_branch_id.as_deref(), "defaultBranchId")?;
-        if let Some(branch_id) = default_branch_id {
-            ensure_branch(database, branch_id).await?;
-        }
+            parse_optional_uuid(request.default_branch_id.as_deref(), "defaultBranchId")?
+                .ok_or_else(|| AppError::Validation(ERROR_USER_BRANCH_REQUIRED.into()))?;
+        ensure_branch(database, default_branch_id).await?;
         let id = Uuid::new_v4();
         let now = now_utc();
+        let username = derive_username(database, request.username.trim(), &email).await?;
         OrgRepository::create_user(
             database,
             id,
             request.name.trim(),
-            request.username.trim(),
+            &username,
             &hash_password(password)?,
-            trimmed(&request.phone).as_deref(),
-            trimmed(&request.email).as_deref(),
+            Some(&phone),
+            Some(&email),
             &role,
-            default_branch_id,
+            Some(default_branch_id),
             request.is_active,
             now,
         )
-        .await?;
+        .await
+        .map_err(map_user_unique_error)?;
         if let Some(permissions) = request.permissions.as_ref() {
             replace_permissions(database, id, permissions, now).await?;
         }
@@ -99,11 +109,15 @@ impl OrgService {
     ) -> Result<UserResponse, AppError> {
         request.validate()?;
         let role = normalize_role(&request.role)?;
+        let email = trimmed(&request.email)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| AppError::Validation(ERROR_USER_EMAIL_REQUIRED.into()))?;
+        let phone = optional_pk_mobile(request.phone.as_deref())?
+            .ok_or_else(|| AppError::Validation(ERROR_USER_PHONE_REQUIRED.into()))?;
         let default_branch_id =
-            parse_optional_uuid(request.default_branch_id.as_deref(), "defaultBranchId")?;
-        if let Some(branch_id) = default_branch_id {
-            ensure_branch(database, branch_id).await?;
-        }
+            parse_optional_uuid(request.default_branch_id.as_deref(), "defaultBranchId")?
+                .ok_or_else(|| AppError::Validation(ERROR_USER_BRANCH_REQUIRED.into()))?;
+        ensure_branch(database, default_branch_id).await?;
         let password_hash = match request
             .password
             .as_deref()
@@ -114,20 +128,26 @@ impl OrgService {
             None => None,
         };
         let now = now_utc();
+        let username = if request.username.trim().is_empty() {
+            derive_username(database, "", &email).await?
+        } else {
+            request.username.trim().to_owned()
+        };
         let updated = OrgRepository::update_user(
             database,
             id,
             request.name.trim(),
-            request.username.trim(),
+            &username,
             password_hash.as_deref(),
-            trimmed(&request.phone).as_deref(),
-            trimmed(&request.email).as_deref(),
+            Some(&phone),
+            Some(&email),
             &role,
-            default_branch_id,
+            Some(default_branch_id),
             request.is_active,
             now,
         )
-        .await?;
+        .await
+        .map_err(map_user_unique_error)?;
         if !updated {
             return Err(AppError::NotFound(ERROR_USER_NOT_FOUND));
         }
@@ -137,6 +157,25 @@ impl OrgService {
         OrgRepository::find_user(database, id)
             .await?
             .ok_or(AppError::NotFound(ERROR_USER_NOT_FOUND))
+    }
+
+    pub async fn delete_user(
+        database: &DatabaseConnection,
+        ctx: &RequestContext,
+        id: Uuid,
+    ) -> Result<(), AppError> {
+        let existing = OrgRepository::find_user(database, id)
+            .await?
+            .ok_or(AppError::NotFound(ERROR_USER_NOT_FOUND))?;
+        if existing.role == "OWNER" {
+            return Err(AppError::Validation(ERROR_CANNOT_DELETE_OWNER.into()));
+        }
+        let now = now_utc();
+        let deleted = OrgRepository::soft_delete_user(database, id, Some(ctx.user_id), now).await?;
+        if !deleted {
+            return Err(AppError::NotFound(ERROR_USER_NOT_FOUND));
+        }
+        Ok(())
     }
 
     pub async fn list_branches(
@@ -382,7 +421,9 @@ async fn upsert_settings(
     );
     let production_prefix = pick_prefix(
         settings.and_then(|value| value.production_prefix.as_deref()),
-        existing.as_ref().map(|value| value.production_prefix.as_str()),
+        existing
+            .as_ref()
+            .map(|value| value.production_prefix.as_str()),
         DEFAULT_PRODUCTION_PREFIX,
     );
     let lot_prefix = pick_prefix(
@@ -432,6 +473,67 @@ fn normalize_role(role: &str) -> Result<String, AppError> {
         Ok(role)
     } else {
         Err(AppError::Validation("role is invalid.".into()))
+    }
+}
+
+async fn derive_username(
+    database: &DatabaseConnection,
+    preferred: &str,
+    email: &str,
+) -> Result<String, AppError> {
+    let trimmed = preferred.trim();
+    let base = if !trimmed.is_empty() {
+        sanitize_username(trimmed)
+    } else {
+        sanitize_username(email.split('@').next().unwrap_or("user"))
+    };
+    let base = if base.is_empty() {
+        "user".to_owned()
+    } else {
+        base
+    };
+    for index in 0..100 {
+        let candidate = if index == 0 {
+            base.clone()
+        } else {
+            format!("{base}{index}")
+        };
+        if !OrgRepository::username_exists(database, &candidate).await? {
+            return Ok(candidate);
+        }
+    }
+    Err(AppError::Validation(
+        "Could not generate a unique username.".into(),
+    ))
+}
+
+fn sanitize_username(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .chars()
+        .take(80)
+        .collect()
+}
+
+fn map_user_unique_error(error: AppError) -> AppError {
+    let message = error.to_string();
+    if message.contains("ux_users_phone") || message.contains("users.phone") {
+        AppError::conflict_coded(CODE_USER_PHONE_DUPLICATE, ERROR_DUPLICATE_USER_PHONE)
+    } else if message.contains("ux_users_email") || message.contains("users.email") {
+        AppError::conflict_coded(CODE_USER_EMAIL_DUPLICATE, ERROR_DUPLICATE_USER_EMAIL)
+    } else if message.contains("UNIQUE constraint failed: users.username") {
+        AppError::conflict_coded(CODE_USERNAME_DUPLICATE, "This username is already used.")
+    } else {
+        error
     }
 }
 

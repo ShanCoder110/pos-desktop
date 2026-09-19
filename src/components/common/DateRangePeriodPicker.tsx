@@ -32,9 +32,11 @@ export function dateInRange(value: string | null | undefined, range: DateRangeFi
 
 function prettyDate(value: string) {
   if (!value) return "Date";
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(
-    new Date(`${value}T00:00:00`),
-  );
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(`${value}T00:00:00`));
 }
 
 export function DateRangePeriodPicker({
@@ -47,7 +49,8 @@ export function DateRangePeriodPicker({
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const label = useMemo(() => {
-    if (value.period === "custom") return `${prettyDate(value.from)} – ${prettyDate(value.to || value.from)}`;
+    if (value.period === "custom")
+      return `${prettyDate(value.from)} – ${prettyDate(value.to || value.from)}`;
     return DATE_PERIOD_PRESETS.find((preset) => preset.id === value.period)?.label ?? "All time";
   }, [value]);
 
@@ -71,7 +74,7 @@ export function DateRangePeriodPicker({
       onOpenChange={setOpen}
       panelClassName="ui-date-range-panel"
       trigger={
-        <Button className="h-8 min-h-8 gap-1.5 rounded-lg px-3" onClick={openPicker} aria-label="Filter by date">
+        <Button className="ui-date-range-trigger" onClick={openPicker} aria-label="Filter by date">
           <CalendarDays size={14} className="text-muted" />
           <span>{label}</span>
           <ChevronDown size={13} className="text-muted" />
@@ -96,29 +99,34 @@ export function DateRangePeriodPicker({
             <strong>Date range</strong>
             <span>Applied to the table and graphs</span>
           </div>
+          <div className="ui-date-range-fields">
+            <label className="field">
+              <span className="field-label">From</span>
+              <TextInput
+                type="date"
+                value={draft.from}
+                onChange={(event) =>
+                  setDraft({ ...draft, period: "custom", from: event.target.value })
+                }
+              />
+            </label>
+            <ArrowRight className="ui-date-range-arrow" size={14} aria-hidden />
+            <label className="field">
+              <span className="field-label">To</span>
+              <TextInput
+                type="date"
+                value={draft.to}
+                onChange={(event) =>
+                  setDraft({ ...draft, period: "custom", to: event.target.value })
+                }
+              />
+            </label>
+          </div>
           {draft.period === "all" ? (
-            <div className="ui-date-range-empty">Showing records from all dates</div>
-          ) : (
-            <div className="ui-date-range-fields">
-              <label className="field">
-                <span className="field-label">From</span>
-                <TextInput
-                  type="date"
-                  value={draft.from}
-                  onChange={(event) => setDraft({ ...draft, period: "custom", from: event.target.value })}
-                />
-              </label>
-              <ArrowRight className="ui-date-range-arrow" size={14} aria-hidden />
-              <label className="field">
-                <span className="field-label">To</span>
-                <TextInput
-                  type="date"
-                  value={draft.to}
-                  onChange={(event) => setDraft({ ...draft, period: "custom", to: event.target.value })}
-                />
-              </label>
+            <div className="ui-date-range-empty">
+              All dates — pick a preset or set From and To for a custom range.
             </div>
-          )}
+          ) : null}
           <div className="ui-pop-foot [display:flex] [justify-content:flex-end] [gap:8px] [border-top:1px_solid_var(--line)]">
             <Button size="sm" onClick={() => setOpen(false)}>
               Cancel

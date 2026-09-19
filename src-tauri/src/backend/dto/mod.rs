@@ -1,4 +1,5 @@
 mod auth;
+mod balance;
 mod common;
 mod credit;
 mod finance;
@@ -9,9 +10,12 @@ mod production;
 mod purchasing;
 mod repairs;
 mod sales;
+mod staff;
 mod transfer;
+mod trash;
 
 pub use auth::*;
+pub use balance::*;
 pub use common::*;
 pub use credit::*;
 pub use finance::*;
@@ -22,4 +26,6 @@ pub use production::*;
 pub use purchasing::*;
 pub use repairs::*;
 pub use sales::*;
+pub use staff::*;
 pub use transfer::*;
+pub use trash::*;

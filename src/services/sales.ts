@@ -1,4 +1,9 @@
-import type { InvoiceItemRow, InvoiceRow, PaymentStatus, InvoiceState } from "@/shared/domain/types";
+import type {
+  InvoiceItemRow,
+  InvoiceRow,
+  PaymentStatus,
+  InvoiceState,
+} from "@/shared/domain/types";
 import { API_ROUTES } from "@/shared/constants/api";
 import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { apiRequest, queryString, type PaginatedResponse } from "@/services/api";
@@ -53,11 +58,13 @@ export interface InvoiceResponse {
 
 export interface HoldResponse {
   id: string;
+  branchId: string;
   label: string;
   customerId?: string | null;
   payload: unknown;
+  heldBy: string;
+  heldAt: string;
   expiresAt?: string | null;
-  createdAt: string;
   updatedAt: string;
 }
 
@@ -135,11 +142,14 @@ export function listInvoices(
   );
 }
 
-export async function listAllInvoices(signal?: AbortSignal): Promise<InvoiceRow[]> {
+export async function listAllInvoices(
+  signal?: AbortSignal,
+  branchId?: string,
+): Promise<InvoiceRow[]> {
   const rows: InvoiceRow[] = [];
   let page = 1;
   for (;;) {
-    const response = await listInvoices({ page, perPage: MAX_PAGE_SIZE }, signal);
+    const response = await listInvoices({ page, perPage: MAX_PAGE_SIZE, branchId }, signal);
     rows.push(...response.data.map(mapInvoice));
     if (!response.meta.hasNextPage) return rows;
     page += 1;
@@ -165,10 +175,9 @@ export function voidInvoice(id: string, reason?: string) {
 }
 
 export function listHolds(signal?: AbortSignal) {
-  return apiRequest<HoldResponse[] | PaginatedResponse<HoldResponse>>(
-    API_ROUTES.salesHolds,
-    { signal },
-  ).then((payload) => (Array.isArray(payload) ? payload : payload.data ?? []));
+  return apiRequest<HoldResponse[] | PaginatedResponse<HoldResponse>>(API_ROUTES.salesHolds, {
+    signal,
+  }).then((payload) => (Array.isArray(payload) ? payload : (payload.data ?? [])));
 }
 
 export function createHold(payload: {
@@ -179,6 +188,21 @@ export function createHold(payload: {
 }) {
   return apiRequest<HoldResponse>(API_ROUTES.salesHolds, {
     method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateHold(
+  id: string,
+  payload: {
+    label: string;
+    customerId?: string | null;
+    payload: unknown;
+    expiresAt?: string | null;
+  },
+) {
+  return apiRequest<HoldResponse>(API_ROUTES.salesHoldById(id), {
+    method: "PUT",
     body: JSON.stringify(payload),
   });
 }

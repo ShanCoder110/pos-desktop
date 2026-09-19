@@ -24,6 +24,8 @@ export const routes = {
   suppliers: "/suppliers",
   customers: "/customers",
   employees: "/employees",
+  users: "/users",
+  trash: "/trash",
   production: "/production",
   repair: "/repair",
   expenses: "/expenses",

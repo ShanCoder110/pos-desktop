@@ -41,6 +41,27 @@ pub struct SessionContextRow {
 }
 
 #[derive(Debug, FromQueryResult)]
+pub struct RefreshSessionRow {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub branch_id: Uuid,
+    pub device_id: Uuid,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub refresh_expires_at: chrono::DateTime<chrono::Utc>,
+    pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub role: String,
+    pub name: String,
+    pub username: String,
+    pub is_active: bool,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct SetupStateRow {
+    setup_completed: i64,
+    shop_name: Option<String>,
+}
+
+#[derive(Debug, FromQueryResult)]
 struct CashSessionRow {
     id: Uuid,
     branch_id: Uuid,
@@ -77,15 +98,34 @@ impl AuthRepository {
         database: &DatabaseConnection,
         username: &str,
     ) -> Result<Option<UserAuthRow>, AppError> {
-        Ok(UserAuthRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT id, name, username, password_hash, phone, email, role, default_branch_id,
+        Ok(
+            UserAuthRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "SELECT id, name, username, password_hash, phone, email, role, default_branch_id,
                     is_active, last_login_at, created_at, updated_at
              FROM users WHERE username = ? LIMIT 1",
-            [username.into()],
-        ))
-        .one(database)
-        .await?)
+                [username.into()],
+            ))
+            .one(database)
+            .await?,
+        )
+    }
+
+    pub async fn find_user_by_email(
+        database: &DatabaseConnection,
+        email: &str,
+    ) -> Result<Option<UserAuthRow>, AppError> {
+        Ok(
+            UserAuthRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "SELECT id, name, username, password_hash, phone, email, role, default_branch_id,
+                    is_active, last_login_at, created_at, updated_at
+             FROM users WHERE email IS NOT NULL AND LOWER(email) = LOWER(?) LIMIT 1",
+                [email.into()],
+            ))
+            .one(database)
+            .await?,
+        )
     }
 
     pub async fn touch_last_login(
@@ -110,25 +150,122 @@ impl AuthRepository {
         device_id: Uuid,
         branch_id: Uuid,
         token_hash: &str,
+        refresh_token_hash: &str,
         expires_at: chrono::DateTime<chrono::Utc>,
+        refresh_expires_at: chrono::DateTime<chrono::Utc>,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), AppError> {
         database
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
                 "INSERT INTO sessions
-                    (id, user_id, device_id, branch_id, token_hash, expires_at, revoked_at, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                    (id, user_id, device_id, branch_id, token_hash, refresh_token_hash, expires_at,
+                     refresh_expires_at, revoked_at, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
                 [
                     id.into(),
                     user_id.into(),
                     device_id.into(),
                     branch_id.into(),
                     token_hash.into(),
+                    refresh_token_hash.into(),
                     expires_at.into(),
+                    refresh_expires_at.into(),
                     now.into(),
                     now.into(),
                 ],
+            ))
+            .await?;
+        Ok(())
+    }
+
+    pub async fn rotate_session_tokens(
+        database: &DatabaseConnection,
+        session_id: Uuid,
+        token_hash: &str,
+        refresh_token_hash: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+        refresh_expires_at: chrono::DateTime<chrono::Utc>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool, AppError> {
+        let result = database
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE sessions
+                 SET token_hash = ?, refresh_token_hash = ?, expires_at = ?, refresh_expires_at = ?,
+                     updated_at = ?
+                 WHERE id = ? AND revoked_at IS NULL",
+                [
+                    token_hash.into(),
+                    refresh_token_hash.into(),
+                    expires_at.into(),
+                    refresh_expires_at.into(),
+                    now.into(),
+                    session_id.into(),
+                ],
+            ))
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn find_session_by_refresh_hash(
+        database: &DatabaseConnection,
+        refresh_token_hash: &str,
+    ) -> Result<Option<RefreshSessionRow>, AppError> {
+        Ok(
+            RefreshSessionRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "SELECT s.id AS session_id, s.user_id, s.branch_id, s.device_id, s.expires_at,
+                    s.refresh_expires_at, s.revoked_at, u.role, u.name, u.username, u.is_active
+             FROM sessions s
+             JOIN users u ON u.id = s.user_id
+             WHERE s.refresh_token_hash = ?
+             LIMIT 1",
+                [refresh_token_hash.into()],
+            ))
+            .one(database)
+            .await?,
+        )
+    }
+
+    pub async fn setup_status(
+        database: &DatabaseConnection,
+    ) -> Result<(bool, Option<String>), AppError> {
+        let row = SetupStateRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT ss.setup_completed,
+                    (
+                      SELECT rs.shop_name
+                      FROM receipt_settings rs
+                      JOIN branches b ON b.id = rs.branch_id
+                      WHERE b.is_main = 1 AND b.deleted_at IS NULL
+                      ORDER BY rs.updated_at DESC
+                      LIMIT 1
+                    ) AS shop_name
+             FROM system_state ss
+             WHERE ss.id = 1
+             LIMIT 1",
+            [],
+        ))
+        .one(database)
+        .await?;
+        Ok(match row {
+            Some(row) => (row.setup_completed == 0, row.shop_name),
+            None => (true, None),
+        })
+    }
+
+    pub async fn mark_setup_complete(
+        database: &DatabaseConnection,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), AppError> {
+        database
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "INSERT INTO system_state (id, setup_completed, updated_at)
+                 VALUES (1, 1, ?)
+                 ON CONFLICT(id) DO UPDATE SET setup_completed = 1, updated_at = excluded.updated_at",
+                [now.into()],
             ))
             .await?;
         Ok(())
@@ -279,7 +416,7 @@ impl AuthRepository {
     ) -> Result<Decimal, AppError> {
         let net = MoneyNetRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT COALESCE(SUM(CASE WHEN direction = 'IN' THEN amount ELSE -amount END), 0) AS net
+            "SELECT CAST(COALESCE(SUM(CASE WHEN direction = 'IN' THEN amount ELSE -amount END), 0) AS REAL) AS net
              FROM money_transactions
              WHERE cash_session_id = ? AND payment_method = 'CASH'",
             [session_id.into()],
@@ -386,6 +523,7 @@ pub fn user_response_from_auth(
         is_active: row.is_active,
         last_login_at: row.last_login_at.map(|value| value.to_rfc3339()),
         permissions,
+        total_paid: 0.0,
         created_at: row.created_at.to_rfc3339(),
         updated_at: row.updated_at.to_rfc3339(),
     }

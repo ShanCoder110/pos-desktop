@@ -6,6 +6,7 @@ import {
   DateRangePeriodPicker,
   EmptyRow,
   HubChart,
+  HubChartGrid,
   KpiCard,
   PageHead,
   Skeleton,
@@ -19,7 +20,14 @@ import {
   rangeForPeriod,
   type DateRangeFilter,
 } from "@/components/common";
-import { REPORT_COPY, comparePeriods, priorRange, rangeLabel } from "@/shared/constants/reports";
+import {
+  REPORT_COPY,
+  REPORT_TABS,
+  comparePeriods,
+  priorRange,
+  rangeLabel,
+} from "@/shared/constants/reports";
+import { useQueryTab } from "@/hooks/useQueryTab";
 import type { DomainCustomer, ExpenseRow, InvoiceRow, PaymentStatus } from "@/shared/domain/types";
 import { useSettings } from "@/shared/settings";
 import { money } from "@/utils/format";
@@ -95,28 +103,32 @@ function topProductsFrom(invoices: InvoiceRow[]) {
 
 export function AnalyticsPage() {
   const { settings } = useSettings();
-  const [tab, setTab] = useState("sales");
+  const [tab, setTab] = useQueryTab(REPORT_TABS, "sales");
   const [range, setRange] = useState<DateRangeFilter>(() => rangeForPeriod("30d"));
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState({ report: true });
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [customers, setCustomers] = useState<DomainCustomer[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [categories, setCategories] = useState<Record<string, string>>({});
   const [movements, setMovements] = useState<StockMovementResponse[]>([]);
-  const [apiTop, setApiTop] = useState<{ productId: string; productName: string; quantity: number; revenue: number }[]>([]);
+  const [apiTop, setApiTop] = useState<
+    { productId: string; productName: string; quantity: number; revenue: number }[]
+  >([]);
 
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
-      setLoading(true);
-      await ensureSession(controller.signal);
+      setLoading((current) => ({ ...current, report: true }));
+      const session = await ensureSession(controller.signal);
       const analyticsParams = range.period === "all" ? {} : { from: range.from, to: range.to };
       const [invoiceRows, customerRows, expenseRows, cats, stock, analytics] = await Promise.all([
-        listAllInvoices(controller.signal).catch(() => [] as InvoiceRow[]),
+        listAllInvoices(controller.signal, session?.branchId).catch(() => [] as InvoiceRow[]),
         listCustomersWithBalances(controller.signal).catch(() => [] as DomainCustomer[]),
         listAllExpenses(controller.signal).catch(() => [] as ExpenseRow[]),
         listExpenseCategories(controller.signal).catch(() => [] as { id: string; name: string }[]),
-        listAllStockMovementDetails({}, controller.signal).catch(() => [] as StockMovementResponse[]),
+        listAllStockMovementDetails({}, controller.signal).catch(
+          () => [] as StockMovementResponse[],
+        ),
         reportsAnalytics(analyticsParams, controller.signal).catch(() => null),
       ]);
       setInvoices(invoiceRows);
@@ -125,7 +137,7 @@ export function AnalyticsPage() {
       setCategories(Object.fromEntries((cats ?? []).map((row) => [row.id, row.name])));
       setMovements(stock);
       setApiTop(analytics?.topProducts ?? []);
-      setLoading(false);
+      setLoading((current) => ({ ...current, report: false }));
     })();
     return () => controller.abort();
   }, [range.from, range.to, range.period]);
@@ -136,7 +148,10 @@ export function AnalyticsPage() {
     [invoices, range],
   );
   const priorSold = useMemo(
-    () => (prior ? invoices.filter((row) => row.status === "COMPLETED" && inRange(row.createdAt, prior)) : []),
+    () =>
+      prior
+        ? invoices.filter((row) => row.status === "COMPLETED" && inRange(row.createdAt, prior))
+        : [],
     [invoices, prior],
   );
   const periodExpenses = useMemo(
@@ -162,8 +177,19 @@ export function AnalyticsPage() {
   const mix = paymentMix(sold);
   const products = useMemo(() => {
     const fromItems = topProductsFrom(sold);
-    if (fromItems.length) return fromItems.map((row) => ({ id: row.id, label: row.name, qty: row.qty, revenue: row.revenue }));
-    return apiTop.map((row) => ({ id: row.productId, label: row.productName, qty: row.quantity, revenue: row.revenue }));
+    if (fromItems.length)
+      return fromItems.map((row) => ({
+        id: row.id,
+        label: row.name,
+        qty: row.qty,
+        revenue: row.revenue,
+      }));
+    return apiTop.map((row) => ({
+      id: row.productId,
+      label: row.productName,
+      qty: row.quantity,
+      revenue: row.revenue,
+    }));
   }, [sold, apiTop]);
 
   function exportPdf() {
@@ -180,7 +206,12 @@ export function AnalyticsPage() {
       ],
       invoices: sold.slice(0, 80).map((row) => ({
         number: row.invoiceNumber,
-        when: new Date(row.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }),
+        when: new Date(row.createdAt).toLocaleString("en-GB", {
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
         status: row.paymentStatus,
         total: money(row.total),
         paid: money(row.paidAmount),
@@ -210,15 +241,48 @@ export function AnalyticsPage() {
       <p className="ui-note text-[12px] leading-snug text-muted">{REPORT_COPY.hint}</p>
 
       <div className="grid shrink-0 grid-cols-5 gap-2.5">
-        {loading ? (
-          Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="h-[92px] rounded-[10px]" />)
+        {loading.report ? (
+          Array.from({ length: 5 }, (_, i) => (
+            <Skeleton key={i} className="h-[92px] rounded-[10px]" />
+          ))
         ) : (
           <>
-            <KpiCard label="Billed" value={money(current.billed)} hint={`${sold.length} bills`} tone="ok" delta={prior ? comparePeriods(current.billed, previous.billed) : undefined} />
-            <KpiCard label="Collected" value={money(current.paid)} hint="Cash and bank" tone="ok" delta={prior ? comparePeriods(current.paid, previous.paid) : undefined} />
-            <KpiCard label="Credit billed" value={money(current.credit)} hint="Udhaar in period" tone={current.credit ? "warn" : "ok"} invertDelta delta={prior ? comparePeriods(current.credit, previous.credit) : undefined} />
-            <KpiCard label="Expenses" value={money(expenseTotal)} hint="Money out" tone="stale" invertDelta delta={prior ? comparePeriods(expenseTotal, priorExpenseTotal) : undefined} />
-            <KpiCard label="Net cash" value={money(net)} hint="Collected minus expenses" tone={net >= 0 ? "ok" : "danger"} />
+            <KpiCard
+              label="Billed"
+              value={money(current.billed)}
+              hint={`${sold.length} bills`}
+              tone="info"
+              delta={prior ? comparePeriods(current.billed, previous.billed) : undefined}
+            />
+            <KpiCard
+              label="Collected"
+              value={money(current.paid)}
+              hint="Cash and bank"
+              tone="ok"
+              delta={prior ? comparePeriods(current.paid, previous.paid) : undefined}
+            />
+            <KpiCard
+              label="Credit billed"
+              value={money(current.credit)}
+              hint="Credit sales in period"
+              tone="warn"
+              invertDelta
+              delta={prior ? comparePeriods(current.credit, previous.credit) : undefined}
+            />
+            <KpiCard
+              label="Expenses"
+              value={money(expenseTotal)}
+              hint="Money out"
+              tone="danger"
+              invertDelta
+              delta={prior ? comparePeriods(expenseTotal, priorExpenseTotal) : undefined}
+            />
+            <KpiCard
+              label="Net cash"
+              value={money(net)}
+              hint="Collected minus expenses"
+              tone={net >= 0 ? "ok" : "danger"}
+            />
           </>
         )}
       </div>
@@ -226,42 +290,57 @@ export function AnalyticsPage() {
       <div className="grid shrink-0 grid-cols-4 gap-2.5">
         {[
           { label: "Average ticket", value: money(avgTicket) },
-          { label: "Open khata", value: money(owed.reduce((sum, row) => sum + row.currentBalance, 0)) },
+          {
+            label: "Open balance",
+            value: money(owed.reduce((sum, row) => sum + row.currentBalance, 0)),
+          },
           { label: "Stock moves", value: String(periodMoves.length) },
           { label: "Expense lines", value: String(periodExpenses.length) },
         ].map((stat) => (
-          <div key={stat.label} className="flex items-center justify-between rounded-[10px] border border-line bg-paper px-3.5 py-2.5">
+          <div
+            key={stat.label}
+            className="flex items-center justify-between rounded-[10px] border border-line bg-paper px-3.5 py-2.5"
+          >
             <p className="text-[11px] font-semibold text-muted">{stat.label}</p>
-            <p className="text-[13px] font-bold tabular-nums text-ink">{loading ? "—" : stat.value}</p>
+            <p className="text-[13px] font-bold tabular-nums text-ink">
+              {loading.report ? "—" : stat.value}
+            </p>
           </div>
         ))}
       </div>
 
-      <div className="grid min-h-[260px] shrink-0 grid-cols-2 gap-2.5">
-        <section className="min-h-0 overflow-hidden rounded-[10px] border border-line bg-paper">
-          {loading ? (
-            <div className="p-4"><Skeleton className="h-48 rounded-lg" /></div>
-          ) : dayChart.length ? (
-            <HubChart type="line" title="Sales by day" subtitle={rangeLabel(range)} data={dayChart} formatValue={money} maxItems={null} />
-          ) : (
-            <div className="grid h-full min-h-[220px] place-items-center text-[12px] text-muted">{REPORT_COPY.empty}</div>
-          )}
-        </section>
-        <section className="min-h-0 overflow-hidden rounded-[10px] border border-line bg-paper">
-          {loading ? (
-            <div className="p-4"><Skeleton className="h-48 rounded-lg" /></div>
-          ) : mix.length ? (
-            <HubChart type="donut" title="Payment mix" subtitle="Billed amount" data={mix} formatValue={money} />
-          ) : (
-            <div className="grid h-full min-h-[220px] place-items-center text-[12px] text-muted">{REPORT_COPY.empty}</div>
-          )}
-        </section>
-      </div>
+      <section className="min-h-[260px] shrink-0 overflow-hidden rounded-[10px] border border-line bg-paper">
+        {loading.report ? (
+          <div className="p-4">
+            <Skeleton className="h-48 rounded-lg" />
+          </div>
+        ) : (
+          <HubChartGrid>
+            <HubChart
+              type="line"
+              title="Sales by day"
+              subtitle={rangeLabel(range)}
+              data={dayChart}
+              formatValue={money}
+              maxItems={null}
+            />
+            <HubChart
+              type="donut"
+              title="Payment mix"
+              subtitle="Billed amount"
+              data={mix}
+              formatValue={money}
+            />
+          </HubChartGrid>
+        )}
+      </section>
 
       <section className="min-h-[220px] shrink-0 overflow-hidden rounded-[10px] border border-line bg-paper">
-        {loading ? (
-          <div className="p-4"><Skeleton className="h-40 rounded-lg" /></div>
-        ) : products.length ? (
+        {loading.report ? (
+          <div className="p-4">
+            <Skeleton className="h-40 rounded-lg" />
+          </div>
+        ) : (
           <HubChart
             type="bar"
             title="Top products"
@@ -278,25 +357,10 @@ export function AnalyticsPage() {
             formatValue={money}
             maxItems={8}
           />
-        ) : (
-          <div className="grid h-full min-h-[180px] place-items-center text-[12px] text-muted">{REPORT_COPY.empty}</div>
         )}
       </section>
 
-      <TabSheet
-        tabs={
-          <Tabs
-            value={tab}
-            onChange={setTab}
-            items={[
-              { id: "sales", label: "Sales" },
-              { id: "expenses", label: "Expenses" },
-              { id: "stock", label: "Stock" },
-              { id: "khata", label: "Khata" },
-            ]}
-          />
-        }
-      >
+      <TabSheet tabs={<Tabs value={tab} onChange={setTab} items={[...REPORT_TABS]} />}>
         {tab === "sales" ? (
           <Table>
             <THead>
@@ -314,7 +378,14 @@ export function AnalyticsPage() {
                 <tr key={row.id}>
                   <Td>
                     {row.invoiceNumber}
-                    <span className="sub">{new Date(row.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                    <span className="sub">
+                      {new Date(row.createdAt).toLocaleString("en-GB", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
                   </Td>
                   <Td>
                     <Badge tone={payTone(row.paymentStatus)}>{row.paymentStatus}</Badge>
@@ -379,24 +450,22 @@ export function AnalyticsPage() {
             </tbody>
           </Table>
         ) : null}
-        {tab === "khata" ? (
+        {tab === "balance" ? (
           <Table>
             <THead>
               <tr>
                 <Th>Customer</Th>
                 <Th>Phone</Th>
                 <Th>Balance</Th>
-                <Th>Limit</Th>
               </tr>
             </THead>
             <tbody>
-              {owed.length === 0 ? <EmptyRow cols={4} text={REPORT_COPY.empty} /> : null}
+              {owed.length === 0 ? <EmptyRow cols={3} text={REPORT_COPY.empty} /> : null}
               {owed.map((row) => (
                 <tr key={row.id}>
                   <Td>{row.name}</Td>
                   <Td>{row.phone || "—"}</Td>
                   <Td numeric>{money(row.currentBalance)}</Td>
-                  <Td numeric>{row.creditLimit != null ? money(row.creditLimit) : "—"}</Td>
                 </tr>
               ))}
             </tbody>

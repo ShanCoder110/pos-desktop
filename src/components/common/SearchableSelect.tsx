@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Plus, X } from "lucide-react";
+import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { cn } from "@/utils/format";
 
 export type SelectOption = { value: string; label: string };
@@ -45,13 +46,15 @@ export function SearchableSelect({
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return options;
-    return options.filter((o) => o.label.toLowerCase().includes(needle) || o.value.toLowerCase().includes(needle));
+    return options.filter(
+      (o) => o.label.toLowerCase().includes(needle) || o.value.toLowerCase().includes(needle),
+    );
   }, [options, q]);
   const cleanQuery = q.trim();
   const canCreate = Boolean(
     onCreate &&
-      cleanQuery &&
-      !options.some((option) => option.label.trim().toLowerCase() === cleanQuery.toLowerCase()),
+    cleanQuery &&
+    !options.some((option) => option.label.trim().toLowerCase() === cleanQuery.toLowerCase()),
   );
 
   useEffect(() => {
@@ -64,7 +67,12 @@ export function SearchableSelect({
 
   useEffect(() => {
     if (!open) return;
-    setHi(Math.max(0, filtered.findIndex((o) => o.value === value)));
+    setHi(
+      Math.max(
+        0,
+        filtered.findIndex((o) => o.value === value),
+      ),
+    );
   }, [open, filtered, value]);
 
   function pick(next: string) {
@@ -130,23 +138,38 @@ export function SearchableSelect({
 
   return (
     <div className={cn("ui-combo [position:relative] [width:100%]", className)} ref={root}>
-      <div className={cn("ui-combo-field [display:flex] [align-items:center] [gap:4px] [width:100%] [height:38px] [padding:0_8px_0_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [transition:border-color_0.15s,_box-shadow_0.15s,_background_0.15s]", open && "is-open", disabled && "is-disabled", invalid && "is-invalid")}>
-        {searchable ? <input
-          ref={inputRef}
-          className="ui-combo-input [flex:1] [min-width:0] [height:100%] [margin:0] [padding:0] [border:0] [border-radius:0] [background:transparent] [box-shadow:none] [outline:none] [font-size:13.5px] [color:var(--ink)]"
-          disabled={disabled}
-          placeholder={open ? searchPlaceholder : placeholder}
-          data-field={name}
-          value={open ? q : selected?.label ?? ""}
-          onChange={(e) => openMenu(e.target.value)}
-          onFocus={() => {
-            if (!open) setQ("");
-          }}
-          onClick={() => {
-            if (!open) openMenu("");
-          }}
-          onKeyDown={onControlKeyDown}
-        /> : (
+      <div
+        className={cn(
+          "ui-combo-field [display:flex] [align-items:center] [gap:4px] [width:100%] [height:38px] [padding:0_8px_0_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [transition:border-color_0.15s,_box-shadow_0.15s,_background_0.15s]",
+          open && "is-open",
+          disabled && "is-disabled",
+          invalid && "is-invalid",
+        )}
+        onClick={() => {
+          if (disabled || searchable) return;
+          if (open) setOpen(false);
+          else openMenu("");
+        }}
+      >
+        {searchable ? (
+          <input
+            ref={inputRef}
+            className="ui-combo-input [flex:1] [min-width:0] [height:100%] [margin:0] [padding:0] [border:0] [border-radius:0] [background:transparent] [box-shadow:none] [outline:none] [font-size:13.5px] [color:var(--ink)]"
+            disabled={disabled}
+            placeholder={open ? searchPlaceholder : placeholder}
+            data-field={name}
+            value={open ? q : (selected?.label ?? "")}
+            maxLength={FIELD_LIMITS.search}
+            onChange={(e) => openMenu(e.target.value)}
+            onFocus={() => {
+              if (!open) setQ("");
+            }}
+            onClick={() => {
+              if (!open) openMenu("");
+            }}
+            onKeyDown={onControlKeyDown}
+          />
+        ) : (
           <button
             type="button"
             className="ui-combo-input flex h-full min-w-0 flex-1 items-center border-0 bg-transparent p-0 text-left text-[13.5px] text-ink outline-none"
@@ -154,10 +177,11 @@ export function SearchableSelect({
             data-field={name}
             aria-haspopup="listbox"
             aria-expanded={open}
-            onClick={() => open ? setOpen(false) : openMenu("")}
             onKeyDown={onControlKeyDown}
           >
-            <span className={cn("truncate", !selected && "text-muted")}>{selected?.label ?? placeholder}</span>
+            <span className={cn("truncate", !selected && "text-muted")}>
+              {selected?.label ?? placeholder}
+            </span>
           </button>
         )}
         <span className="ui-combo-actions [display:inline-flex] [align-items:center] [gap:2px] [color:var(--muted)] [flex-shrink:0]">
@@ -169,6 +193,7 @@ export function SearchableSelect({
               aria-label="Clear"
               onMouseDown={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 onChange("");
                 setQ("");
                 inputRef.current?.focus();
@@ -181,10 +206,15 @@ export function SearchableSelect({
         </span>
       </div>
       {open ? (
-        <div className="ui-combo-menu [position:absolute] [top:calc(100%_+_6px)] [left:0] [right:0] [z-index:30] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)] [box-shadow:0_12px_28px_rgba(15,_23,_42,_0.12)] [overflow:hidden]" role="listbox">
+        <div
+          className="ui-combo-menu [position:absolute] [top:calc(100%_+_6px)] [left:0] [right:0] [z-index:30] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)] [box-shadow:0_12px_28px_rgba(15,_23,_42,_0.12)] [overflow:hidden]"
+          role="listbox"
+        >
           <div className="ui-combo-list [max-height:220px] [overflow:auto] [padding:6px]">
             {filtered.length === 0 && !canCreate ? (
-              <div className="ui-combo-empty [padding:18px_10px] [text-align:center] [font-size:12px] [color:var(--muted)]">{emptyMessage}</div>
+              <div className="ui-combo-empty [padding:18px_10px] [text-align:center] [font-size:12px] [color:var(--muted)]">
+                {emptyMessage}
+              </div>
             ) : (
               filtered.map((opt, i) => (
                 <button
@@ -192,7 +222,11 @@ export function SearchableSelect({
                   type="button"
                   role="option"
                   aria-selected={opt.value === value}
-                  className={cn("ui-combo-item [display:flex] [align-items:center] [justify-content:space-between] [gap:8px] [width:100%] [min-height:34px] [padding:0_10px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:13px] [text-align:left] [cursor:pointer]", opt.value === value && "is-on", i === hi && "is-hi")}
+                  className={cn(
+                    "ui-combo-item [display:flex] [align-items:center] [justify-content:space-between] [gap:8px] [width:100%] [min-height:34px] [padding:0_10px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:13px] [text-align:left] [cursor:pointer]",
+                    opt.value === value && "is-on",
+                    i === hi && "is-hi",
+                  )}
                   onMouseEnter={() => setHi(i)}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => pick(opt.value)}

@@ -4,11 +4,26 @@ use validator::{Validate, ValidationError};
 
 use super::PageQuery;
 
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CustomerLedgerListQuery {
+    #[serde(flatten)]
+    pub page: PageQuery,
+    pub customer: Option<String>,
+    pub entry_type: Option<String>,
+    pub debit: Option<f64>,
+    pub credit: Option<f64>,
+    pub occurred_from: Option<String>,
+    pub occurred_to: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomerLedgerEntryResponse {
     pub id: String,
     pub customer_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_name: Option<String>,
     pub branch_id: String,
     pub entry_type: String,
     pub invoice_id: Option<String>,

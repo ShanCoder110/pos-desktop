@@ -14,8 +14,8 @@ use crate::backend::{
     },
     context::RequestContext,
     dto::{
-        CreateProductRequest, DeleteResponse, Paginated, PaginationMeta, ProductListQuery,
-        ProductResponse, ProductUnitInput, UpdateProductRequest,
+        CreateProductRequest, DeleteResponse, OpeningStockInput, Paginated, PaginationMeta,
+        ProductListQuery, ProductResponse, ProductUnitInput, UpdateProductRequest,
     },
     entities::{product, product_lot, product_unit},
     errors::AppError,
@@ -146,60 +146,14 @@ impl ProductService {
             .await?;
         }
 
-        if let Some(opening) = request.opening_stock {
-            let branch_id = parse_uuid(&opening.branch_id, "openingStock.branchId")?;
-            let supplier_id = opening
-                .supplier_id
-                .as_deref()
-                .map(|value| parse_uuid(value, "openingStock.supplierId"))
-                .transpose()?;
-            let received_date = parse_date(&opening.received_date, ERROR_INVALID_RECEIVED_DATE)?;
-            let expiry_date = opening
-                .expiry_date
-                .as_deref()
-                .map(|value| parse_date(value, ERROR_INVALID_EXPIRY_DATE))
-                .transpose()?;
-            let lot_id = Uuid::new_v4();
-            let lot_number =
-                SequenceRepository::next(&transaction, SEQUENCE_KIND_LOT, DEFAULT_LOT_PREFIX)
-                    .await?;
-            ProductRepository::insert_lot(
-                &transaction,
-                product_lot::ActiveModel {
-                    id: Set(lot_id),
-                    product_id: Set(product_id),
-                    supplier_id: Set(supplier_id),
-                    goods_receipt_item_id: Set(None),
-                    production_job_id: Set(None),
-                    lot_number: Set(lot_number),
-                    source_type: Set(LOT_SOURCE_OPENING.to_owned()),
-                    original_base_quantity: Set(opening.quantity),
-                    remaining_base_quantity: Set(opening.quantity),
-                    damaged_base_quantity: Set(Decimal::ZERO),
-                    purchase_price_per_base: Set(opening.cost),
-                    received_date: Set(received_date),
-                    expiry_date: Set(expiry_date),
-                    created_by: Set(created_by),
-                    version: Set(1),
-                    deleted_at: Set(None),
-                    origin_device_id: Set(Some(context.device_id)),
-                    created_at: Set(now),
-                    updated_at: Set(now),
-                },
-            )
-            .await?;
-            ProductRepository::raw_insert(
-                &transaction,
-                "INSERT INTO branch_lots (id, branch_id, product_lot_id, allocated_base_quantity, remaining_base_quantity, reserved_base_quantity, damaged_base_quantity, updated_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?)",
-                vec![Uuid::new_v4().into(), branch_id.into(), lot_id.into(), opening.quantity.into(), opening.quantity.into(), now.into()],
-            )
-            .await?;
-            ProductRepository::raw_insert(
-                &transaction,
-                "INSERT INTO stock_movements (id, branch_id, product_id, product_lot_id, type, displayed_quantity, displayed_unit_name, base_quantity_delta, unit_cost, total_cost, reference_type, reference_id, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                vec![Uuid::new_v4().into(), branch_id.into(), product_id.into(), lot_id.into(), STOCK_MOVEMENT_ADJUSTMENT.into(), opening.quantity.into(), "base".into(), opening.quantity.into(), opening.cost.into(), (opening.cost * opening.quantity).into(), REFERENCE_PRODUCT_OPENING.into(), product_id.into(), now.into(), created_by.into(), now.into()],
-            )
-            .await?;
+        let opening_stocks = if !request.opening_stocks.is_empty() {
+            request.opening_stocks.clone()
+        } else {
+            request.opening_stock.clone().into_iter().collect()
+        };
+        for opening in opening_stocks {
+            insert_opening_stock(&transaction, context, product_id, created_by, &opening, now)
+                .await?;
         }
 
         transaction.commit().await?;
@@ -290,6 +244,92 @@ impl ProductService {
     }
 }
 
+async fn insert_opening_stock(
+    transaction: &sea_orm::DatabaseTransaction,
+    context: &RequestContext,
+    product_id: Uuid,
+    created_by: Uuid,
+    opening: &OpeningStockInput,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), AppError> {
+    let branch_id = parse_uuid(&opening.branch_id, "openingStock.branchId")?;
+    let supplier_id = opening
+        .supplier_id
+        .as_deref()
+        .map(|value| parse_uuid(value, "openingStock.supplierId"))
+        .transpose()?;
+    let received_date = parse_date(&opening.received_date, ERROR_INVALID_RECEIVED_DATE)?;
+    let expiry_date = opening
+        .expiry_date
+        .as_deref()
+        .map(|value| parse_date(value, ERROR_INVALID_EXPIRY_DATE))
+        .transpose()?;
+    let lot_id = Uuid::new_v4();
+    let lot_number =
+        SequenceRepository::next(transaction, SEQUENCE_KIND_LOT, DEFAULT_LOT_PREFIX).await?;
+    ProductRepository::insert_lot(
+        transaction,
+        product_lot::ActiveModel {
+            id: Set(lot_id),
+            product_id: Set(product_id),
+            supplier_id: Set(supplier_id),
+            goods_receipt_item_id: Set(None),
+            production_job_id: Set(None),
+            lot_number: Set(lot_number),
+            source_type: Set(LOT_SOURCE_OPENING.to_owned()),
+            original_base_quantity: Set(opening.quantity),
+            remaining_base_quantity: Set(opening.quantity),
+            damaged_base_quantity: Set(Decimal::ZERO),
+            purchase_price_per_base: Set(opening.cost),
+            received_date: Set(received_date),
+            expiry_date: Set(expiry_date),
+            created_by: Set(created_by),
+            version: Set(1),
+            deleted_at: Set(None),
+            origin_device_id: Set(Some(context.device_id)),
+            created_at: Set(now),
+            updated_at: Set(now),
+        },
+    )
+    .await?;
+    ProductRepository::raw_insert(
+        transaction,
+        "INSERT INTO branch_lots (id, branch_id, product_lot_id, allocated_base_quantity, remaining_base_quantity, reserved_base_quantity, damaged_base_quantity, updated_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?)",
+        vec![
+            Uuid::new_v4().into(),
+            branch_id.into(),
+            lot_id.into(),
+            opening.quantity.into(),
+            opening.quantity.into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    ProductRepository::raw_insert(
+        transaction,
+        "INSERT INTO stock_movements (id, branch_id, product_id, product_lot_id, type, displayed_quantity, displayed_unit_name, base_quantity_delta, unit_cost, total_cost, reference_type, reference_id, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        vec![
+            Uuid::new_v4().into(),
+            branch_id.into(),
+            product_id.into(),
+            lot_id.into(),
+            STOCK_MOVEMENT_ADJUSTMENT.into(),
+            opening.quantity.into(),
+            "base".into(),
+            opening.quantity.into(),
+            opening.cost.into(),
+            (opening.cost * opening.quantity).into(),
+            REFERENCE_PRODUCT_OPENING.into(),
+            product_id.into(),
+            now.into(),
+            created_by.into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    Ok(())
+}
+
 fn unit_active_model(
     product_id: Uuid,
     unit: ProductUnitInput,
@@ -297,8 +337,9 @@ fn unit_active_model(
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<product_unit::ActiveModel, AppError> {
     Ok(product_unit::ActiveModel {
-        id: Set(parse_optional_uuid(unit.id.as_deref(), "sellUnits.id")?
-            .unwrap_or_else(Uuid::new_v4)),
+        id: Set(
+            parse_optional_uuid(unit.id.as_deref(), "sellUnits.id")?.unwrap_or_else(Uuid::new_v4)
+        ),
         product_id: Set(product_id),
         unit_id: Set(parse_uuid(&unit.unit_id, "sellUnits.unitId")?),
         display_name: Set(unit.name.trim().to_owned()),
@@ -345,6 +386,10 @@ fn normalize_create(request: &mut CreateProductRequest) {
         unit.price = money_value(unit.price);
     }
     if let Some(opening) = &mut request.opening_stock {
+        opening.quantity = quantity(opening.quantity);
+        opening.cost = money_value(opening.cost);
+    }
+    for opening in &mut request.opening_stocks {
         opening.quantity = quantity(opening.quantity);
         opening.cost = money_value(opening.cost);
     }
@@ -431,10 +476,10 @@ mod tests {
                 notes: None,
                 is_active: true,
                 precision: None,
-                credit_limit: None,
-                payment_terms_days: None,
                 is_walk_in: false,
+                previous_balance: None,
             },
+            None,
         )
         .await
         .expect("create category");

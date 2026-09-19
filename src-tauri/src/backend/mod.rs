@@ -1,3 +1,4 @@
+pub mod config;
 pub mod constants;
 pub mod context;
 pub mod db;
@@ -13,9 +14,14 @@ pub mod server;
 pub mod services;
 pub mod util;
 
+use std::sync::Arc;
+
 use sea_orm::DatabaseConnection;
+
+use self::config::Config;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: DatabaseConnection,
+    pub config: Arc<Config>,
 }

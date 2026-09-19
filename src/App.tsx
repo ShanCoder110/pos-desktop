@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { RequireAuth } from "@/components/common/auth/RequireAuth";
 import { RootRedirect } from "@/components/common/auth/RootRedirect";
 import { SessionProvider } from "@/components/common/auth/SessionProvider";
@@ -9,14 +9,13 @@ import { CreditSalesPage } from "@/pages/credit/CreditSalesPage";
 import { CustomersPage } from "@/pages/customers/CustomersPage";
 import { DashboardPage } from "@/pages/dashboard/DashboardPage";
 import { EmployeesPage } from "@/pages/employees/EmployeesPage";
+import { UsersPage } from "@/pages/users/UsersPage";
 import { ExpensesPage } from "@/pages/expenses/ExpensesPage";
 import { InvoicesPage } from "@/pages/invoices/InvoicesPage";
 import { LoginPage } from "@/pages/login/LoginPage";
-import { LotsPage } from "@/pages/lots/LotsPage";
 import { PosPage } from "@/pages/pos/PosPage";
-import { CategoriesPage } from "@/pages/products/CategoriesPage";
+import { ProductHubBody } from "@/pages/products/ProductHubBody";
 import { ProductsLayout } from "@/pages/products/ProductsLayout";
-import { ProductsPage } from "@/pages/products/ProductsPage";
 import { RepairPage } from "@/pages/repair/RepairPage";
 import { ClaimsPage } from "@/pages/sales/ClaimsPage";
 import { ProductSalesPage } from "@/pages/sales/ProductSalesPage";
@@ -34,8 +33,8 @@ import { SetupPage } from "@/pages/setup/SetupPage";
 import { ShopsPage } from "@/pages/shops/ShopsPage";
 import { SuppliersPage } from "@/pages/suppliers/SuppliersPage";
 import { TransactionsPage } from "@/pages/transactions/TransactionsPage";
-import { TransfersPage } from "@/pages/transfers/TransfersPage";
-import { UnitsPage } from "@/pages/units/UnitsPage";
+import { TrashPage } from "@/pages/trash/TrashPage";
+import { productsHref } from "@/shared/constants/products";
 import { routes } from "@/shared/constants/routes";
 import { defaultSettings, SettingsContext } from "@/shared/settings";
 import type { ShopSettings } from "@/shared/types";
@@ -46,7 +45,7 @@ export default function App() {
   return (
     <SettingsContext.Provider value={{ settings, setSettings }}>
       <SessionProvider>
-        <HashRouter>
+        <BrowserRouter>
           <Routes>
             <Route path={routes.setup} element={<SetupPage />} />
             <Route path={routes.login} element={<LoginPage />} />
@@ -62,27 +61,59 @@ export default function App() {
                 </Route>
                 <Route path={routes.invoices} element={<Navigate to={routes.sales} replace />} />
                 <Route path={routes.credit} element={<CreditSalesPage />} />
-                <Route path={routes.returns} element={<Navigate to={routes.salesReturns} replace />} />
-                <Route path={routes.productsClaims} element={<Navigate to={routes.salesClaims} replace />} />
+                <Route
+                  path={routes.returns}
+                  element={<Navigate to={routes.salesReturns} replace />}
+                />
+                <Route
+                  path={routes.productsClaims}
+                  element={<Navigate to={routes.salesClaims} replace />}
+                />
                 <Route path={routes.products} element={<ProductsLayout />}>
-                  <Route index element={<ProductsPage />} />
-                  <Route path="stock" element={<Navigate to={routes.products} replace />} />
-                  <Route path="lots" element={<LotsPage />} />
-                  <Route path="units" element={<UnitsPage />} />
-                  <Route path="categories" element={<CategoriesPage />} />
-                  <Route path="transfers" element={<TransfersPage />} />
-                  <Route path="low" element={<ProductsPage />} />
-                  <Route path="sold" element={<Navigate to={routes.products} replace />} />
+                  <Route index element={<ProductHubBody />} />
                 </Route>
                 <Route path="/stock" element={<Navigate to={routes.products} replace />} />
-                <Route path="/lots" element={<Navigate to={routes.lots} replace />} />
-                <Route path="/units" element={<Navigate to={routes.units} replace />} />
-                <Route path="/transfers" element={<Navigate to={routes.transfers} replace />} />
-                <Route path={routes.categories} element={<Navigate to={routes.productsCategories} replace />} />
-                <Route path={routes.reorder} element={<Navigate to={routes.lots} replace />} />
+                <Route path="/products/stock" element={<Navigate to={routes.products} replace />} />
+                <Route path="/products/sold" element={<Navigate to={routes.products} replace />} />
+                <Route
+                  path="/products/lots"
+                  element={<Navigate to={productsHref("lots")} replace />}
+                />
+                <Route
+                  path="/products/units"
+                  element={<Navigate to={productsHref("units")} replace />}
+                />
+                <Route
+                  path="/products/categories"
+                  element={<Navigate to={productsHref("categories")} replace />}
+                />
+                <Route
+                  path="/products/transfers"
+                  element={<Navigate to={productsHref("transfers")} replace />}
+                />
+                <Route
+                  path="/products/low"
+                  element={<Navigate to={productsHref("low")} replace />}
+                />
+                <Route path="/lots" element={<Navigate to={productsHref("lots")} replace />} />
+                <Route path="/units" element={<Navigate to={productsHref("units")} replace />} />
+                <Route
+                  path="/transfers"
+                  element={<Navigate to={productsHref("transfers")} replace />}
+                />
+                <Route
+                  path={routes.categories}
+                  element={<Navigate to={productsHref("categories")} replace />}
+                />
+                <Route
+                  path={routes.reorder}
+                  element={<Navigate to={productsHref("lots")} replace />}
+                />
                 <Route path={routes.suppliers} element={<SuppliersPage />} />
+                <Route path={routes.trash} element={<TrashPage />} />
                 <Route path={routes.customers} element={<CustomersPage />} />
                 <Route path={routes.employees} element={<EmployeesPage />} />
+                <Route path={routes.users} element={<UsersPage />} />
                 <Route path={routes.production} element={<RepairPage />} />
                 <Route path={routes.repair} element={<RepairPage />} />
                 <Route path={routes.expenses} element={<ExpensesPage />} />
@@ -103,7 +134,7 @@ export default function App() {
             </Route>
             <Route path="*" element={<RootRedirect />} />
           </Routes>
-        </HashRouter>
+        </BrowserRouter>
       </SessionProvider>
     </SettingsContext.Provider>
   );

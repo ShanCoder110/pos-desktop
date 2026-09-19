@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::backend::{
     dto::{
         BranchResponse, BranchSettingsResponse, DevicePrinterResponse, DeviceResponse, PageQuery,
-        UserPermissionResponse, UserResponse,
+        UserListQuery, UserPermissionResponse, UserResponse,
     },
     errors::AppError,
     repositories::auth::AuthRepository,
@@ -21,6 +21,7 @@ struct UserRow {
     default_branch_id: Option<Uuid>,
     is_active: bool,
     last_login_at: Option<chrono::DateTime<chrono::Utc>>,
+    total_paid: Option<f64>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -88,35 +89,38 @@ pub struct OrgRepository;
 impl OrgRepository {
     pub async fn list_users(
         database: &DatabaseConnection,
-        query: &PageQuery,
+        query: &UserListQuery,
     ) -> Result<(Vec<UserResponse>, u64), AppError> {
-        let (where_sql, values) = user_conditions(query);
+        let page = query.page.clone().normalized();
+        let (where_sql, values) = user_conditions(&page, query);
         let total = CountRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            format!("SELECT COUNT(*) AS count FROM users WHERE {where_sql}"),
+            format!("SELECT COUNT(*) AS count FROM users u WHERE {where_sql}"),
             values.clone(),
         ))
         .one(database)
         .await?
         .map(|row| row.count.max(0) as u64)
         .unwrap_or(0);
-        let sort = match query.sort_by.as_deref() {
-            Some("username") => "username",
-            Some("role") => "role",
-            Some("createdAt") => "created_at",
-            _ => "name",
+        let sort = match page.sort_by.as_deref() {
+            Some("name") => "u.name",
+            Some("username") => "u.username",
+            Some("role") => "u.role",
+            _ => "u.created_at",
         };
-        let direction = query.sort_direction.unwrap_or_default().sql();
+        let direction = page.sort_direction.unwrap_or_default().sql();
         let mut page_values = values;
-        page_values.push((query.per_page as i64).into());
-        page_values.push((query.offset() as i64).into());
+        page_values.push((page.per_page as i64).into());
+        page_values.push((page.offset() as i64).into());
         let rows = UserRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
             format!(
-                "SELECT id, name, username, phone, email, role, default_branch_id, is_active,
-                        last_login_at, created_at, updated_at
-                 FROM users WHERE {where_sql}
-                 ORDER BY {sort} {direction}, id ASC
+                "SELECT u.id, u.name, u.username, u.phone, u.email, u.role, u.default_branch_id, u.is_active,
+                        u.last_login_at,
+                        CAST(COALESCE((SELECT sle.balance_after FROM staff_ledger_entries sle WHERE sle.user_id = u.id ORDER BY sle.occurred_at DESC, sle.created_at DESC LIMIT 1), 0) AS REAL) AS total_paid,
+                        u.created_at, u.updated_at
+                 FROM users u WHERE {where_sql}
+                 ORDER BY {sort} {direction}, u.id ASC
                  LIMIT ? OFFSET ?"
             ),
             page_values,
@@ -136,6 +140,21 @@ impl OrgRepository {
         id: Uuid,
     ) -> Result<Option<UserResponse>, AppError> {
         AuthRepository::load_user_response(database, id).await
+    }
+
+    pub async fn username_exists(
+        database: &DatabaseConnection,
+        username: &str,
+    ) -> Result<bool, AppError> {
+        Ok(CountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM users WHERE username = ? AND deleted_at IS NULL",
+            [username.into()],
+        ))
+        .one(database)
+        .await?
+        .map(|row| row.count > 0)
+        .unwrap_or(false))
     }
 
     pub async fn create_user(
@@ -236,6 +255,24 @@ impl OrgRepository {
         Ok(result.rows_affected() > 0)
     }
 
+    pub async fn soft_delete_user(
+        database: &DatabaseConnection,
+        id: Uuid,
+        deleted_by: Option<Uuid>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool, AppError> {
+        let result = database
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE users
+                 SET is_active = 0, deleted_at = ?, deleted_by = ?, updated_at = ?
+                 WHERE id = ? AND deleted_at IS NULL AND role != 'OWNER'",
+                [now.into(), deleted_by.into(), now.into(), id.into()],
+            ))
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     pub async fn replace_permissions(
         database: &DatabaseConnection,
         user_id: Uuid,
@@ -285,9 +322,9 @@ impl OrgRepository {
         .map(|row| row.count.max(0) as u64)
         .unwrap_or(0);
         let sort = match query.sort_by.as_deref() {
+            Some("name") => "b.name",
             Some("code") => "b.code",
-            Some("createdAt") => "b.created_at",
-            _ => "b.name",
+            _ => "b.created_at",
         };
         let direction = query.sort_direction.unwrap_or_default().sql();
         let mut page_values = values;
@@ -312,7 +349,10 @@ impl OrgRepository {
     ) -> Result<Option<BranchResponse>, AppError> {
         Ok(BranchRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            format!("{} WHERE b.id = ? AND b.deleted_at IS NULL LIMIT 1", branch_projection()),
+            format!(
+                "{} WHERE b.id = ? AND b.deleted_at IS NULL LIMIT 1",
+                branch_projection()
+            ),
             [id.into()],
         ))
         .one(database)
@@ -509,7 +549,7 @@ impl OrgRepository {
             format!(
                 "SELECT id, branch_id, name, is_active, last_seen_at, last_synced_at, created_at, updated_at
                  FROM devices WHERE {where_sql}
-                 ORDER BY name {direction}, id ASC
+                 ORDER BY created_at {direction}, id DESC
                  LIMIT ? OFFSET ?"
             ),
             page_values,
@@ -532,6 +572,37 @@ impl OrgRepository {
         .one(database)
         .await?
         .map(Into::into))
+    }
+
+    pub async fn ensure_device(
+        database: &DatabaseConnection,
+        id: Uuid,
+        branch_id: Uuid,
+        name: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), AppError> {
+        database
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "INSERT INTO devices
+                    (id, branch_id, name, device_key_hash, is_active, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, 1, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET
+                    branch_id = excluded.branch_id,
+                    name = excluded.name,
+                    is_active = 1,
+                    updated_at = excluded.updated_at",
+                [
+                    id.into(),
+                    branch_id.into(),
+                    name.into(),
+                    format!("device-{id}").into(),
+                    now.into(),
+                    now.into(),
+                ],
+            ))
+            .await?;
+        Ok(())
     }
 
     pub async fn touch_device_seen(
@@ -722,24 +793,42 @@ fn user_response(row: UserRow, permissions: Vec<UserPermissionResponse>) -> User
         is_active: row.is_active,
         last_login_at: row.last_login_at.map(|value| value.to_rfc3339()),
         permissions,
+        total_paid: row.total_paid.unwrap_or(0.0),
         created_at: row.created_at.to_rfc3339(),
         updated_at: row.updated_at.to_rfc3339(),
     }
 }
 
-fn user_conditions(query: &PageQuery) -> (String, Vec<sea_orm::Value>) {
-    let mut where_sql = String::from("1 = 1");
+fn user_conditions(
+    page: &crate::backend::dto::PageQuery,
+    query: &UserListQuery,
+) -> (String, Vec<sea_orm::Value>) {
+    let mut where_sql = String::from("u.deleted_at IS NULL");
     let mut values = Vec::new();
-    if let Some(search) = query.search.as_deref() {
-        where_sql.push_str(" AND (name LIKE ? OR username LIKE ? OR role LIKE ?)");
+    if let Some(search) = page.search.as_deref() {
+        where_sql.push_str(" AND (u.name LIKE ? OR u.username LIKE ? OR u.role LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)");
         let pattern = format!("%{search}%");
+        values.push(pattern.clone().into());
+        values.push(pattern.clone().into());
         values.push(pattern.clone().into());
         values.push(pattern.clone().into());
         values.push(pattern.into());
     }
-    if let Some(is_active) = query.is_active {
-        where_sql.push_str(" AND is_active = ?");
+    if let Some(is_active) = page.is_active {
+        where_sql.push_str(" AND u.is_active = ?");
         values.push(is_active.into());
+    }
+    if query.staff_only == Some(true) {
+        where_sql.push_str(" AND u.role != 'OWNER'");
+    }
+    if let Some(role) = query
+        .role
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        where_sql.push_str(" AND u.role = ?");
+        values.push(role.to_uppercase().into());
     }
     (where_sql, values)
 }

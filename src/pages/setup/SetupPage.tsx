@@ -1,150 +1,216 @@
 import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { AuthShell } from "@/components/common/auth/AuthShell";
-import { Field, TextArea, TextInput } from "@/components/common/fields";
+import { toaster } from "@/components/common";
+import { Field, PhoneField, TextArea, TextInput, PasswordInput } from "@/components/common/fields";
+import { Toggle } from "@/components/common";
 import { AUTH_ENABLED, useSession } from "@/shared/auth/session";
+import { AUTH_COPY } from "@/shared/constants/auth";
+import { FIELD_LIMITS, FORM_COPY } from "@/shared/constants/fields";
+import { PK_MOBILE_COPY } from "@/shared/constants/phone";
 import { routes } from "@/shared/constants/routes";
+import { Controller, useAppForm } from "@/hooks/useAppForm";
+import { fieldMessage, requiredTrim } from "@/utils/form";
+import { formatPkMobile, pkMobileDigits, requiredPkMobile } from "@/utils/phone";
+import { validateUserEmail } from "@/validations/user.validation";
 
 export function SetupPage() {
   const navigate = useNavigate();
-  const { session, completeSetup } = useSession();
-  const [shopName, setShopName] = useState(session.shop?.name ?? "");
-  const [address, setAddress] = useState(session.shop?.address ?? "");
-  const [firstName, setFirstName] = useState(session.owner?.firstName ?? "");
-  const [lastName, setLastName] = useState(session.owner?.lastName ?? "");
-  const [phone, setPhone] = useState(session.owner?.phone ?? "");
-  const [email, setEmail] = useState(session.owner?.email ?? "");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const { phase, completeSetup } = useSession();
+  const [submitting, setSubmitting] = useState(false);
+  const {
+    register,
+    handleSubmit,
+    control,
+    watch,
+    formState: { errors },
+  } = useAppForm({
+    defaultValues: {
+      shopName: "",
+      address: "",
+      firstName: "",
+      lastName: "",
+      phone: "",
+      email: "",
+      username: "",
+      password: "",
+      confirmPassword: "",
+      tagline: "",
+      contactLine: "",
+      showLogo: false,
+    },
+  });
 
   if (!AUTH_ENABLED) {
     return <Navigate to={routes.dashboard} replace />;
   }
 
-  if (session.shop && session.owner) {
-    return <Navigate to={session.loggedIn ? routes.pos : routes.login} replace />;
+  if (phase === "authenticated") {
+    return <Navigate to={routes.dashboard} replace />;
   }
+
+  if (phase !== "needs_setup" && phase !== "loading") {
+    return <Navigate to={routes.login} replace />;
+  }
+
+  const email = watch("email");
 
   return (
     <AuthShell
-      kicker="First time"
-      title="Set up your shop"
-      subtitle="Name the shop, then create the first login. You will sign in with this email."
+      kicker={AUTH_COPY.firstTime}
+      title={AUTH_COPY.setupTitle}
+      subtitle={AUTH_COPY.setupSubtitle}
       footer={
         <p>
-          Already set up?{" "}
-          <Link to={routes.login} className="auth-link [font-weight:600] [color:var(--accent)] [text-decoration:none]">
-            Sign in
+          {AUTH_COPY.alreadySetUp}{" "}
+          <Link
+            to={routes.login}
+            className="auth-link [font-weight:600] [color:var(--accent)] [text-decoration:none]"
+          >
+            {AUTH_COPY.signIn}
           </Link>
         </p>
       }
     >
       <form
         className="auth-form [display:grid] [gap:16px]"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!shopName.trim()) {
-            setError("Shop name is required");
+        onSubmit={handleSubmit(async (values) => {
+          setSubmitting(true);
+          const ownerName = `${values.firstName.trim()} ${values.lastName.trim()}`.trim();
+          const username =
+            values.username.trim() ||
+            values.email.trim().split("@")[0] ||
+            values.firstName.trim().toLowerCase();
+          const fail = await completeSetup({
+            shopName: values.shopName.trim(),
+            address: values.address.trim(),
+            ownerName,
+            username,
+            password: values.password,
+            phone: pkMobileDigits(values.phone),
+            email: values.email.trim(),
+            tagline: values.tagline.trim() || undefined,
+            contactLine: values.contactLine.trim() || formatPkMobile(values.phone) || undefined,
+            showLogo: values.showLogo,
+          });
+          setSubmitting(false);
+          if (fail) {
+            toaster.error(fail);
             return;
           }
-          if (!address.trim()) {
-            setError("Address is required");
-            return;
-          }
-          if (!firstName.trim() || !lastName.trim()) {
-            setError("First and last name are required");
-            return;
-          }
-          if (!phone.trim()) {
-            setError("Phone is required");
-            return;
-          }
-          if (!email.trim() || !email.includes("@")) {
-            setError("A valid email is required");
-            return;
-          }
-          if (password.length < 4) {
-            setError("Password must be at least 4 characters");
-            return;
-          }
-          completeSetup(
-            { name: shopName.trim(), address: address.trim() },
-            {
-              firstName: firstName.trim(),
-              lastName: lastName.trim(),
-              phone: phone.trim(),
-              email: email.trim(),
-              password,
-            },
-          );
-          navigate(routes.login);
-        }}
+          navigate(routes.dashboard);
+        })}
       >
-        <Field label="Shop name">
+        <Field label="Shop name" error={fieldMessage(errors, "shopName")}>
           <TextInput
             autoFocus
             className="is-lg"
-            value={shopName}
-            onChange={(e) => setShopName(e.target.value)}
             placeholder="Madina Electric"
+            {...register("shopName", { validate: requiredTrim(FORM_COPY.shopRequired) })}
           />
         </Field>
-        <Field label="Address">
+        <Field label="Address" error={fieldMessage(errors, "address")}>
           <TextArea
             className="is-lg"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
+            maxLength={FIELD_LIMITS.address}
             placeholder="Shop 12, Hall Road, Lahore"
+            {...register("address", { validate: requiredTrim(FORM_COPY.addressRequired) })}
+          />
+        </Field>
+        <Field label={AUTH_COPY.tagline} hint={AUTH_COPY.taglineHint}>
+          <TextInput
+            className="is-lg"
+            placeholder="Quality parts, fair prices"
+            {...register("tagline")}
           />
         </Field>
         <div className="auth-form-row [display:grid] [grid-template-columns:1fr_1fr] [gap:12px]">
-          <Field label="First name">
+          <Field label="First name" error={fieldMessage(errors, "firstName")}>
             <TextInput
               className="is-lg"
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
               placeholder="Usman"
+              {...register("firstName", { validate: requiredTrim(FORM_COPY.firstNameRequired) })}
             />
           </Field>
-          <Field label="Last name">
+          <Field label="Last name" error={fieldMessage(errors, "lastName")}>
             <TextInput
               className="is-lg"
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
               placeholder="Ali"
+              {...register("lastName", { validate: requiredTrim(FORM_COPY.lastNameRequired) })}
             />
           </Field>
         </div>
-        <Field label="Phone">
-          <TextInput
-            className="is-lg"
-            inputMode="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="0300 1112233"
-          />
-        </Field>
-        <Field label="Email">
+        <Controller
+          name="phone"
+          control={control}
+          rules={{
+            validate: (value) =>
+              requiredPkMobile(value, FORM_COPY.phoneRequired, PK_MOBILE_COPY.invalid),
+          }}
+          render={({ field }) => (
+            <PhoneField
+              error={fieldMessage(errors, "phone")}
+              value={field.value}
+              onChange={field.onChange}
+              onBlur={field.onBlur}
+              inputClassName="is-lg"
+            />
+          )}
+        />
+        <Field label="Email" error={fieldMessage(errors, "email")}>
           <TextInput
             className="is-lg"
             type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
             placeholder="usman@shop.com"
+            {...register("email", { validate: validateUserEmail })}
           />
         </Field>
-        <Field label="Password">
+        <Field label={AUTH_COPY.username} hint="Internal label for receipts and staff lists">
           <TextInput
             className="is-lg"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
+            placeholder={email.trim().split("@")[0] || "owner"}
+            {...register("username")}
           />
         </Field>
-        {error ? <p className="auth-error [font-size:12px] [color:var(--danger)]">{error}</p> : null}
-        <button type="submit" className="auth-submit [height:44px] [width:100%] [border:0] [border-radius:8px] [background:var(--accent)] [color:#fff] [font-size:14px] [font-weight:600] [cursor:pointer]">
-          Create shop
+        <Field label={AUTH_COPY.contactLine} hint={AUTH_COPY.contactLineHint}>
+          <TextInput className="is-lg" placeholder="0300 1234567" {...register("contactLine")} />
+        </Field>
+        <Controller
+          name="showLogo"
+          control={control}
+          render={({ field }) => (
+            <Toggle checked={field.value} onChange={field.onChange} label={AUTH_COPY.showLogo} />
+          )}
+        />
+        <Field label="Password" error={fieldMessage(errors, "password")}>
+          <PasswordInput
+            className="is-lg"
+            autoComplete="new-password"
+            placeholder="••••••••"
+            {...register("password", {
+              validate: (value) => (value.length >= 6 ? true : AUTH_COPY.passwordMin),
+            })}
+          />
+        </Field>
+        <Field label={AUTH_COPY.confirmPassword} error={fieldMessage(errors, "confirmPassword")}>
+          <PasswordInput
+            className="is-lg"
+            autoComplete="new-password"
+            placeholder="••••••••"
+            {...register("confirmPassword", {
+              validate: (value, formValues) => {
+                if (!value) return FORM_COPY.confirmPasswordRequired;
+                return value === formValues.password ? true : AUTH_COPY.passwordMismatch;
+              },
+            })}
+          />
+        </Field>
+        <button
+          type="submit"
+          disabled={submitting || phase === "loading"}
+          className="auth-submit [height:44px] [width:100%] [border:0] [border-radius:8px] [background:var(--accent)] [color:#fff] [font-size:14px] [font-weight:600] [cursor:pointer] disabled:[opacity:0.6] disabled:[cursor:not-allowed]"
+        >
+          {submitting ? "Creating shop…" : AUTH_COPY.createShop}
         </button>
       </form>
     </AuthShell>

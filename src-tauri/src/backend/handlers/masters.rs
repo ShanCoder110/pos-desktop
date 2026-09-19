@@ -40,10 +40,10 @@ macro_rules! master_handlers {
 
         pub async fn $create(
             State(state): State<AppState>,
-            _ctx: RequestContext,
+            ctx: RequestContext,
             Json(request): Json<MasterRequest>,
         ) -> Result<(StatusCode, Json<MasterResponse>), AppError> {
-            let row = MasterService::create(&state.db, $kind, request).await?;
+            let row = MasterService::create(&state.db, $kind, request, Some(&ctx)).await?;
             Ok((StatusCode::CREATED, Json(row)))
         }
 
@@ -61,11 +61,11 @@ macro_rules! master_handlers {
 
         pub async fn $delete(
             State(state): State<AppState>,
-            _ctx: RequestContext,
+            ctx: RequestContext,
             Path(id): Path<String>,
         ) -> Result<Json<DeleteResponse>, AppError> {
             let id = parse_id(&id)?;
-            MasterService::delete(&state.db, $kind, id, $not_found).await?;
+            MasterService::delete(&state.db, $kind, id, $not_found, Some(&ctx)).await?;
             Ok(Json(DeleteResponse {
                 id: id.to_string(),
                 deleted: true,

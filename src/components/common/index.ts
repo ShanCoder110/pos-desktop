@@ -6,12 +6,29 @@ export { Checkbox } from "@/components/common/Checkbox";
 export { ColumnPicker } from "@/components/common/ColumnPicker";
 export { Drawer } from "@/components/common/Drawer";
 export type { DrawerSize } from "@/components/common/Drawer";
-export { DateRangePeriodPicker, dateInRange, rangeForPeriod } from "@/components/common/DateRangePeriodPicker";
+export {
+  DateRangePeriodPicker,
+  dateInRange,
+  rangeForPeriod,
+} from "@/components/common/DateRangePeriodPicker";
 export type { DateRangeFilter, DatePeriod } from "@/components/common/DateRangePeriodPicker";
-export { Field, TextInput, SelectInput, TextArea, Toggle, MoneyInput } from "@/components/common/fields";
+export {
+  Field,
+  TextInput,
+  PasswordInput,
+  SelectInput,
+  TextArea,
+  Toggle,
+  MoneyInput,
+  MoneyDisplay,
+  PhoneInput,
+  PhoneField,
+} from "@/components/common/fields";
+export { FormSection } from "@/components/common/FormSection";
 export { FilterChips, FilterPicker } from "@/components/common/FilterPicker";
 export { KpiCard } from "@/components/common/KpiCard";
-export { HubChart } from "@/components/common/HubChart";
+export { EmptyState } from "@/components/common/EmptyState";
+export { HubChart, HubChartGrid } from "@/components/common/HubChart";
 export type { HubChartPoint } from "@/components/common/HubChart";
 export { Menu, MenuItem } from "@/components/common/Menu";
 export { ConfirmDialog, Modal } from "@/components/common/modals";
@@ -28,6 +45,19 @@ export type { SelectOption } from "@/components/common/SearchableSelect";
 export { Skeleton, TableRowsSkeleton } from "@/components/common/Skeleton";
 export { Slider } from "@/components/common/Slider";
 export { Table, THead, Th, Td } from "@/components/common/Table";
+export { TableToolbar } from "@/components/common/TableToolbar";
+export { EntityCell } from "@/components/common/EntityCell";
+export { EntityDetailDrawer, EntityDetailPanel } from "@/components/common/EntityDetailDrawer";
+export type {
+  DetailAction,
+  DetailActionTone,
+  DetailField,
+  DetailIdentity,
+  DetailMeta,
+  DetailSummaryCard,
+  DetailSummaryTone,
+} from "@/components/common/EntityDetailDrawer";
+export { ThemeToggle } from "@/components/common/ThemeToggle";
 export { Tabs, TabSheet } from "@/components/common/Tabs";
 export type { TabItem } from "@/components/common/Tabs";
 export { ToastProvider, toaster, useToast } from "@/components/common/Toast";

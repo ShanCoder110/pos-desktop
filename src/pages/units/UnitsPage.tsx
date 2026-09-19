@@ -15,6 +15,7 @@ import {
   PAGE_SIZE_ALL,
   Pagination,
   Table,
+  TableRowsSkeleton,
   Td,
   TextInput,
   THead,
@@ -26,9 +27,50 @@ import { useProductsHub } from "@/pages/products/ProductsLayout";
 import type { UnitRow } from "@/shared/domain/types";
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { UNIT_TABLE_COLUMNS } from "@/shared/constants/products";
+import { FIELD_LIMITS, FORM_COPY } from "@/shared/constants/fields";
 import { listMasterRecords } from "@/services/masters";
+import { useAppForm } from "@/hooks/useAppForm";
+import { fieldMessage, requiredTrim } from "@/utils/form";
 
+const UNIT_FORM_ID = "unit-form";
 const blank: UnitRow = { id: "", name: "", symbol: "" };
+
+function UnitEditForm({
+  row,
+  onValid,
+}: {
+  row: UnitRow;
+  onValid: (values: { name: string; symbol: string }) => void;
+}) {
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useAppForm({
+    defaultValues: { name: row.name, symbol: row.symbol },
+  });
+  return (
+    <form
+      id={UNIT_FORM_ID}
+      className="ui-stack [display:grid] [gap:12px]"
+      onSubmit={handleSubmit(onValid)}
+    >
+      <Field label="Name" error={fieldMessage(errors, "name")}>
+        <TextInput
+          placeholder="Meter"
+          {...register("name", { validate: requiredTrim(FORM_COPY.nameRequired) })}
+        />
+      </Field>
+      <Field label="Symbol" error={fieldMessage(errors, "symbol")}>
+        <TextInput
+          maxLength={FIELD_LIMITS.symbol}
+          placeholder="m"
+          {...register("symbol", { validate: requiredTrim(FORM_COPY.symbolRequired) })}
+        />
+      </Field>
+    </form>
+  );
+}
 
 export function UnitsPage() {
   const { setActions, sectionKpi, products } = useProductsHub();
@@ -42,6 +84,7 @@ export function UnitsPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<UnitRow | null>(null);
   const [remove, setRemove] = useState<UnitRow | null>(null);
+  const [loading, setLoading] = useState({ page: true });
 
   useEffect(() => {
     setPage(1);
@@ -53,13 +96,18 @@ export function UnitsPage() {
       .then((response) => {
         setRows(response.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" })));
       })
-      .catch(() => setRows([]));
+      .catch(() => setRows([]))
+      .finally(() => setLoading((current) => ({ ...current, page: false })));
     return () => controller.abort();
   }, []);
 
   useLayoutEffect(() => {
     setActions(
-      <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}>
+      <Button
+        variant="primary"
+        icon={<Plus size={14} />}
+        onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}
+      >
         Add unit
       </Button>,
     );
@@ -80,9 +128,14 @@ export function UnitsPage() {
   }, [rows, q, chips, sectionKpi]);
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
-  const shown = pageSize === PAGE_SIZE_ALL ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
+  const shown =
+    pageSize === PAGE_SIZE_ALL ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
   const chartData = filtered
-    .map((row) => ({ id: row.id, label: row.name, value: products.filter((product) => product.unit === row.symbol).length }))
+    .map((row) => ({
+      id: row.id,
+      label: row.name,
+      value: products.filter((product) => product.unit === row.symbol).length,
+    }))
     .sort((a, b) => b.value - a.value);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
@@ -137,7 +190,11 @@ export function UnitsPage() {
             }
           />
         }
-        body={view === "insights" ? <HubChart type="donut" title="Products by base unit" data={chartData} /> : undefined}
+        body={
+          view === "insights" ? (
+            <HubChart type="donut" title="Products by base unit" data={chartData} />
+          ) : undefined
+        }
         footer={
           <Pagination
             page={Math.min(page, pages)}
@@ -158,7 +215,8 @@ export function UnitsPage() {
               <Checkbox
                 checked={allShownSelected}
                 onChange={(e) => {
-                  if (e.target.checked) setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
+                  if (e.target.checked)
+                    setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
                   else setSelected((s) => s.filter((id) => !shown.some((r) => r.id === id)));
                 }}
               />
@@ -169,31 +227,38 @@ export function UnitsPage() {
           </tr>
         </THead>
         <tbody>
-          {shown.length === 0 ? <EmptyRow cols={cols.length + 2} /> : null}
-          {shown.map((row) => (
-            <tr key={row.id}>
-              <Td className="ui-check-col">
-                <Checkbox
-                  checked={selected.includes(row.id)}
-                  onChange={(e) => {
-                    setSelected((s) => (e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id)));
-                  }}
-                />
-              </Td>
-              <Td>{row.name}</Td>
-              {cols.includes("symbol") ? <Td>{row.symbol}</Td> : null}
-              <Td>
-                <Menu>
-                  <MenuItem icon={<Pencil size={14} />} onClick={() => setEdit(row)}>
-                    Edit
-                  </MenuItem>
-                  <MenuItem danger icon={<Trash2 size={14} />} onClick={() => setRemove(row)}>
-                    Delete
-                  </MenuItem>
-                </Menu>
-              </Td>
-            </tr>
-          ))}
+          {loading.page ? (
+            <TableRowsSkeleton columnCount={cols.length} rows={6} selectable hasActions />
+          ) : null}
+          {!loading.page && shown.length === 0 ? <EmptyRow cols={cols.length + 2} /> : null}
+          {!loading.page
+            ? shown.map((row) => (
+                <tr key={row.id}>
+                  <Td className="ui-check-col">
+                    <Checkbox
+                      checked={selected.includes(row.id)}
+                      onChange={(e) => {
+                        setSelected((s) =>
+                          e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
+                        );
+                      }}
+                    />
+                  </Td>
+                  <Td>{row.name}</Td>
+                  {cols.includes("symbol") ? <Td>{row.symbol}</Td> : null}
+                  <Td>
+                    <Menu>
+                      <MenuItem icon={<Pencil size={14} />} onClick={() => setEdit(row)}>
+                        Edit
+                      </MenuItem>
+                      <MenuItem danger icon={<Trash2 size={14} />} onClick={() => setRemove(row)}>
+                        Delete
+                      </MenuItem>
+                    </Menu>
+                  </Td>
+                </tr>
+              ))
+            : null}
         </tbody>
       </Table>
 
@@ -204,28 +269,26 @@ export function UnitsPage() {
         footer={
           <>
             <Button onClick={() => setEdit(null)}>Cancel</Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                if (!edit?.name || !edit.symbol) return;
-                setRows((p) => (p.some((r) => r.id === edit.id) ? p.map((r) => (r.id === edit.id ? edit : r)) : [...p, edit]));
-                setEdit(null);
-              }}
-            >
+            <Button variant="primary" type="submit" form={UNIT_FORM_ID}>
               Save
             </Button>
           </>
         }
       >
         {edit ? (
-          <div className="ui-stack [display:grid] [gap:12px]">
-            <Field label="Name">
-              <TextInput value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="Meter" />
-            </Field>
-            <Field label="Symbol">
-              <TextInput value={edit.symbol} onChange={(e) => setEdit({ ...edit, symbol: e.target.value })} placeholder="m" />
-            </Field>
-          </div>
+          <UnitEditForm
+            key={edit.id}
+            row={edit}
+            onValid={(values) => {
+              const next = { ...edit, name: values.name.trim(), symbol: values.symbol.trim() };
+              setRows((p) =>
+                p.some((r) => r.id === next.id)
+                  ? p.map((r) => (r.id === next.id ? next : r))
+                  : [...p, next],
+              );
+              setEdit(null);
+            }}
+          />
         ) : null}
       </Drawer>
 

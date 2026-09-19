@@ -1,4 +1,5 @@
-import { Field, TextInput } from "@/components/common";
+import { Field, PhoneField, TextInput } from "@/components/common";
+import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { SettingsSection } from "@/pages/settings/SettingsSection";
 import { useSettingsForm } from "@/shared/settings";
 
@@ -22,21 +23,30 @@ export function ProfileSection() {
         <TextInput value={draft.shopName} onChange={(e) => patch({ shopName: e.target.value })} />
       </Field>
       <div className="settings-row">
-        <Field label="Shop name" hint="Printed at the top of the slip. Can differ from the POS name.">
+        <Field
+          label="Shop name"
+          hint="Printed at the top of the slip. Can differ from the POS name."
+        >
           <TextInput
             value={draft.receiptShopName}
             onChange={(e) => patch({ receiptShopName: e.target.value })}
           />
         </Field>
-        <Field label="Phone">
-          <TextInput value={draft.phone} onChange={(e) => patch({ phone: e.target.value })} />
-        </Field>
+        <PhoneField value={draft.phone} onChange={(phone) => patch({ phone })} />
       </div>
       <Field label="Email">
-        <TextInput value={draft.email} onChange={(e) => patch({ email: e.target.value })} />
+        <TextInput
+          type="email"
+          value={draft.email}
+          onChange={(e) => patch({ email: e.target.value })}
+        />
       </Field>
       <Field label="Address">
-        <TextInput value={draft.address} onChange={(e) => patch({ address: e.target.value })} />
+        <TextInput
+          maxLength={FIELD_LIMITS.address}
+          value={draft.address}
+          onChange={(e) => patch({ address: e.target.value })}
+        />
       </Field>
       <Field label="Legal name" hint="Optional extra line for invoices and reports">
         <TextInput

@@ -8,7 +8,7 @@ use crate::backend::{
     constants::{
         ERROR_BELOW_MINIMUM, ERROR_HOLD_NOT_FOUND, ERROR_INSUFFICIENT_STOCK,
         ERROR_INVOICE_ALREADY_VOIDED, ERROR_INVOICE_NOT_FOUND, ERROR_WALK_IN_CREDIT,
-        INVOICE_STATUS_CANCELLED, INVOICE_STATUS_COMPLETED, LEDGER_ADJUSTMENT, LEDGER_CREDIT_SALE,
+        INVOICE_STATUS_CANCELLED, INVOICE_STATUS_COMPLETED, LEDGER_ADJUSTMENT, LEDGER_SALE,
         MONEY_TYPE_SALE, MONEY_TYPE_VOID, PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT,
         PAYMENT_STATUS_COMPLETED, PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID,
         PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_UNPAID, PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE,
@@ -35,13 +35,11 @@ struct InvoiceIdRow {
 
 #[derive(Debug, FromQueryResult)]
 struct ProductUnitRow {
-    product_id: Uuid,
     product_name: String,
     sku: String,
     unit_display_name: String,
     conversion_to_base: Decimal,
     minimum_price: Decimal,
-    is_walk_in: Option<i64>,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -124,7 +122,6 @@ struct PaymentRow {
 
 #[derive(Debug, FromQueryResult)]
 struct ConsumptionRow {
-    id: Uuid,
     branch_id: Uuid,
     product_id: Uuid,
     product_lot_id: Uuid,
@@ -134,7 +131,6 @@ struct ConsumptionRow {
 
 #[derive(Debug, FromQueryResult)]
 struct LedgerRow {
-    id: Uuid,
     customer_id: Uuid,
     debit: Decimal,
     credit: Decimal,
@@ -189,7 +185,9 @@ impl SalesRepository {
             ))
             .one(transaction)
             .await?
-            .ok_or(AppError::NotFound(crate::backend::constants::ERROR_CUSTOMER_NOT_FOUND))?;
+            .ok_or(AppError::NotFound(
+                crate::backend::constants::ERROR_CUSTOMER_NOT_FOUND,
+            ))?;
             is_walk_in = flag.is_walk_in != 0;
         }
 
@@ -200,7 +198,7 @@ impl SalesRepository {
             let product_unit_id = parse_uuid(&item.product_unit_id, "items.productUnitId")?;
             let row = ProductUnitRow::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT p.id AS product_id, p.name AS product_name, p.sku, pu.display_name AS unit_display_name, pu.conversion_to_base, pu.minimum_price, NULL AS is_walk_in FROM products p JOIN product_units pu ON pu.product_id = p.id WHERE p.id = ? AND pu.id = ? AND p.deleted_at IS NULL AND pu.deleted_at IS NULL LIMIT 1",
+                "SELECT p.name AS product_name, p.sku, pu.display_name AS unit_display_name, pu.conversion_to_base, pu.minimum_price FROM products p JOIN product_units pu ON pu.product_id = p.id WHERE p.id = ? AND pu.id = ? AND p.deleted_at IS NULL AND pu.deleted_at IS NULL LIMIT 1",
                 [product_id.into(), product_unit_id.into()],
             ))
             .one(transaction)
@@ -434,7 +432,7 @@ impl SalesRepository {
                             Uuid::new_v4().into(),
                             customer_id.into(),
                             context.branch_id.into(),
-                            LEDGER_CREDIT_SALE.into(),
+                            LEDGER_SALE.into(),
                             invoice_id.into(),
                             credit_amount.into(),
                             balance_after.into(),
@@ -529,7 +527,7 @@ impl SalesRepository {
         let now = now_utc();
         let consumptions = ConsumptionRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, branch_id, product_id, product_lot_id, base_quantity, unit_cost FROM lot_consumptions WHERE reference_type = ? AND reference_id = ?",
+            "SELECT branch_id, product_id, product_lot_id, base_quantity, unit_cost FROM lot_consumptions WHERE reference_type = ? AND reference_id = ?",
             [REFERENCE_INVOICE.into(), invoice_id.to_string().into()],
         ))
         .all(transaction)
@@ -608,7 +606,7 @@ impl SalesRepository {
 
         let ledgers = LedgerRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, customer_id, debit, credit FROM customer_ledger_entries WHERE invoice_id = ?",
+            "SELECT customer_id, debit, credit FROM customer_ledger_entries WHERE invoice_id = ?",
             [invoice_id.into()],
         ))
         .all(transaction)
@@ -738,7 +736,12 @@ impl SalesRepository {
         ))
         .all(database)
         .await?;
-        Ok((rows.into_iter().map(map_hold).collect::<Result<Vec<_>, _>>()?, count))
+        Ok((
+            rows.into_iter()
+                .map(map_hold)
+                .collect::<Result<Vec<_>, _>>()?,
+            count,
+        ))
     }
 
     pub async fn find_hold(
@@ -900,7 +903,11 @@ async fn allocate_fifo(
         let movement_id = Uuid::new_v4();
         let line_cost = money_value(lot.unit_cost * take);
         fifo_cost += line_cost;
-        let displayed_qty = if first_movement { displayed } else { Decimal::ZERO };
+        let displayed_qty = if first_movement {
+            displayed
+        } else {
+            Decimal::ZERO
+        };
         first_movement = false;
         transaction
             .execute_raw(Statement::from_sql_and_values(
@@ -993,7 +1000,9 @@ fn invoice_conditions(
         values.push(payment_status.trim().to_uppercase().into());
     }
     if let Some(search) = &query.page.search {
-        parts.push("(lower(i.invoice_number) LIKE ? OR lower(i.cashier_name_snapshot) LIKE ?)".to_owned());
+        parts.push(
+            "(lower(i.invoice_number) LIKE ? OR lower(i.cashier_name_snapshot) LIKE ?)".to_owned(),
+        );
         let needle = format!("%{}%", search.to_lowercase());
         values.extend([needle.clone().into(), needle.into()]);
     }

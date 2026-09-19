@@ -1,3 +1,4 @@
+import { productsHref } from "@/shared/constants/products";
 import { routes } from "@/shared/constants/routes";
 
 export const DASHBOARD_RECENT_INVOICES = 8;
@@ -23,8 +24,8 @@ export const DASHBOARD_COPY = {
 export const DASHBOARD_KPI = {
   sales: { label: "Today’s sales", hint: "Completed bills", to: routes.sales },
   collected: { label: "Collected today", hint: "Cash and bank in", to: routes.transactions },
-  credit: { label: "Customer owes", hint: "Open khata", to: routes.credit },
-  low: { label: "Low stock", hint: "Below minimum", to: routes.productsLow },
+  credit: { label: "Customer owes", hint: "Open balance", to: routes.credit },
+  low: { label: "Low stock", hint: "Below minimum", to: productsHref("low") },
 } as const;
 
 export type DashboardDelta = {

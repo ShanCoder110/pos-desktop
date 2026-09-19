@@ -1,13 +1,22 @@
+import { QUERY_TAB } from "@/shared/constants/query";
 import { routes } from "@/shared/constants/routes";
 
+export const PRODUCT_TAB_ALL = "all";
+
 export const PRODUCT_SECTION_TABS = [
-  { id: "all", to: routes.products, label: "All products", end: true },
-  { id: "lots", to: routes.lots, label: "Lots" },
-  { id: "units", to: routes.units, label: "Units" },
-  { id: "categories", to: routes.productsCategories, label: "Categories" },
-  { id: "transfers", to: routes.transfers, label: "Transfers" },
-  { id: "low", to: routes.productsLow, label: "Reorder" },
+  { id: PRODUCT_TAB_ALL, label: "All products" },
+  { id: "lots", label: "Lots" },
+  { id: "units", label: "Units" },
+  { id: "categories", label: "Categories" },
+  { id: "transfers", label: "Transfers" },
+  { id: "low", label: "Reorder" },
 ] as const;
+
+export type ProductSectionTab = (typeof PRODUCT_SECTION_TABS)[number]["id"];
+
+export function productsHref(tab: ProductSectionTab = PRODUCT_TAB_ALL) {
+  return `${routes.products}?${QUERY_TAB}=${tab}`;
+}
 
 export const PRODUCT_INSIGHT_METRICS = [
   { id: "sales", label: "Sales revenue" },
@@ -36,7 +45,14 @@ export const PRODUCT_HEALTH_FROM_LABEL: Record<string, ProductHealth> = {
   Phantom: "phantom",
 };
 
-export const PRODUCT_FORM_SECTIONS = ["details", "units", "lots", "recipe", "warranty"] as const;
+export const PRODUCT_FORM_SECTIONS = [
+  "details",
+  "branches",
+  "units",
+  "lots",
+  "recipe",
+  "warranty",
+] as const;
 
 export type ProductFormSection = (typeof PRODUCT_FORM_SECTIONS)[number];
 
@@ -55,7 +71,42 @@ export const PRODUCT_TABLE_COLUMNS = [
   { id: "status", label: "Status" },
 ];
 
-export const DEFAULT_PRODUCT_COLUMNS = ["name", "category", "cost", "min", "wholesale", "retail", "margin", "sales", "profit", "stock", "status"];
+export const DEFAULT_PRODUCT_COLUMNS = [
+  "name",
+  "category",
+  "retail",
+  "margin",
+  "sales",
+  "profit",
+  "stock",
+  "status",
+];
+
+export const CATEGORY_COPY = {
+  added: "Category added",
+  saved: "Category saved",
+  deleted: "Category deleted",
+  deletedMany: "Categories deleted",
+  saveFailed: "Could not save category",
+  deleteFailed: "Could not delete category",
+  loadFailed: "Could not load categories",
+} as const;
+
+export const PRODUCT_COPY = {
+  added: "Product added",
+  saved: "Product saved",
+  deleted: "Product deleted",
+  saveFailed: "Could not save product",
+  deleteFailed: "Could not delete product",
+  loadFailed: "Could not load products",
+  categoryRequired: "Choose a category",
+  unitRequired: "Choose a unit",
+  sessionRequired: "Sign in again to save products",
+  branchesTitle: "Branch stock",
+  branchesHint: "Split opening quantity across branches. FIFO lots are created per branch.",
+  branchesTotal: "Total quantity",
+  branchesEmpty: "Leave zero if stock will be received later through lots.",
+};
 
 export const REORDER_PRODUCT_COLUMNS = [
   { id: "name", label: "Name", locked: true },

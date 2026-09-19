@@ -7,16 +7,17 @@ use uuid::Uuid;
 use crate::backend::{
     constants::{
         ERROR_CLAIM_NOT_FOUND, ERROR_CUSTOMER_NOT_FOUND, ERROR_INSUFFICIENT_STOCK,
-        ERROR_INVOICE_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND, ERROR_RETURN_NOT_FOUND, LEDGER_PAYMENT,
-        LOT_SOURCE_RETURN, PAYMENT_DIRECTION_IN, PAYMENT_STATUS_COMPLETED, REFERENCE_RETURN,
+        ERROR_INVOICE_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND, ERROR_RETURN_NOT_FOUND,
+        LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LOT_SOURCE_RETURN, PAYMENT_DIRECTION_IN,
+        PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED, REFERENCE_RETURN,
         STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN,
     },
     context::RequestContext,
     dto::{
         ClaimItemResponse, ClaimListQuery, ClaimResponse, ClaimStatusHistoryResponse,
         CreateClaimRequest, CreateReturnRequest, CustomerLedgerEntryResponse,
-        CustomerLedgerResponse, CustomerPaymentRequest, CustomerPaymentResponse, ReturnItemResponse,
-        ReturnListQuery, ReturnResponse,
+        CustomerLedgerListQuery, CustomerLedgerResponse, CustomerPaymentRequest,
+        CustomerPaymentResponse, ReturnItemResponse, ReturnListQuery, ReturnResponse,
     },
     errors::AppError,
     util::{money_value, now_utc, parse_optional_uuid, parse_uuid, quantity, trimmed},
@@ -50,17 +51,32 @@ struct LedgerRow {
 }
 
 #[derive(Debug, FromQueryResult)]
-struct InvoiceMeta {
+struct CustomerLedgerListRow {
     id: Uuid,
+    customer_id: Uuid,
+    customer_name: String,
+    branch_id: Uuid,
+    entry_type: String,
+    invoice_id: Option<Uuid>,
+    payment_id: Option<Uuid>,
+    return_id: Option<Uuid>,
+    debit: Decimal,
+    credit: Decimal,
+    balance_after: Decimal,
+    notes: Option<String>,
+    occurred_at: chrono::DateTime<chrono::Utc>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct InvoiceMeta {
     branch_id: Uuid,
     customer_id: Option<Uuid>,
 }
 
 #[derive(Debug, FromQueryResult)]
 struct InvoiceItemMeta {
-    id: Uuid,
     product_id: Uuid,
-    base_quantity: Decimal,
     conversion_to_base: Decimal,
     unit_name: String,
 }
@@ -174,6 +190,7 @@ impl CreditRepository {
                 .map(|row| CustomerLedgerEntryResponse {
                     id: row.id.to_string(),
                     customer_id: row.customer_id.to_string(),
+                    customer_name: None,
                     branch_id: row.branch_id.to_string(),
                     entry_type: row.entry_type,
                     invoice_id: row.invoice_id.map(|v| v.to_string()),
@@ -201,16 +218,48 @@ impl CreditRepository {
         let now = now_utc();
         let amount = money_value(request.amount);
         let method = request.payment_method.trim().to_uppercase();
-        if !matches!(method.as_str(), "CASH" | "CARD" | "BANK" | "MOBILE" | "OTHER") {
+        if !matches!(
+            method.as_str(),
+            "CASH" | "CARD" | "BANK" | "MOBILE" | "OTHER"
+        ) {
             return Err(AppError::Validation("Invalid paymentMethod.".into()));
         }
         let payment_id = Uuid::new_v4();
         let money_id = Uuid::new_v4();
+        let ledger_id = Uuid::new_v4();
         let client_request_id = request
             .client_request_id
             .clone()
             .filter(|v| !v.trim().is_empty())
             .unwrap_or_else(|| format!("cust-pay-{payment_id}"));
+        let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
+            [customer_id.into()],
+        ))
+        .one(transaction)
+        .await?
+        .map(|row| row.balance_after)
+        .unwrap_or(Decimal::ZERO);
+        // Positive balance = customer owes (collect). Negative = advance (refund).
+        let collecting = previous >= Decimal::ZERO;
+        let (direction, entry_type, debit, credit, balance_after) = if collecting {
+            (
+                PAYMENT_DIRECTION_IN,
+                LEDGER_PAYMENT_RECEIVED,
+                Decimal::ZERO,
+                amount,
+                previous - amount,
+            )
+        } else {
+            (
+                PAYMENT_DIRECTION_OUT,
+                LEDGER_PAYMENT_MADE,
+                amount,
+                Decimal::ZERO,
+                previous + amount,
+            )
+        };
 
         transaction
             .execute_raw(Statement::from_sql_and_values(
@@ -224,7 +273,7 @@ impl CreditRepository {
                     amount.into(),
                     method.clone().into(),
                     trimmed(&request.reference_number).into(),
-                    PAYMENT_DIRECTION_IN.into(),
+                    direction.into(),
                     PAYMENT_STATUS_COMPLETED.into(),
                     context.user_id.into(),
                     now.into(),
@@ -242,7 +291,7 @@ impl CreditRepository {
                     money_id.into(),
                     context.branch_id.into(),
                     cash_session_id.into(),
-                    PAYMENT_DIRECTION_IN.into(),
+                    direction.into(),
                     amount.into(),
                     method.clone().into(),
                     payment_id.into(),
@@ -254,29 +303,28 @@ impl CreditRepository {
                 ],
             ))
             .await?;
-        let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-            [customer_id.into()],
-        ))
-        .one(transaction)
-        .await?
-        .map(|row| row.balance_after)
-        .unwrap_or(Decimal::ZERO);
-        let balance_after = previous - amount;
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "INSERT INTO customer_ledger_entries (id, customer_id, branch_id, type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, NULL, ?, NULL, 0, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO customer_ledger_entries (id, customer_id, branch_id, type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
                 [
-                    Uuid::new_v4().into(),
+                    ledger_id.into(),
                     customer_id.into(),
                     context.branch_id.into(),
-                    LEDGER_PAYMENT.into(),
+                    entry_type.into(),
                     payment_id.into(),
-                    amount.into(),
+                    debit.into(),
+                    credit.into(),
                     balance_after.into(),
-                    trimmed(&request.notes).unwrap_or_else(|| "Customer payment".into()).into(),
+                    trimmed(&request.notes)
+                        .unwrap_or_else(|| {
+                            if collecting {
+                                "Customer payment".into()
+                            } else {
+                                "Customer refund".into()
+                            }
+                        })
+                        .into(),
                     now.into(),
                     context.user_id.into(),
                     now.into(),
@@ -292,6 +340,125 @@ impl CreditRepository {
             balance_after: decimal(balance_after),
             occurred_at: now.to_rfc3339(),
         })
+    }
+
+    pub async fn list_customer_ledgers(
+        database: &DatabaseConnection,
+        query: &CustomerLedgerListQuery,
+    ) -> Result<(Vec<CustomerLedgerEntryResponse>, u64), AppError> {
+        let page = query.page.clone().normalized();
+        let mut parts = vec!["1 = 1".to_owned()];
+        let mut values = Vec::new();
+        if let Some(search) = &page.search {
+            let pattern = format!("%{}%", search.to_lowercase());
+            parts.push("(lower(c.name) LIKE ? OR lower(cle.type) LIKE ? OR lower(COALESCE(cle.notes, '')) LIKE ?)".to_owned());
+            values.push(pattern.clone().into());
+            values.push(pattern.clone().into());
+            values.push(pattern.into());
+        }
+        if let Some(customer) = query
+            .customer
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push("lower(c.name) LIKE ?".to_owned());
+            values.push(format!("%{}%", customer.to_lowercase()).into());
+        }
+        if let Some(entry_type) = query
+            .entry_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push("cle.type = ?".to_owned());
+            values.push(entry_type.to_uppercase().into());
+        }
+        if let Some(notes) = page.notes.as_deref() {
+            parts.push("lower(COALESCE(cle.notes, '')) LIKE ?".to_owned());
+            values.push(format!("%{}%", notes.to_lowercase()).into());
+        }
+        if let Some(balance) = page.balance.as_deref() {
+            match balance.to_ascii_lowercase().as_str() {
+                "payable" | "owes" => parts.push("cle.balance_after > 0".to_owned()),
+                "advance" => parts.push("cle.balance_after < 0".to_owned()),
+                "settled" => parts.push("cle.balance_after = 0".to_owned()),
+                _ => {}
+            }
+        }
+        if let Some(debit) = query.debit {
+            parts.push("cle.debit >= ?".to_owned());
+            values.push(debit.into());
+        }
+        if let Some(credit) = query.credit {
+            parts.push("cle.credit >= ?".to_owned());
+            values.push(credit.into());
+        }
+        if let Some(from) = query
+            .occurred_from
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push("date(cle.occurred_at) >= date(?)".to_owned());
+            values.push(from.into());
+        }
+        if let Some(to) = query
+            .occurred_to
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push("date(cle.occurred_at) <= date(?)".to_owned());
+            values.push(to.into());
+        }
+        let where_sql = parts.join(" AND ");
+        let count_sql = format!(
+            "SELECT COUNT(*) AS count FROM customer_ledger_entries cle INNER JOIN customers c ON c.id = cle.customer_id WHERE {where_sql}"
+        );
+        let total = CountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            count_sql,
+            values.clone(),
+        ))
+        .one(database)
+        .await?
+        .map(|row| row.count.max(0) as u64)
+        .unwrap_or(0);
+        let sql = format!(
+            "SELECT cle.id, cle.customer_id, c.name AS customer_name, cle.branch_id, cle.type AS entry_type, cle.invoice_id, cle.payment_id, cle.return_id, CAST(cle.debit AS REAL) AS debit, CAST(cle.credit AS REAL) AS credit, CAST(cle.balance_after AS REAL) AS balance_after, cle.notes, cle.occurred_at, cle.created_at FROM customer_ledger_entries cle INNER JOIN customers c ON c.id = cle.customer_id WHERE {where_sql} ORDER BY cle.created_at DESC, cle.id DESC LIMIT ? OFFSET ?"
+        );
+        let mut page_values = values;
+        page_values.push((page.per_page as i64).into());
+        page_values.push((page.offset() as i64).into());
+        let rows = CustomerLedgerListRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            sql,
+            page_values,
+        ))
+        .all(database)
+        .await?;
+        Ok((
+            rows.into_iter()
+                .map(|row| CustomerLedgerEntryResponse {
+                    id: row.id.to_string(),
+                    customer_id: row.customer_id.to_string(),
+                    customer_name: Some(row.customer_name),
+                    branch_id: row.branch_id.to_string(),
+                    entry_type: row.entry_type,
+                    invoice_id: row.invoice_id.map(|value| value.to_string()),
+                    payment_id: row.payment_id.map(|value| value.to_string()),
+                    return_id: row.return_id.map(|value| value.to_string()),
+                    debit: decimal(row.debit),
+                    credit: decimal(row.credit),
+                    balance_after: decimal(row.balance_after),
+                    notes: row.notes,
+                    occurred_at: row.occurred_at.to_rfc3339(),
+                    created_at: row.created_at.to_rfc3339(),
+                })
+                .collect(),
+            total,
+        ))
     }
 
     pub async fn list_returns(
@@ -353,7 +520,7 @@ impl CreditRepository {
         let invoice_id = parse_uuid(&request.invoice_id, "invoiceId")?;
         let invoice = InvoiceMeta::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, branch_id, customer_id FROM invoices WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+            "SELECT branch_id, customer_id FROM invoices WHERE id = ? AND deleted_at IS NULL LIMIT 1",
             [invoice_id.into()],
         ))
         .one(transaction)
@@ -388,7 +555,7 @@ impl CreditRepository {
             let invoice_item_id = parse_uuid(&item.invoice_item_id, "items.invoiceItemId")?;
             let meta = InvoiceItemMeta::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT id, product_id, base_quantity, conversion_to_base, unit_name FROM invoice_items WHERE id = ? AND invoice_id = ? LIMIT 1",
+                "SELECT product_id, conversion_to_base, unit_name FROM invoice_items WHERE id = ? AND invoice_id = ? LIMIT 1",
                 [invoice_item_id.into(), invoice_id.into()],
             ))
             .one(transaction)
@@ -404,8 +571,10 @@ impl CreditRepository {
             } else {
                 "NO_RESTOCK"
             };
-            let original_lot =
-                parse_optional_uuid(item.original_product_lot_id.as_deref(), "originalProductLotId")?;
+            let original_lot = parse_optional_uuid(
+                item.original_product_lot_id.as_deref(),
+                "originalProductLotId",
+            )?;
             let mut movement_id: Option<Uuid> = None;
 
             if restock == "RESTOCK" {
@@ -587,7 +756,11 @@ impl CreditRepository {
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
                 "UPDATE sale_returns SET refund_amount = ?, completed_at = ? WHERE id = ?",
-                [money_value(refund_total).into(), now.into(), return_id.into()],
+                [
+                    money_value(refund_total).into(),
+                    now.into(),
+                    return_id.into(),
+                ],
             ))
             .await?;
 

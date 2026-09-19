@@ -1,7 +1,13 @@
 import { cn } from "@/utils/format";
 
-export function Skeleton({ className, style }: { className?: string; style?: React.CSSProperties }) {
-  return <div className={cn("ui-skeleton", className)} style={style} />;
+export function Skeleton({
+  className,
+  style,
+}: {
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  return <div aria-hidden="true" className={cn("ui-skeleton", className)} style={style} />;
 }
 
 export function TableRowsSkeleton({

@@ -1,4 +1,49 @@
-export type UserRole = "OWNER" | "MANAGER" | "CASHIER" | "TECHNICIAN";
+export type UserRole = "OWNER" | "MANAGER" | "CASHIER" | "TECHNICIAN" | "PARTNER";
+
+/** Software access role — what the person can do in the POS app. */
+export type UserAccessRole = "OWNER" | "MANAGER" | "CASHIER";
+
+/** Business role — what the person does day-to-day for the shop. */
+export type EmployeeRole =
+  "CASHIER" | "SALESMAN" | "TECHNICIAN" | "REPAIR_WORKER" | "ACCOUNTANT" | "HELPER" | "OTHER";
+
+export interface Employee {
+  id: string;
+  name: string;
+  phone: string;
+  role: EmployeeRole;
+  branchId: string;
+  joiningDate: string;
+  salaryWage: number | null;
+  isActive: boolean;
+  notes: string;
+  totalPaid: number;
+}
+
+export interface PosUser {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  username: string;
+  role: UserAccessRole;
+  branchIds: string[];
+  linkedEmployeeId: string | null;
+  isActive: boolean;
+  hasPassword: boolean;
+  permissions: Record<string, boolean>;
+}
+
+export interface EmployeeLedgerEntry {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  entryType: "SALARY" | "COMMISSION";
+  debit: number;
+  balanceAfter: number;
+  occurredAt: string;
+  notes: string;
+}
 export type BranchType = "STORE" | "WAREHOUSE" | "REPAIR" | "PRODUCTION";
 export type PaymentStatus = "PAID" | "PARTIAL" | "CREDIT";
 export type InvoiceState = "COMPLETED" | "CANCELLED";
@@ -25,21 +70,19 @@ export type StockMoveType =
 
 export type LedgerType = "CREDIT_SALE" | "PAYMENT" | "REFUND" | "ADVANCE" | "ADJUSTMENT";
 
-export type TxnType =
-  | "SALE_PAYMENT"
-  | "CUSTOMER_PAYMENT"
-  | "REFUND"
-  | "EXPENSE"
-  | "COMMISSION";
+export type TxnType = "SALE_PAYMENT" | "CUSTOMER_PAYMENT" | "REFUND" | "EXPENSE" | "COMMISSION";
 
 export interface StaffUser {
   id: string;
   name: string;
   username: string;
+  email: string;
   role: UserRole;
   branchId: string;
   phone: string;
+  totalPaid: number;
   isActive: boolean;
+  permissions?: Record<string, boolean>;
 }
 
 export interface UserPermission {
@@ -160,7 +203,12 @@ export interface SupplierRow {
   email: string;
   address: string;
   notes: string;
+  currentBalance: number;
+  previousBalance?: string;
+  openingSide?: "we-owe" | "they-owe";
   isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface InvoiceRow {
@@ -225,9 +273,11 @@ export interface DomainCustomer {
   phone: string;
   address: string;
   currentBalance: number;
-  creditLimit: number | null;
   notes: string;
   isActive: boolean;
+  isWalkIn?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface LedgerRow {

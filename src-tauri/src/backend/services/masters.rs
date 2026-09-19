@@ -3,10 +3,12 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::backend::{
-    constants::{ERROR_NEGATIVE_CREDIT_LIMIT, ERROR_UNIT_SYMBOL_REQUIRED},
+    constants::ERROR_UNIT_SYMBOL_REQUIRED,
+    context::RequestContext,
     dto::{MasterRequest, MasterResponse, PageQuery, Paginated, PaginationMeta},
     errors::AppError,
     repositories::{MasterKind, MasterRepository},
+    util::optional_pk_mobile,
 };
 
 pub struct MasterService;
@@ -40,10 +42,15 @@ impl MasterService {
         database: &DatabaseConnection,
         kind: MasterKind,
         request: MasterRequest,
+        context: Option<&RequestContext>,
     ) -> Result<MasterResponse, AppError> {
         request.validate()?;
+        let mut request = request;
+        if matches!(kind, MasterKind::Supplier | MasterKind::Customer) {
+            request.phone = optional_pk_mobile(request.phone.as_deref())?;
+        }
         Self::validate_kind(kind, &request)?;
-        MasterRepository::create(database, kind, &request).await
+        MasterRepository::create(database, kind, &request, context).await
     }
 
     pub async fn update(
@@ -54,6 +61,10 @@ impl MasterService {
         not_found: &'static str,
     ) -> Result<MasterResponse, AppError> {
         request.validate()?;
+        let mut request = request;
+        if matches!(kind, MasterKind::Supplier | MasterKind::Customer) {
+            request.phone = optional_pk_mobile(request.phone.as_deref())?;
+        }
         Self::validate_kind(kind, &request)?;
         MasterRepository::update(database, kind, id, &request)
             .await?
@@ -65,8 +76,10 @@ impl MasterService {
         kind: MasterKind,
         id: Uuid,
         not_found: &'static str,
+        context: Option<&RequestContext>,
     ) -> Result<(), AppError> {
-        if MasterRepository::soft_delete(database, kind, id).await? {
+        if MasterRepository::soft_delete(database, kind, id, context.map(|ctx| ctx.user_id)).await?
+        {
             Ok(())
         } else {
             Err(AppError::NotFound(not_found))
@@ -83,11 +96,6 @@ impl MasterService {
                 .is_empty()
         {
             return Err(AppError::Validation(ERROR_UNIT_SYMBOL_REQUIRED.into()));
-        }
-        if let Some(credit_limit) = request.credit_limit {
-            if credit_limit.is_sign_negative() {
-                return Err(AppError::Validation(ERROR_NEGATIVE_CREDIT_LIMIT.into()));
-            }
         }
         Ok(())
     }

@@ -53,8 +53,7 @@ impl FinanceService {
         request.amount = money_value(request.amount);
         request.validate()?;
         let transaction = database.begin().await?;
-        let response =
-            FinanceRepository::create_expense(&transaction, context, &request).await?;
+        let response = FinanceRepository::create_expense(&transaction, context, &request).await?;
         transaction.commit().await?;
         Ok(response)
     }
@@ -80,9 +79,10 @@ impl FinanceService {
 
     pub async fn analytics(
         database: &DatabaseConnection,
+        context: &RequestContext,
         query: AnalyticsQuery,
     ) -> Result<AnalyticsReportResponse, AppError> {
-        FinanceRepository::analytics(database, &query).await
+        FinanceRepository::analytics(database, context.branch_id, &query).await
     }
 
     pub async fn get_localization(

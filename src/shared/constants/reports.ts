@@ -1,6 +1,13 @@
 import type { DateRangeFilter } from "@/components/common/DateRangePeriodPicker";
 import type { DashboardDelta } from "@/shared/constants/dashboard";
 
+export const REPORT_TABS = [
+  { id: "sales", label: "Sales" },
+  { id: "expenses", label: "Expenses" },
+  { id: "stock", label: "Stock" },
+  { id: "balance", label: "Balance" },
+] as const;
+
 export const REPORT_COPY = {
   title: "Reports",
   hint: "Filter any period, then export a PDF of billed sales, collections, expenses, and stock.",

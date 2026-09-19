@@ -15,11 +15,13 @@ import {
   Badge,
   Button,
   EmptyRow,
+  EmptyState,
   HubChart,
   KpiCard,
   PageHead,
   Skeleton,
   Table,
+  TableRowsSkeleton,
   Td,
   THead,
   Th,
@@ -33,6 +35,7 @@ import {
   compareToPrevious,
   isSameCalendarDay,
 } from "@/shared/constants/dashboard";
+import { productsHref } from "@/shared/constants/products";
 import { routes } from "@/shared/constants/routes";
 import type { ExpenseRow, InvoiceRow, PaymentStatus, ReturnRow } from "@/shared/domain/types";
 import { money } from "@/utils/format";
@@ -42,6 +45,7 @@ import { listAllExpenses, reportsAnalytics, reportsDashboard } from "@/services/
 import { listAllRepairs, type RepairResponse } from "@/services/repairs";
 import { listAllInvoices } from "@/services/sales";
 import { listAllTransfers } from "@/services/transfers";
+import { createLoadGuard } from "@/utils/async";
 
 function payTone(status: PaymentStatus) {
   if (status === "PAID") return "ok" as const;
@@ -75,7 +79,7 @@ function deltaClass(direction: "up" | "down" | "flat" | "new", invert?: boolean)
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState({ page: true });
   const [todaySales, setTodaySales] = useState(0);
   const [creditOpen, setCreditOpen] = useState(0);
   const [low, setLow] = useState(0);
@@ -87,49 +91,65 @@ export function DashboardPage() {
   const [transfers, setTransfers] = useState<{ status: string; createdAt: string }[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [chart, setChart] = useState<{ label: string; value: number }[]>([]);
-  const [topProducts, setTopProducts] = useState<{ productId: string; productName: string; quantity: number; revenue: number }[]>([]);
+  const [topProducts, setTopProducts] = useState<
+    { productId: string; productName: string; quantity: number; revenue: number }[]
+  >([]);
 
   useEffect(() => {
     const controller = new AbortController();
+    const guard = createLoadGuard();
     void (async () => {
-      await ensureSession(controller.signal);
-      const [dash, analytics, transferRows, invoiceRows, returnRows, expenseRows, repairRows] = await Promise.all([
-        reportsDashboard(controller.signal).catch(() => null),
-        reportsAnalytics({}, controller.signal).catch(() => null),
-        listAllTransfers(controller.signal).catch(() => []),
-        listAllInvoices(controller.signal).catch(() => [] as InvoiceRow[]),
-        listAllReturns(controller.signal).catch(() => [] as ReturnRow[]),
-        listAllExpenses(controller.signal).catch(() => [] as ExpenseRow[]),
-        listAllRepairs(controller.signal).catch(() => [] as RepairResponse[]),
-      ]);
-      if (dash) {
-        setTodaySales(dash.todaySalesTotal);
-        setCreditOpen(dash.creditOutstanding);
-        setLow(dash.lowStockCount);
-        setOpenRepairs(dash.openRepairs);
+      try {
+        const session = await ensureSession();
+        const [dash, analytics, transferRows, invoiceRows, returnRows, expenseRows, repairRows] =
+          await Promise.all([
+            reportsDashboard(controller.signal).catch(() => null),
+            reportsAnalytics({}, controller.signal).catch(() => null),
+            listAllTransfers(controller.signal).catch(() => []),
+            listAllInvoices(controller.signal, session?.branchId).catch(() => [] as InvoiceRow[]),
+            listAllReturns(controller.signal).catch(() => [] as ReturnRow[]),
+            listAllExpenses(controller.signal).catch(() => [] as ExpenseRow[]),
+            listAllRepairs(controller.signal).catch(() => [] as RepairResponse[]),
+          ]);
+        if (!guard.isActive()) return;
+        if (dash) {
+          setTodaySales(dash.todaySalesTotal);
+          setCreditOpen(dash.creditOutstanding);
+          setLow(dash.lowStockCount);
+          setOpenRepairs(dash.openRepairs);
+        }
+        setTransfers(transferRows);
+        setPendingTransfers(transferRows.filter((t) => t.status === "PENDING").length);
+        setInvoices(invoiceRows);
+        setReturns(returnRows);
+        setExpenses(expenseRows);
+        setRepairs(repairRows);
+        setChart(
+          analytics?.salesByDay?.length
+            ? analytics.salesByDay.map((day) => ({ label: day.day, value: day.total }))
+            : [],
+        );
+        setTopProducts(analytics?.topProducts ?? []);
+      } finally {
+        if (guard.isActive()) {
+          setLoading((current) => ({ ...current, page: false }));
+        }
       }
-      setTransfers(transferRows);
-      setPendingTransfers(transferRows.filter((t) => t.status === "PENDING").length);
-      setInvoices(invoiceRows);
-      setReturns(returnRows);
-      setExpenses(expenseRows);
-      setRepairs(repairRows);
-      setChart(
-        analytics?.salesByDay?.length
-          ? analytics.salesByDay.map((day) => ({ label: day.day, value: day.total }))
-          : [],
-      );
-      setTopProducts(analytics?.topProducts ?? []);
-      setLoading(false);
     })();
-    return () => controller.abort();
+    return () => {
+      guard.dispose();
+      controller.abort();
+    };
   }, []);
 
   const today = useMemo(() => new Date(), []);
   const yesterday = useMemo(() => addDays(today, -1), [today]);
 
   const todayInvoices = useMemo(
-    () => invoices.filter((row) => row.status === "COMPLETED" && isSameCalendarDay(row.createdAt, today)),
+    () =>
+      invoices.filter(
+        (row) => row.status === "COMPLETED" && isSameCalendarDay(row.createdAt, today),
+      ),
     [invoices, today],
   );
   const salesToday = todaySales || sumDay(invoices, today, (row) => row.total);
@@ -168,7 +188,7 @@ export function DashboardPage() {
       value: low,
       hint: "Reorder SKUs",
       icon: PackageMinus,
-      to: routes.productsLow,
+      to: productsHref("low"),
       severity: (low ? "danger" : "ok") as "ok" | "warn" | "danger",
       delta: null,
     },
@@ -186,7 +206,7 @@ export function DashboardPage() {
       value: pendingTransfers,
       hint: "Waiting receive",
       icon: ArrowLeftRight,
-      to: routes.transfers,
+      to: productsHref("transfers"),
       severity: (pendingTransfers ? "warn" : "ok") as "ok" | "warn" | "danger",
       delta: compareToPrevious(transfersToday, transfersYesterday),
     },
@@ -202,7 +222,7 @@ export function DashboardPage() {
   ];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
+    <div className="dashboard-page flex min-h-0 flex-1 flex-col gap-4 overflow-auto">
       <PageHead title={DASHBOARD_COPY.title}>
         <p className="mr-auto text-[12px] font-medium text-muted">{weekdayLabel()}</p>
         <Button onClick={() => navigate(routes.reports)}>{DASHBOARD_COPY.reports}</Button>
@@ -211,8 +231,8 @@ export function DashboardPage() {
         </Button>
       </PageHead>
 
-      <div className="grid shrink-0 grid-cols-4 gap-2.5">
-        {loading ? (
+      <div className="ui-kpi-row grid shrink-0 grid-cols-4 gap-2.5">
+        {loading.page ? (
           Array.from({ length: 4 }, (_, i) => (
             <Skeleton key={i} className="h-[92px] rounded-[10px]" />
           ))
@@ -222,7 +242,7 @@ export function DashboardPage() {
               label={DASHBOARD_KPI.sales.label}
               value={money(salesToday)}
               hint={DASHBOARD_KPI.sales.hint}
-              tone="ok"
+              tone="info"
               icon={<Receipt size={16} />}
               delta={salesDelta}
               onClick={() => navigate(DASHBOARD_KPI.sales.to)}
@@ -240,7 +260,7 @@ export function DashboardPage() {
               label={DASHBOARD_KPI.credit.label}
               value={money(creditOpen)}
               hint={DASHBOARD_KPI.credit.hint}
-              tone={creditOpen > 0 ? "warn" : "ok"}
+              tone="warn"
               icon={<Wallet size={16} />}
               delta={creditDelta}
               invertDelta
@@ -250,7 +270,7 @@ export function DashboardPage() {
               label={DASHBOARD_KPI.low.label}
               value={low}
               hint={DASHBOARD_KPI.low.hint}
-              tone={low ? "danger" : "ok"}
+              tone="danger"
               icon={<PackageMinus size={16} />}
               onClick={() => navigate(DASHBOARD_KPI.low.to)}
             />
@@ -258,26 +278,43 @@ export function DashboardPage() {
         )}
       </div>
 
-      <div className="grid shrink-0 grid-cols-4 gap-2.5">
+      <div className="dashboard-mini-grid grid shrink-0 grid-cols-4 gap-2.5">
         {[
-          { label: "Bills today", value: String(todayInvoices.length), hint: "Completed" },
-          { label: "This period", value: money(weekTotal), hint: "Sales by day" },
-          { label: "Expenses today", value: money(expenseToday), hint: "Money out" },
-          { label: "Open jobs", value: String(openRepairs), hint: "Repairs" },
+          {
+            label: "Bills today",
+            value: String(todayInvoices.length),
+            hint: "Completed",
+            tone: "blue",
+          },
+          { label: "This period", value: money(weekTotal), hint: "Sales by day", tone: "violet" },
+          {
+            label: "Expenses today",
+            value: money(expenseToday),
+            hint: "Money out",
+            tone: "orange",
+          },
+          { label: "Open jobs", value: String(openRepairs), hint: "Repairs", tone: "rose" },
         ].map((stat) => (
-          <div key={stat.label} className="flex items-center justify-between rounded-[10px] border border-line bg-paper px-3.5 py-2.5">
+          <div
+            key={stat.label}
+            className={`dashboard-mini is-${stat.tone} flex items-center justify-between rounded-[10px] border border-line bg-paper px-3.5 py-2.5`}
+          >
             <div>
               <p className="text-[11px] font-semibold text-muted">{stat.label}</p>
-              <p className="mt-0.5 text-[13px] font-bold tabular-nums text-ink">{loading ? "—" : stat.value}</p>
+              <p className="mt-0.5 text-[13px] font-bold tabular-nums text-ink">
+                {loading.page ? "—" : stat.value}
+              </p>
             </div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">{stat.hint}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+              {stat.hint}
+            </p>
           </div>
         ))}
       </div>
 
       <div className="grid min-h-[280px] shrink-0 grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)] gap-2.5">
-        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-paper">
-          {loading ? (
+        <section className="dashboard-panel is-chart flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-paper">
+          {loading.page ? (
             <div className="grid flex-1 place-items-center p-6">
               <Skeleton className="h-40 w-full rounded-lg" />
             </div>
@@ -291,11 +328,11 @@ export function DashboardPage() {
               maxItems={null}
             />
           ) : (
-            <div className="grid flex-1 place-items-center p-6 text-[12px] text-muted">{DASHBOARD_COPY.emptySales}</div>
+            <EmptyState title={DASHBOARD_COPY.emptySales} />
           )}
         </section>
 
-        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-paper">
+        <section className="dashboard-panel is-action flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-paper">
           <div className="flex shrink-0 items-center justify-between gap-3 px-3.5 py-3">
             <h2 className="text-[13px] font-bold text-ink">{DASHBOARD_COPY.needsAction}</h2>
             <AlertTriangle size={14} className="text-gold" />
@@ -310,19 +347,27 @@ export function DashboardPage() {
                   className="flex w-full items-center gap-2.5 rounded-lg border-0 bg-transparent px-2.5 py-2.5 text-left text-ink hover:bg-bg"
                   onClick={() => navigate(item.to)}
                 >
-                  <span className={`attn-ico grid size-[30px] shrink-0 place-items-center rounded-lg is-${item.severity}`}>
+                  <span
+                    className={`attn-ico grid size-[30px] shrink-0 place-items-center rounded-lg is-${item.severity}`}
+                  >
                     <Icon size={14} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-[13px] font-semibold">{item.label}</span>
                     <span className="mt-px block text-[11px] text-muted">{item.hint}</span>
                     {item.delta ? (
-                      <span className={`attn-delta mt-0.5 block text-[10px] font-bold ${deltaClass(item.delta.direction, true)}`}>
+                      <span
+                        className={`attn-delta mt-0.5 block text-[10px] font-bold ${deltaClass(item.delta.direction, true)}`}
+                      >
                         {item.delta.text}
                       </span>
                     ) : null}
                   </span>
-                  <Badge tone={item.value === 0 ? "ok" : item.severity === "danger" ? "danger" : "warn"}>{item.value}</Badge>
+                  <Badge
+                    tone={item.value === 0 ? "ok" : item.severity === "danger" ? "danger" : "warn"}
+                  >
+                    {item.value}
+                  </Badge>
                   <ChevronRight size={14} className="text-muted" />
                 </button>
               );
@@ -332,7 +377,7 @@ export function DashboardPage() {
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.35fr)_minmax(260px,0.85fr)] gap-2.5 pb-1">
-        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-paper">
+        <section className="dashboard-panel is-bills flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-paper">
           <div className="flex shrink-0 items-center justify-between px-3.5 py-3">
             <h2 className="text-[13px] font-bold text-ink">{DASHBOARD_COPY.recentBills}</h2>
             <Button size="sm" onClick={() => navigate(routes.sales)}>
@@ -349,16 +394,27 @@ export function DashboardPage() {
               </tr>
             </THead>
             <tbody>
-              {loading ? (
-                <EmptyRow cols={4} text="Loading…" />
+              {loading.page ? (
+                <TableRowsSkeleton columnCount={4} rows={5} />
               ) : recentBills.length === 0 ? (
                 <EmptyRow cols={4} text={DASHBOARD_COPY.emptyBills} />
               ) : (
                 recentBills.map((row) => (
-                  <tr key={row.id} className="cursor-pointer" onClick={() => navigate(routes.sales)}>
+                  <tr
+                    key={row.id}
+                    className="cursor-pointer"
+                    onClick={() => navigate(routes.sales)}
+                  >
                     <Td>
                       {row.invoiceNumber}
-                      <span className="sub">{new Date(row.createdAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                      <span className="sub">
+                        {new Date(row.createdAt).toLocaleString("en-GB", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
                     </Td>
                     <Td>
                       <Badge tone={payTone(row.paymentStatus)}>{row.paymentStatus}</Badge>
@@ -372,8 +428,8 @@ export function DashboardPage() {
           </Table>
         </section>
 
-        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-paper">
-          {loading ? (
+        <section className="dashboard-panel is-products flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-paper">
+          {loading.page ? (
             <div className="p-4">
               <Skeleton className="h-48 rounded-lg" />
             </div>
@@ -396,7 +452,7 @@ export function DashboardPage() {
               onPointClick={() => navigate(routes.salesProducts)}
             />
           ) : (
-            <div className="grid flex-1 place-items-center p-6 text-[12px] text-muted">{DASHBOARD_COPY.emptyProducts}</div>
+            <EmptyState title={DASHBOARD_COPY.emptyProducts} />
           )}
         </section>
       </div>

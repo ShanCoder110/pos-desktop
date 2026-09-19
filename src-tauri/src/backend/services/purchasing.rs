@@ -4,14 +4,14 @@ use validator::Validate;
 
 use crate::backend::{
     constants::{
-        DEFAULT_PO_PREFIX, DEFAULT_RECEIPT_PREFIX, ERROR_PO_NOT_FOUND, SEQUENCE_KIND_PURCHASE_ORDER,
-        SEQUENCE_KIND_RECEIPT,
+        DEFAULT_PO_PREFIX, DEFAULT_RECEIPT_PREFIX, ERROR_PO_NOT_FOUND,
+        SEQUENCE_KIND_PURCHASE_ORDER, SEQUENCE_KIND_RECEIPT,
     },
     context::RequestContext,
     dto::{
         CreatePurchaseOrderRequest, Paginated, PaginationMeta, PurchaseOrderListQuery,
         PurchaseOrderResponse, ReceivePurchaseOrderRequest, SupplierLedgerEntryResponse,
-        SupplierPaymentRequest, SupplierPaymentResponse,
+        SupplierLedgerListQuery, SupplierPaymentRequest, SupplierPaymentResponse,
     },
     errors::AppError,
     repositories::{PurchasingRepository, SequenceRepository},
@@ -61,9 +61,8 @@ impl PurchasingService {
             DEFAULT_PO_PREFIX,
         )
         .await?;
-        let id =
-            PurchasingRepository::create_draft(&transaction, context, &request, order_number)
-                .await?;
+        let id = PurchasingRepository::create_draft(&transaction, context, &request, order_number)
+            .await?;
         transaction.commit().await?;
         Self::get(database, id).await
     }
@@ -92,10 +91,21 @@ impl PurchasingService {
         let receipt_number =
             SequenceRepository::next(&transaction, SEQUENCE_KIND_RECEIPT, DEFAULT_RECEIPT_PREFIX)
                 .await?;
-        PurchasingRepository::receive(&transaction, context, id, &request, receipt_number)
-            .await?;
+        PurchasingRepository::receive(&transaction, context, id, &request, receipt_number).await?;
         transaction.commit().await?;
         Self::get(database, id).await
+    }
+
+    pub async fn list_supplier_ledgers(
+        database: &DatabaseConnection,
+        mut query: SupplierLedgerListQuery,
+    ) -> Result<Paginated<SupplierLedgerEntryResponse>, AppError> {
+        query.page = query.page.normalized();
+        let (data, total) = PurchasingRepository::list_supplier_ledgers(database, &query).await?;
+        Ok(Paginated {
+            data,
+            meta: PaginationMeta::new(total, query.page.page, query.page.per_page),
+        })
     }
 
     pub async fn supplier_ledger(

@@ -1,5 +1,5 @@
--- Seed one local shop: main branch, owner, device, walk-in customer, settings, sequences.
--- Password for username `owner` is `owner123` (argon2id).
+-- Seed one local shop: main branch, device, walk-in customer, settings, sequences.
+-- Owner account is created during first-run onboarding (auth/setup), not here.
 -- IDs are binary UUIDs to match SeaORM's SQLite UUID storage.
 
 INSERT OR IGNORE INTO branches
@@ -7,13 +7,6 @@ INSERT OR IGNORE INTO branches
 VALUES
   (X'20000000000040008000000000000001', 'Main Store', 'MAIN', 'STORE', NULL, NULL, 1, 1, 1,
    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
-
-INSERT OR IGNORE INTO users
-  (id, business_id, default_branch_id, name, username, password_hash, phone, email, role, is_active, created_at, updated_at)
-VALUES
-  (X'20000000000040008000000000000002', NULL, X'20000000000040008000000000000001', 'Owner', 'owner',
-   '$argon2id$v=19$m=19456,t=2,p=1$fcch3SOz+gS8m1McDX6JvQ$yY6pAdPLx9DqOsoO+JFwg0AOPCfXOXarQIvo9PVuUL0',
-   NULL, NULL, 'OWNER', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 INSERT OR IGNORE INTO devices
   (id, branch_id, name, device_key_hash, is_active, created_at, updated_at)

@@ -19,9 +19,11 @@ use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 use sea_orm_migration::MigratorTrait;
 
 use tauri_app_lib::backend::{
+    config::Config,
     constants::DATABASE_FILE_NAME,
     db::{apply_runtime_pragmas, connect_path},
     migration::Migrator,
+    security::hash_password,
 };
 
 #[tokio::main]
@@ -56,18 +58,26 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        "seed" => match seed(&db_path).await {
-            Ok(()) => {
-                println!("Seed ensured on {}", db_path.display());
-                println!("Login: owner / owner123");
-                println!("Device id: 20000000-0000-4000-8000-000000000003");
-                ExitCode::SUCCESS
+        "seed" => {
+            if let Err(error) = Config::load() {
+                eprintln!("config error: {error}");
+                return ExitCode::FAILURE;
             }
-            Err(error) => {
-                eprintln!("seed failed: {error}");
-                ExitCode::FAILURE
+            match seed(&db_path).await {
+                Ok(()) => {
+                    println!("Seed ensured on {}", db_path.display());
+                    println!(
+                        "Complete first-run onboarding in the app to create the owner account."
+                    );
+                    println!("Device id: 20000000-0000-4000-8000-000000000003");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("seed failed: {error}");
+                    ExitCode::FAILURE
+                }
             }
-        },
+        }
         "status" => match status(&db_path).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
@@ -75,6 +85,23 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        "hash" => {
+            let password = args.first().map(String::as_str).unwrap_or("");
+            if password.is_empty() {
+                eprintln!("usage: db hash <password>");
+                return ExitCode::FAILURE;
+            }
+            match hash_password(password) {
+                Ok(hash) => {
+                    println!("{hash}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("hash failed: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         "new" => {
             let name = args.first().map(String::as_str).unwrap_or("");
             if name.is_empty() {
@@ -111,6 +138,7 @@ Commands:
   seed    [--db PATH]   Re-run shop seed SQL (INSERT OR IGNORE) after migrate
   status  [--db PATH]   Show applied migration versions and core row counts
   new NAME              Scaffold src/backend/migration/mYYYYMMDD_HHMMSS_NAME.rs + .sql
+  hash PASSWORD         Print argon2id hash for a password (local admin bootstrap)
 
 Options:
   --db PATH             SQLite file (default: ./data/{DATABASE_FILE_NAME} or $DUKAN_DB_PATH)
@@ -126,6 +154,9 @@ Examples:
 }
 
 fn default_db_path() -> PathBuf {
+    if let Ok(config) = Config::load() {
+        return config.database_path.clone();
+    }
     if let Ok(path) = env::var("DUKAN_DB_PATH") {
         return PathBuf::from(path);
     }
@@ -145,16 +176,22 @@ async fn migrate(path: &PathBuf) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let _db = connect_path(path.clone()).await.map_err(|e| e.to_string())?;
+    let _db = connect_path(path.clone())
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 async fn seed(path: &PathBuf) -> Result<(), String> {
-    let db = connect_path(path.clone()).await.map_err(|e| e.to_string())?;
+    let db = connect_path(path.clone())
+        .await
+        .map_err(|e| e.to_string())?;
     // Shop seed is also a migration; re-apply SQL with INSERT OR IGNORE for idempotent refresh.
     run_sql_script(&db, include_str!("../backend/migration/seed_shop.sql")).await?;
     run_sql_script(&db, include_str!("../backend/migration/seed_units.sql")).await?;
-    apply_runtime_pragmas(&db).await.map_err(|e| e.to_string())?;
+    apply_runtime_pragmas(&db)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -163,7 +200,9 @@ async fn status(path: &PathBuf) -> Result<(), String> {
         println!("Database not found: {}", path.display());
         return Ok(());
     }
-    let db = connect_path(path.clone()).await.map_err(|e| e.to_string())?;
+    let db = connect_path(path.clone())
+        .await
+        .map_err(|e| e.to_string())?;
     println!("Database: {}", path.display());
     let applied = Migrator::get_applied_migrations(&db)
         .await
@@ -239,11 +278,7 @@ fn create_migration(name: &str) -> Result<PathBuf, String> {
         format!("-- Migration {stem}\n-- Write forward SQL here.\n"),
     )
     .map_err(|e| e.to_string())?;
-    fs::write(
-        &down_path,
-        format!("-- Rollback for {stem}\n"),
-    )
-    .map_err(|e| e.to_string())?;
+    fs::write(&down_path, format!("-- Rollback for {stem}\n")).map_err(|e| e.to_string())?;
     fs::write(
         &rs_path,
         format!(

@@ -4,6 +4,12 @@ mod m20260907_000001_initial;
 mod m20260909_000002_seed_units;
 mod m20260909_000003_sessions;
 mod m20260909_000004_seed_shop;
+mod m20260912_000005_drop_master_credit_fields;
+mod m20260912_000006_drop_supplier_tax_number;
+mod m20260917_000007_ledger_trash_foundation;
+mod m20260918_000008_staff_partner_users;
+mod m20260919_000009_auth_refresh_setup;
+mod m20260920_000010_soft_delete_filter_indexes;
 
 pub struct Migrator;
 
@@ -15,22 +21,21 @@ impl MigratorTrait for Migrator {
             Box::new(m20260909_000002_seed_units::Migration),
             Box::new(m20260909_000003_sessions::Migration),
             Box::new(m20260909_000004_seed_shop::Migration),
+            Box::new(m20260912_000005_drop_master_credit_fields::Migration),
+            Box::new(m20260912_000006_drop_supplier_tax_number::Migration),
+            Box::new(m20260917_000007_ledger_trash_foundation::Migration),
+            Box::new(m20260918_000008_staff_partner_users::Migration),
+            Box::new(m20260919_000009_auth_refresh_setup::Migration),
+            Box::new(m20260920_000010_soft_delete_filter_indexes::Migration),
         ]
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::backend::{dto::PageQuery, repositories::MasterKind, services::MasterService};
     use sea_orm::{ConnectionTrait, Database};
     use sea_orm_migration::{MigratorTrait, SchemaManager};
-    use uuid::Uuid;
-
-    use crate::backend::{
-        constants::{SEED_OWNER_USERNAME, SEED_USER_ID},
-        dto::PageQuery,
-        repositories::MasterKind,
-        services::MasterService,
-    };
 
     use super::Migrator;
 
@@ -80,16 +85,15 @@ mod tests {
             .iter()
             .any(|unit| unit.name == "Piece" && unit.symbol.as_deref() == Some("pc")));
 
-        let owner = database
-            .query_one_raw(sea_orm::Statement::from_sql_and_values(
+        let user_count = database
+            .query_one_raw(sea_orm::Statement::from_string(
                 sea_orm::DbBackend::Sqlite,
-                "SELECT id, username FROM users WHERE username = ?",
-                [SEED_OWNER_USERNAME.into()],
+                "SELECT COUNT(*) AS count FROM users".to_owned(),
             ))
             .await
-            .expect("query owner")
-            .expect("owner row");
-        let owner_id: Uuid = owner.try_get("", "id").expect("owner id");
-        assert_eq!(owner_id.to_string(), SEED_USER_ID);
+            .expect("count users")
+            .expect("user count row");
+        let count: i64 = user_count.try_get("", "count").expect("read user count");
+        assert_eq!(count, 0, "owner is created during onboarding, not seed");
     }
 }

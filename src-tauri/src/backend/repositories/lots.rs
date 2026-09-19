@@ -11,9 +11,7 @@ use crate::backend::{
         REFERENCE_GOODS_RECEIPT, REFERENCE_PRODUCT_OPENING, STOCK_MOVEMENT_ADJUSTMENT,
         STOCK_MOVEMENT_PURCHASE,
     },
-    dto::{
-        BranchLotResponse, LotListQuery, LotResponse, ReceiveLotRequest,
-    },
+    dto::{BranchLotResponse, LotListQuery, LotResponse, ReceiveLotRequest},
     errors::AppError,
     util::{money_value, now_utc, parse_date, parse_optional_uuid, parse_uuid, quantity, trimmed},
 };
@@ -83,7 +81,7 @@ impl LotRepository {
             Some("lotNumber") => "pl.lot_number",
             Some("receivedDate") => "pl.received_date",
             Some("remaining") => "pl.remaining_base_quantity",
-            _ => "pl.received_date",
+            _ => "pl.created_at",
         };
         let direction = query.page.sort_direction.unwrap_or_default().sql();
         let sql = format!(
@@ -144,7 +142,11 @@ impl LotRepository {
         let source_type = match source.as_str() {
             "OPENING" => LOT_SOURCE_OPENING,
             "PURCHASE" => LOT_SOURCE_PURCHASE,
-            _ => return Err(AppError::Validation("sourceType must be OPENING or PURCHASE.".into())),
+            _ => {
+                return Err(AppError::Validation(
+                    "sourceType must be OPENING or PURCHASE.".into(),
+                ))
+            }
         };
         let supplier_id = parse_optional_uuid(request.supplier_id.as_deref(), "supplierId")?;
         if source_type == LOT_SOURCE_PURCHASE && supplier_id.is_none() {
@@ -160,12 +162,7 @@ impl LotRepository {
         let expiry_date = request
             .expiry_date
             .as_deref()
-            .map(|value| {
-                parse_date(
-                    value,
-                    crate::backend::constants::ERROR_INVALID_EXPIRY_DATE,
-                )
-            })
+            .map(|value| parse_date(value, crate::backend::constants::ERROR_INVALID_EXPIRY_DATE))
             .transpose()?;
         let now = now_utc();
         let lot_id = Uuid::new_v4();
@@ -242,7 +239,7 @@ impl LotRepository {
         if let Some(supplier_id) = supplier_id {
             let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
+                "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
                 [supplier_id.into()],
             ))
             .one(transaction)
@@ -335,7 +332,8 @@ fn build_conditions(
     }
     if let Some(search) = &query.page.search {
         parts.push(
-            "(lower(pl.lot_number) LIKE ? OR lower(p.name) LIKE ? OR lower(p.sku) LIKE ?)".to_owned(),
+            "(lower(pl.lot_number) LIKE ? OR lower(p.name) LIKE ? OR lower(p.sku) LIKE ?)"
+                .to_owned(),
         );
         let needle = format!("%{}%", search.to_lowercase());
         values.extend([needle.clone().into(), needle.clone().into(), needle.into()]);
@@ -366,16 +364,19 @@ async fn hydrate(
     let mut by_lot: std::collections::HashMap<Uuid, Vec<BranchLotResponse>> =
         std::collections::HashMap::new();
     for row in branch_rows {
-        by_lot.entry(row.product_lot_id).or_default().push(BranchLotResponse {
-            id: row.id.to_string(),
-            branch_id: row.branch_id.to_string(),
-            product_lot_id: row.product_lot_id.to_string(),
-            allocated_base_quantity: decimal(row.allocated_base_quantity),
-            remaining_base_quantity: decimal(row.remaining_base_quantity),
-            reserved_base_quantity: decimal(row.reserved_base_quantity),
-            damaged_base_quantity: decimal(row.damaged_base_quantity),
-            updated_at: row.updated_at.to_rfc3339(),
-        });
+        by_lot
+            .entry(row.product_lot_id)
+            .or_default()
+            .push(BranchLotResponse {
+                id: row.id.to_string(),
+                branch_id: row.branch_id.to_string(),
+                product_lot_id: row.product_lot_id.to_string(),
+                allocated_base_quantity: decimal(row.allocated_base_quantity),
+                remaining_base_quantity: decimal(row.remaining_base_quantity),
+                reserved_base_quantity: decimal(row.reserved_base_quantity),
+                damaged_base_quantity: decimal(row.damaged_base_quantity),
+                updated_at: row.updated_at.to_rfc3339(),
+            });
     }
 
     Ok(rows

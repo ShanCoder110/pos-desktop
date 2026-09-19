@@ -7,8 +7,9 @@ use crate::backend::{
     context::RequestContext,
     dto::{
         ClaimListQuery, ClaimResponse, CreateClaimRequest, CreateReturnRequest,
-        CustomerLedgerResponse, CustomerPaymentRequest, CustomerPaymentResponse, Paginated,
-        PaginationMeta, ReturnListQuery, ReturnResponse,
+        CustomerLedgerEntryResponse, CustomerLedgerListQuery, CustomerLedgerResponse,
+        CustomerPaymentRequest, CustomerPaymentResponse, Paginated, PaginationMeta,
+        ReturnListQuery, ReturnResponse,
     },
     errors::AppError,
     repositories::{CreditRepository, SequenceRepository},
@@ -23,6 +24,18 @@ impl CreditService {
         customer_id: Uuid,
     ) -> Result<CustomerLedgerResponse, AppError> {
         CreditRepository::customer_ledger(database, customer_id).await
+    }
+
+    pub async fn list_customer_ledgers(
+        database: &DatabaseConnection,
+        mut query: CustomerLedgerListQuery,
+    ) -> Result<Paginated<CustomerLedgerEntryResponse>, AppError> {
+        query.page = query.page.normalized();
+        let (data, total) = CreditRepository::list_customer_ledgers(database, &query).await?;
+        Ok(Paginated {
+            data,
+            meta: PaginationMeta::new(total, query.page.page, query.page.per_page),
+        })
     }
 
     pub async fn customer_payment(
@@ -77,8 +90,7 @@ impl CreditService {
         }
         request.validate()?;
         let transaction = database.begin().await?;
-        let return_number =
-            SequenceRepository::next(&transaction, "sale_return", "SR").await?;
+        let return_number = SequenceRepository::next(&transaction, "sale_return", "SR").await?;
         let id =
             CreditRepository::create_return(&transaction, context, &request, return_number).await?;
         transaction.commit().await?;

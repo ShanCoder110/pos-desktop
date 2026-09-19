@@ -14,6 +14,7 @@ import { listMasterRecords, type MasterRecord } from "@/services/masters";
 export interface CustomerLedgerEntryResponse {
   id: string;
   customerId: string;
+  customerName?: string | null;
   branchId: string;
   entryType: string;
   invoiceId?: string | null;
@@ -101,9 +102,11 @@ export function mapCustomer(record: MasterRecord, balance = 0): DomainCustomer {
     phone: record.phone ?? "",
     address: record.address ?? "",
     currentBalance: balance,
-    creditLimit: record.creditLimit ?? null,
     notes: record.notes ?? "",
     isActive: record.isActive,
+    isWalkIn: Boolean(record.isWalkIn),
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
   };
 }
 
@@ -146,6 +149,44 @@ export function mapReturn(row: ReturnResponse): ReturnRow {
   };
 }
 
+export type CustomerLedgerEntry = CustomerLedgerEntryResponse;
+
+export function listCustomerLedgers(
+  params: {
+    page?: number;
+    perPage?: number;
+    search?: string;
+    customer?: string;
+    entryType?: string;
+    notes?: string;
+    balance?: string;
+    debit?: number;
+    credit?: number;
+    occurredFrom?: string;
+    occurredTo?: string;
+  } = {},
+  signal?: AbortSignal,
+) {
+  return apiRequest<PaginatedResponse<CustomerLedgerEntry>>(
+    `${API_ROUTES.customerLedgers}${queryString(params)}`,
+    { signal },
+  );
+}
+
+export async function listAllCustomerLedgers(
+  params: Omit<Parameters<typeof listCustomerLedgers>[0], "page" | "perPage"> = {},
+  signal?: AbortSignal,
+) {
+  const rows: CustomerLedgerEntry[] = [];
+  let page = 1;
+  for (;;) {
+    const response = await listCustomerLedgers({ ...params, page, perPage: MAX_PAGE_SIZE }, signal);
+    rows.push(...response.data);
+    if (!response.meta.hasNextPage) return rows;
+    page += 1;
+  }
+}
+
 export function getCustomerLedger(customerId: string, signal?: AbortSignal) {
   return apiRequest<CustomerLedgerResponse>(API_ROUTES.customersLedger(customerId), { signal });
 }
@@ -170,20 +211,9 @@ export async function listCustomersWithBalances(signal?: AbortSignal): Promise<D
   const customers: DomainCustomer[] = [];
   let page = 1;
   for (;;) {
-    const response = await listMasterRecords(
-      "customers",
-      { page, perPage: MAX_PAGE_SIZE },
-      signal,
-    );
+    const response = await listMasterRecords("customers", { page, perPage: MAX_PAGE_SIZE }, signal);
     for (const record of response.data) {
-      let balance = 0;
-      try {
-        const ledger = await getCustomerLedger(record.id, signal);
-        balance = ledger.balance;
-      } catch {
-        balance = 0;
-      }
-      customers.push(mapCustomer(record, balance));
+      customers.push(mapCustomer(record, record.balance ?? 0));
     }
     if (!response.meta.hasNextPage) return customers;
     page += 1;
@@ -191,7 +221,13 @@ export async function listCustomersWithBalances(signal?: AbortSignal): Promise<D
 }
 
 export function listReturns(
-  params: { page?: number; perPage?: number; branchId?: string; invoiceId?: string; status?: string } = {},
+  params: {
+    page?: number;
+    perPage?: number;
+    branchId?: string;
+    invoiceId?: string;
+    status?: string;
+  } = {},
   signal?: AbortSignal,
 ) {
   return apiRequest<PaginatedResponse<ReturnResponse>>(
@@ -212,7 +248,13 @@ export async function listAllReturns(signal?: AbortSignal): Promise<ReturnRow[]>
 }
 
 export function listClaims(
-  params: { page?: number; perPage?: number; branchId?: string; status?: string; customerId?: string } = {},
+  params: {
+    page?: number;
+    perPage?: number;
+    branchId?: string;
+    status?: string;
+    customerId?: string;
+  } = {},
   signal?: AbortSignal,
 ) {
   return apiRequest<PaginatedResponse<ClaimResponse>>(

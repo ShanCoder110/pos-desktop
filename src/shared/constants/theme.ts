@@ -15,6 +15,7 @@ export const THEME_COLORS = {
   accent: "accent",
   accentDeep: "accent-deep",
   accentBg: "accent-bg",
+  accentText: "accent-text",
   sale: "sale",
   saleBg: "sale-bg",
   hold: "hold",

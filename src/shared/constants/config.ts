@@ -8,4 +8,5 @@ export const PAGE_SIZE_ALL = 0;
 export const STORAGE_KEYS = {
   keepAddingProducts: "pos.keepAddingProducts",
   managementSidebarCollapsed: "pos.mgmt.collapsed",
+  colorMode: "pos.colorMode",
 } as const;

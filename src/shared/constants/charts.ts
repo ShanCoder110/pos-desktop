@@ -6,4 +6,16 @@ export const DATE_PERIOD_PRESETS = [
   { id: "custom", label: "Custom range" },
 ] as const;
 
-export const CHART_COLORS = ["#0f9f8f", "#2563eb", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#f97316", "#64748b"] as const;
+/** Default date filter when opening supplier, customer, and staff ledger tabs. */
+export const DEFAULT_LEDGER_DATE_PERIOD = "30d" as const;
+
+export const CHART_COLORS = [
+  "#9d4b82",
+  "#e08a3e",
+  "#7c5bbf",
+  "#d95d67",
+  "#3f9b8d",
+  "#c09a32",
+  "#b45f4b",
+  "#746778",
+] as const;

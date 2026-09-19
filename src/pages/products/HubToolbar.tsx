@@ -2,9 +2,12 @@ import type { ReactNode } from "react";
 import { BarChart3, Table2 } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { ColumnPicker, type ColumnOption } from "@/components/common/ColumnPicker";
-import { DateRangePeriodPicker, type DateRangeFilter } from "@/components/common/DateRangePeriodPicker";
+import {
+  DateRangePeriodPicker,
+  type DateRangeFilter,
+} from "@/components/common/DateRangePeriodPicker";
 import { FilterChips, FilterPicker, type FilterChip } from "@/components/common/FilterPicker";
-import { SearchInput } from "@/components/common/SearchInput";
+import { TableSearch } from "@/components/common/TableSearch";
 
 export type HubView = "table" | "insights";
 
@@ -35,7 +38,14 @@ export function HubToolbar({
   onApply: (chip: FilterChip) => void;
   onRemove: (field: string) => void;
   onClear: () => void;
-  filterFields: { id: string; label: string; options?: string[]; searchable?: boolean; placeholder?: string; numeric?: boolean }[];
+  filterFields: {
+    id: string;
+    label: string;
+    options?: string[];
+    searchable?: boolean;
+    placeholder?: string;
+    numeric?: boolean;
+  }[];
   search: string;
   onSearch: (value: string) => void;
   searchPlaceholder: string;
@@ -64,13 +74,26 @@ export function HubToolbar({
               >
                 <Table2 size={15} />
               </Button>
-              <Button size="icon" className={view === "insights" ? "is-on" : undefined} aria-label="Insights" aria-pressed={view === "insights"} onClick={() => onView("insights")}>
+              <Button
+                size="icon"
+                className={view === "insights" ? "is-on" : undefined}
+                aria-label="Insights"
+                aria-pressed={view === "insights"}
+                onClick={() => onView("insights")}
+              >
                 <BarChart3 size={15} />
               </Button>
             </div>
           ) : null}
-          {dateRange && onDateRange ? <DateRangePeriodPicker value={dateRange} onChange={onDateRange} /> : null}
-          <SearchInput searchable={searchable} value={search} onChange={onSearch} placeholder={searchPlaceholder} />
+          {dateRange && onDateRange ? (
+            <DateRangePeriodPicker value={dateRange} onChange={onDateRange} />
+          ) : null}
+          <TableSearch
+            searchable={searchable}
+            value={search}
+            onSearch={onSearch}
+            placeholder={searchPlaceholder}
+          />
         </div>
         {(view === "insights" && insightControls) || trailing ? (
           <div className="ui-toolbar-right [display:flex] [align-items:center] [gap:8px] [min-width:0] [flex-shrink:0]">

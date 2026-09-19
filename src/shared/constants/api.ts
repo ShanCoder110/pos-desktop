@@ -4,6 +4,9 @@ export const API_BASE_URL = String(
 
 export const API_ROUTES = {
   health: "/health",
+  authStatus: "/auth/status",
+  authSetup: "/auth/setup",
+  authRefresh: "/auth/refresh",
   authLogin: "/auth/login",
   authLogout: "/auth/logout",
   authMe: "/auth/me",
@@ -12,6 +15,9 @@ export const API_ROUTES = {
   cashSessionClose: (id: string) => `/cash-sessions/${encodeURIComponent(id)}/close`,
   users: "/users",
   userById: (id: string) => `/users/${encodeURIComponent(id)}`,
+  staffLedgers: "/staff-ledgers",
+  userLedger: (id: string) => `/users/${encodeURIComponent(id)}/ledger`,
+  userPayouts: (id: string) => `/users/${encodeURIComponent(id)}/payouts`,
   branches: "/branches",
   branchById: (id: string) => `/branches/${encodeURIComponent(id)}`,
   devices: "/devices",
@@ -25,12 +31,21 @@ export const API_ROUTES = {
   unitById: (id: string) => `/units/${encodeURIComponent(id)}`,
   suppliers: "/suppliers",
   supplierById: (id: string) => `/suppliers/${encodeURIComponent(id)}`,
+  supplierLedgers: "/supplier-ledgers",
+  customerLedgers: "/customer-ledgers",
   supplierLedger: (id: string) => `/suppliers/${encodeURIComponent(id)}/ledger`,
   supplierPayments: (id: string) => `/suppliers/${encodeURIComponent(id)}/payments`,
+  supplierAdjustBalance: (id: string) => `/suppliers/${encodeURIComponent(id)}/adjust-balance`,
   customers: "/customers",
   customerById: (id: string) => `/customers/${encodeURIComponent(id)}`,
   customersLedger: (id: string) => `/customers/${encodeURIComponent(id)}/ledger`,
   customersPayments: (id: string) => `/customers/${encodeURIComponent(id)}/payments`,
+  customerAdjustBalance: (id: string) => `/customers/${encodeURIComponent(id)}/adjust-balance`,
+  trash: "/trash",
+  trashRestore: (entity: string, id: string) =>
+    `/trash/${encodeURIComponent(entity)}/${encodeURIComponent(id)}/restore`,
+  trashPurge: (entity: string, id: string) =>
+    `/trash/${encodeURIComponent(entity)}/${encodeURIComponent(id)}/purge`,
   lots: "/lots",
   lotById: (id: string) => `/lots/${encodeURIComponent(id)}`,
   lotsReceive: "/lots/receive",
@@ -82,13 +97,12 @@ export const API_HEADERS = {
 export const API_ERRORS = {
   requestFailed: "The request could not be completed.",
   backendUnavailable: "The local backend is unavailable.",
+  sessionExpired: "Session expired. Sign in again.",
 } as const;
 
-/** Seed credentials for silent local session bootstrap when AUTH_ENABLED is false. */
+/** Dev-only counter device id when AUTH_ENABLED is false. */
 export const SEED_AUTH = {
-  username: "owner",
-  password: "owner123",
-  deviceId: "20000000-0000-4000-8000-000000000003",
+  deviceId: String(import.meta.env.VITE_SEED_DEVICE_ID ?? "20000000-0000-4000-8000-000000000003"),
 } as const;
 
 export const PRODUCT_SEARCH_DEBOUNCE_MS = 320;

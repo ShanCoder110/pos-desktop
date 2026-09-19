@@ -11,6 +11,7 @@ import {
   unitLabel,
 } from "@/pages/products/productQty";
 import type { Product } from "@/shared/types";
+import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { cn, money } from "@/utils/format";
 
 export type ProductQuantityValue = {
@@ -52,12 +53,17 @@ export function ProductQuantityPicker({
   const product = products.find((item) => item.id === value.productId);
   const units = product ? productSellUnits(product) : [];
   const selectedUnit = product
-    ? units.find((unit) => unit.id === value.unitId) ?? units.find((unit) => unit.symbol === product.unit) ?? units[0]
+    ? (units.find((unit) => unit.id === value.unitId) ??
+      units.find((unit) => unit.symbol === product.unit) ??
+      units[0])
     : undefined;
   const hasUnitChoice = units.length > 1;
-  const available = product && selectedUnit ? qtyInUnit(units, product.unit, selectedUnit, product.stock) : 0;
+  const available =
+    product && selectedUnit ? qtyInUnit(units, product.unit, selectedUnit, product.stock) : 0;
   const insufficient = Boolean(product && selectedUnit && value.quantity > available + 1e-6);
-  const lowStock = Boolean(product && product.stock > 0 && product.stock < (product.minimumStock ?? 20));
+  const lowStock = Boolean(
+    product && product.stock > 0 && product.stock < (product.minimumStock ?? 20),
+  );
   const unitCost = selectedUnit?.cost ?? 0;
 
   useEffect(() => {
@@ -132,14 +138,16 @@ export function ProductQuantityPicker({
   }
 
   return (
-    <article className={cn(
-      "product-quantity-picker relative grid gap-3 overflow-visible rounded-xl border bg-paper p-3 focus-within:z-30",
-      insufficient
-        ? "border-danger/60 ring-2 ring-danger/10"
-        : recipeTone
-          ? "border-violet-200 bg-violet-50/20"
-          : "border-line",
-    )}>
+    <article
+      className={cn(
+        "product-quantity-picker relative grid gap-3 overflow-visible rounded-xl border bg-paper p-3 focus-within:z-30",
+        insufficient
+          ? "border-danger/60 ring-2 ring-danger/10"
+          : recipeTone
+            ? "border-violet-200 bg-violet-50/20"
+            : "border-line",
+      )}
+    >
       <div className="grid grid-cols-[minmax(0,1fr)_36px] items-start gap-2">
         <ProductSearch
           products={products}
@@ -158,10 +166,14 @@ export function ProductQuantityPicker({
       </div>
 
       {product && selectedUnit ? (
-        <div className={cn(
-          "grid items-end gap-3 rounded-lg bg-bg/70 p-2.5",
-          hasUnitChoice ? "grid-cols-[minmax(180px,1fr)_120px_minmax(150px,auto)]" : "grid-cols-[120px_minmax(180px,1fr)]",
-        )}>
+        <div
+          className={cn(
+            "grid items-end gap-3 rounded-lg bg-bg/70 p-2.5",
+            hasUnitChoice
+              ? "grid-cols-[minmax(180px,1fr)_120px_minmax(150px,auto)]"
+              : "grid-cols-[120px_minmax(180px,1fr)]",
+          )}
+        >
           {hasUnitChoice ? (
             <div className="grid gap-1.5">
               <span className="text-[10px] font-bold text-muted">Unit</span>
@@ -169,12 +181,16 @@ export function ProductQuantityPicker({
                 {units.map((unit, index) => (
                   <button
                     key={unit.id}
-                    ref={(element) => { unitRefs.current[unit.id] = element; }}
+                    ref={(element) => {
+                      unitRefs.current[unit.id] = element;
+                    }}
                     type="button"
                     tabIndex={selectedUnit.id === unit.id ? 0 : -1}
                     className={cn(
                       "min-h-7 flex-1 rounded-md border-0 px-2 text-[11px] font-bold",
-                      selectedUnit.id === unit.id ? "bg-accent text-white" : "bg-transparent text-sub hover:bg-bg",
+                      selectedUnit.id === unit.id
+                        ? "bg-accent text-white"
+                        : "bg-transparent text-sub hover:bg-bg",
                     )}
                     onClick={() => selectUnit(unit.id)}
                     onKeyDown={(event) => onUnitKeyDown(event, index)}
@@ -191,6 +207,7 @@ export function ProductQuantityPicker({
             <TextInput
               inputRef={quantityRef}
               inputMode="decimal"
+              maxLength={FIELD_LIMITS.qty}
               placeholder="1"
               className={insufficient ? "!border-danger" : undefined}
               value={numericText(value.quantity)}
@@ -213,12 +230,16 @@ export function ProductQuantityPicker({
           </div>
 
           <div className="grid min-h-[38px] content-center gap-0.5 border-l border-line pl-3">
-            <span className={cn(
-              "inline-flex items-center gap-1 text-[10px] font-bold",
-              insufficient ? "text-danger" : lowStock ? "text-amber-700" : "text-accent-deep",
-            )}>
-              {(insufficient || lowStock) ? <AlertTriangle size={11} /> : null}
-              {insufficient ? `Only ${formatStockQty(available)} available` : `${formatStockQty(available)} available`}
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 text-[10px] font-bold",
+                insufficient ? "text-danger" : lowStock ? "text-amber-700" : "text-accent-deep",
+              )}
+            >
+              {insufficient || lowStock ? <AlertTriangle size={11} /> : null}
+              {insufficient
+                ? `Only ${formatStockQty(available)} available`
+                : `${formatStockQty(available)} available`}
             </span>
             <span className="text-[10px] text-muted">
               Cost {money(unitCost)} · Total {money(unitCost * value.quantity)}

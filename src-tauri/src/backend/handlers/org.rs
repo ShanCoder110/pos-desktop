@@ -11,7 +11,7 @@ use crate::backend::{
     context::RequestContext,
     dto::{
         BranchRequest, BranchResponse, DevicePrinterRequest, DevicePrinterResponse, DeviceResponse,
-        PageQuery, Paginated, UserRequest, UserResponse,
+        PageQuery, Paginated, UserListQuery, UserRequest, UserResponse,
     },
     errors::AppError,
     services::OrgService,
@@ -29,7 +29,7 @@ pub struct DeviceListQuery {
 pub async fn list_users(
     State(state): State<AppState>,
     ctx: RequestContext,
-    Query(query): Query<PageQuery>,
+    Query(query): Query<UserListQuery>,
 ) -> Result<Json<Paginated<UserResponse>>, AppError> {
     Ok(Json(OrgService::list_users(&state.db, &ctx, query).await?))
 }
@@ -62,6 +62,15 @@ pub async fn update_user(
     Ok(Json(
         OrgService::update_user(&state.db, &ctx, parse_id(&id)?, request).await?,
     ))
+}
+
+pub async fn delete_user(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Path(id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    OrgService::delete_user(&state.db, &ctx, parse_id(&id)?).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn list_branches(
@@ -110,13 +119,7 @@ pub async fn list_devices(
     Query(query): Query<DeviceListQuery>,
 ) -> Result<Json<Paginated<DeviceResponse>>, AppError> {
     Ok(Json(
-        OrgService::list_devices(
-            &state.db,
-            &ctx,
-            query.page,
-            query.branch_id.as_deref(),
-        )
-        .await?,
+        OrgService::list_devices(&state.db, &ctx, query.page, query.branch_id.as_deref()).await?,
     ))
 }
 

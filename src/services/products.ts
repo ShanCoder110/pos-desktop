@@ -6,6 +6,7 @@ import { apiRequest, queryString, type PaginatedResponse } from "@/services/api"
 export interface ProductListParams {
   page?: number;
   perPage?: number;
+  branchId?: string;
   search?: string;
   categoryId?: string;
   productType?: "STANDARD" | "MANUFACTURED";
@@ -19,17 +20,19 @@ export interface ProductListParams {
 }
 
 export function listProducts(params: ProductListParams = {}, signal?: AbortSignal) {
-  return apiRequest<PaginatedResponse<Product>>(
-    `${API_ROUTES.products}${queryString(params)}`,
-    { signal },
-  );
+  return apiRequest<PaginatedResponse<Product>>(`${API_ROUTES.products}${queryString(params)}`, {
+    signal,
+  });
 }
 
-export async function listAllProducts(signal?: AbortSignal): Promise<Product[]> {
+export async function listAllProducts(signal?: AbortSignal, branchId?: string): Promise<Product[]> {
   const products: Product[] = [];
   let page = 1;
   for (;;) {
-    const response = await listProducts({ page, perPage: MAX_PAGE_SIZE, sortBy: "name", sortDirection: "asc" }, signal);
+    const response = await listProducts(
+      { page, perPage: MAX_PAGE_SIZE, sortBy: "name", sortDirection: "asc", branchId },
+      signal,
+    );
     products.push(...response.data);
     if (!response.meta.hasNextPage) return products;
     page += 1;
@@ -41,11 +44,11 @@ export async function searchAllProducts(query: string, signal?: AbortSignal): Pr
     `${API_ROUTES.productSearch}${queryString({ q: query })}`,
     { signal },
   );
-  return Array.isArray(payload) ? payload : payload.products ?? [];
+  return Array.isArray(payload) ? payload : (payload.products ?? []);
 }
 
 export function getProduct(id: string, signal?: AbortSignal) {
-  return apiRequest<Product>(`${API_ROUTES.products}/${encodeURIComponent(id)}`, { signal });
+  return apiRequest<Product>(API_ROUTES.productById(id), { signal });
 }
 
 export function createProduct(payload: unknown) {
@@ -56,15 +59,14 @@ export function createProduct(payload: unknown) {
 }
 
 export function updateProduct(id: string, payload: unknown) {
-  return apiRequest<Product>(`${API_ROUTES.products}/${encodeURIComponent(id)}`, {
+  return apiRequest<Product>(API_ROUTES.productById(id), {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 }
 
 export function deleteProduct(id: string) {
-  return apiRequest<{ id: string; deleted: boolean }>(
-    `${API_ROUTES.products}/${encodeURIComponent(id)}`,
-    { method: "DELETE" },
-  );
+  return apiRequest<{ id: string; deleted: boolean }>(API_ROUTES.productById(id), {
+    method: "DELETE",
+  });
 }
