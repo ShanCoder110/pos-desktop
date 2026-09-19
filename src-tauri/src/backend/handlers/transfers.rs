@@ -25,9 +25,7 @@ pub async fn get_transfer(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<TransferResponse>, AppError> {
-    Ok(Json(
-        TransferService::get(&state.db, parse_id(&id)?).await?,
-    ))
+    Ok(Json(TransferService::get(&state.db, parse_id(&id)?).await?))
 }
 
 pub async fn create_transfer(

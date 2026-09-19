@@ -14,8 +14,9 @@ pub struct RequestContext {
 
 impl RequestContext {
     pub fn require_cash_session(&self) -> Result<Uuid, crate::backend::errors::AppError> {
-        self.cash_session_id.ok_or(crate::backend::errors::AppError::Forbidden(
-            crate::backend::constants::ERROR_CASH_SESSION_REQUIRED,
-        ))
+        self.cash_session_id
+            .ok_or(crate::backend::errors::AppError::Forbidden(
+                crate::backend::constants::ERROR_CASH_SESSION_REQUIRED,
+            ))
     }
 }

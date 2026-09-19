@@ -5,9 +5,7 @@ use validator::Validate;
 use crate::backend::{
     constants::{DEFAULT_TRANSFER_PREFIX, ERROR_TRANSFER_NOT_FOUND, SEQUENCE_KIND_TRANSFER},
     context::RequestContext,
-    dto::{
-        CreateTransferRequest, Paginated, PaginationMeta, TransferListQuery, TransferResponse,
-    },
+    dto::{CreateTransferRequest, Paginated, PaginationMeta, TransferListQuery, TransferResponse},
     errors::AppError,
     repositories::{SequenceRepository, TransferRepository},
     util::quantity,

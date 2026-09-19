@@ -40,9 +40,7 @@ pub async fn get_invoice(
     _ctx: RequestContext,
     Path(id): Path<String>,
 ) -> Result<Json<InvoiceResponse>, AppError> {
-    Ok(Json(
-        SalesService::get(&state.db, parse_id(&id)?).await?,
-    ))
+    Ok(Json(SalesService::get(&state.db, parse_id(&id)?).await?))
 }
 
 pub async fn void_invoice(

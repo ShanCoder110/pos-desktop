@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use crate::backend::{
     constants::{
-        ERROR_INSUFFICIENT_STOCK, ERROR_PRODUCTION_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND,
-        LOT_SOURCE_PRODUCTION, REFERENCE_PRODUCTION, SEQUENCE_KIND_LOT, DEFAULT_LOT_PREFIX,
+        DEFAULT_LOT_PREFIX, ERROR_INSUFFICIENT_STOCK, ERROR_PRODUCTION_NOT_FOUND,
+        ERROR_PRODUCT_NOT_FOUND, LOT_SOURCE_PRODUCTION, REFERENCE_PRODUCTION, SEQUENCE_KIND_LOT,
         STOCK_MOVEMENT_PRODUCTION_OUTPUT, STOCK_MOVEMENT_PRODUCTION_USE,
         STOCK_MOVEMENT_PRODUCTION_WASTE,
     },
@@ -190,10 +190,11 @@ impl ProductionRepository {
         } else {
             let mut out = Vec::new();
             for material in &request.materials {
-                let product_id =
-                    parse_uuid(&material.component_product_id, "materials.componentProductId")?;
-                let unit_id =
-                    parse_uuid(&material.component_unit_id, "materials.componentUnitId")?;
+                let product_id = parse_uuid(
+                    &material.component_product_id,
+                    "materials.componentProductId",
+                )?;
+                let unit_id = parse_uuid(&material.component_unit_id, "materials.componentUnitId")?;
                 let unit = UnitRow::find_by_statement(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
                     "SELECT conversion_to_base FROM product_units WHERE id = ? AND product_id = ? AND deleted_at IS NULL LIMIT 1",
@@ -234,10 +235,7 @@ impl ProductionRepository {
         Ok(id)
     }
 
-    pub async fn start(
-        transaction: &DatabaseTransaction,
-        id: Uuid,
-    ) -> Result<(), AppError> {
+    pub async fn start(transaction: &DatabaseTransaction, id: Uuid) -> Result<(), AppError> {
         let header = load(transaction, id).await?;
         if header.status != "DRAFT" {
             return Err(AppError::Conflict(format!(
@@ -297,7 +295,10 @@ impl ProductionRepository {
                     .ok_or(AppError::Validation(
                         "Missing actual quantity for a production material.".into(),
                     ))?;
-                (quantity(input.actual_quantity), quantity(input.waste_base_quantity))
+                (
+                    quantity(input.actual_quantity),
+                    quantity(input.waste_base_quantity),
+                )
             };
             let conversion = material.conversion_to_base.unwrap_or(Decimal::ONE);
             let actual_base = quantity(actual_qty * conversion);

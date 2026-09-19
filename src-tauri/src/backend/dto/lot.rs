@@ -157,7 +157,13 @@ fn validate_receive_lot(value: &ReceiveLotRequest) -> Result<(), ValidationError
     if source != "OPENING" && source != "PURCHASE" {
         return Err(ValidationError::new("invalid_source_type"));
     }
-    if source == "PURCHASE" && value.supplier_id.as_deref().map(str::trim).filter(|v| !v.is_empty()).is_none()
+    if source == "PURCHASE"
+        && value
+            .supplier_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .is_none()
     {
         return Err(ValidationError::new("supplier_required"));
     }

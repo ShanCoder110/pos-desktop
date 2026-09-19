@@ -39,8 +39,7 @@ pub async fn search_products(
     ctx: RequestContext,
     Query(query): Query<SearchQuery>,
 ) -> Result<Json<ProductSearchResponse>, AppError> {
-    let products =
-        ProductService::search(&state.db, &query.q, Some(ctx.branch_id)).await?;
+    let products = ProductService::search(&state.db, &query.q, Some(ctx.branch_id)).await?;
     Ok(Json(ProductSearchResponse { products }))
 }
 

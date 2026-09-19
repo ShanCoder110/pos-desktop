@@ -10,9 +10,7 @@ use crate::backend::{
         STOCK_MOVEMENT_TRANSFER_IN, STOCK_MOVEMENT_TRANSFER_OUT,
     },
     context::RequestContext,
-    dto::{
-        CreateTransferRequest, TransferItemResponse, TransferListQuery, TransferResponse,
-    },
+    dto::{CreateTransferRequest, TransferItemResponse, TransferListQuery, TransferResponse},
     errors::AppError,
     util::{now_utc, parse_uuid, quantity, trimmed},
 };

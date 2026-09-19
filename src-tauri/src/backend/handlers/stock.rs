@@ -16,9 +16,7 @@ pub async fn list_stock(
     ctx: RequestContext,
     Query(query): Query<StockListQuery>,
 ) -> Result<Json<Paginated<StockRow>>, AppError> {
-    Ok(Json(
-        StockService::list(&state.db, &ctx, query).await?,
-    ))
+    Ok(Json(StockService::list(&state.db, &ctx, query).await?))
 }
 
 pub async fn list_stock_movements(

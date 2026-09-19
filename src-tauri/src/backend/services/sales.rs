@@ -4,7 +4,8 @@ use validator::Validate;
 
 use crate::backend::{
     constants::{
-        DEFAULT_INVOICE_PREFIX, ERROR_HOLD_NOT_FOUND, ERROR_INVOICE_NOT_FOUND, SEQUENCE_KIND_INVOICE,
+        DEFAULT_INVOICE_PREFIX, ERROR_HOLD_NOT_FOUND, ERROR_INVOICE_NOT_FOUND,
+        SEQUENCE_KIND_INVOICE,
     },
     context::RequestContext,
     dto::{
@@ -47,12 +48,9 @@ impl SalesService {
         }
 
         let transaction = database.begin().await?;
-        let invoice_number = SequenceRepository::next(
-            &transaction,
-            SEQUENCE_KIND_INVOICE,
-            DEFAULT_INVOICE_PREFIX,
-        )
-        .await?;
+        let invoice_number =
+            SequenceRepository::next(&transaction, SEQUENCE_KIND_INVOICE, DEFAULT_INVOICE_PREFIX)
+                .await?;
         let invoice_id =
             SalesRepository::complete(&transaction, context, &request, invoice_number).await?;
         transaction.commit().await?;
@@ -71,10 +69,7 @@ impl SalesService {
         })
     }
 
-    pub async fn get(
-        database: &DatabaseConnection,
-        id: Uuid,
-    ) -> Result<InvoiceResponse, AppError> {
+    pub async fn get(database: &DatabaseConnection, id: Uuid) -> Result<InvoiceResponse, AppError> {
         SalesRepository::find(database, id)
             .await?
             .ok_or(AppError::NotFound(ERROR_INVOICE_NOT_FOUND))

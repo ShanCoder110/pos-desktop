@@ -28,9 +28,7 @@ pub async fn get_repair(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<RepairResponse>, AppError> {
-    Ok(Json(
-        RepairService::get(&state.db, parse_id(&id)?).await?,
-    ))
+    Ok(Json(RepairService::get(&state.db, parse_id(&id)?).await?))
 }
 
 pub async fn create_repair(
@@ -46,9 +44,7 @@ pub async fn start_repair(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<RepairResponse>, AppError> {
-    Ok(Json(
-        RepairService::start(&state.db, parse_id(&id)?).await?,
-    ))
+    Ok(Json(RepairService::start(&state.db, parse_id(&id)?).await?))
 }
 
 pub async fn complete_repair(
