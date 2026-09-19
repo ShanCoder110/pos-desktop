@@ -1,6 +1,5 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-
-const KEY = "pos.mgmt.collapsed";
+import { STORAGE_KEYS } from "@/shared/constants/config";
 
 const MgmtLayoutContext = createContext<{
   collapsed: boolean;
@@ -11,14 +10,14 @@ const MgmtLayoutContext = createContext<{
 });
 
 export function MgmtLayoutProvider({ children }: { children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(KEY) === "1");
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(STORAGE_KEYS.managementSidebarCollapsed) === "1");
   const value = useMemo(
     () => ({
       collapsed,
       toggle: () => {
         setCollapsed((prev) => {
           const next = !prev;
-          localStorage.setItem(KEY, next ? "1" : "0");
+          localStorage.setItem(STORAGE_KEYS.managementSidebarCollapsed, next ? "1" : "0");
           return next;
         });
       },

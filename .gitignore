@@ -22,3 +22,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local specs — keep on disk, do not commit
+docs/
+
+# Local SQLite for `npm run api` / `npm run db:*`
+data/
+
+# Secrets / machine config — never commit (see `.env.example`)
+.env
+.env.local
+.env.*.local
+src-tauri/.env
+src-tauri/.env.local

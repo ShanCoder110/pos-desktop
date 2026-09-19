@@ -1,104 +1,213 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Eye } from "lucide-react";
 import {
   Badge,
   Button,
+  Checkbox,
   Drawer,
   EmptyRow,
-  KpiCard,
-  PageHead,
+  HubChart,
+  PAGE_SIZE_ALL,
   Pagination,
-  SearchInput,
   Table,
-  Tabs,
   Td,
   THead,
   Th,
 } from "@/components/common";
-import { catalog as seed, stockMovements, branchName, lotNumber, userName } from "@/shared/domain/mock";
-import type { CatalogProduct } from "@/shared/domain/types";
+import type { FilterChip } from "@/components/common/FilterPicker";
+import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
+import { useProductsHub } from "@/pages/products/ProductsLayout";
+import type { CatalogProduct, StockMovementRow } from "@/shared/domain/types";
 import { qty } from "@/utils/format";
-
-const PAGE = 10;
+import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import { STOCK_TABLE_COLUMNS } from "@/shared/constants/products";
+import { ensureSession } from "@/services/auth";
+import { listAllBranches, listAllUsers } from "@/services/org";
+import { listAllLots } from "@/services/lots";
+import { listAllStockMovements } from "@/services/stock";
 
 export function StockPage() {
+  const { sectionKpi, products } = useProductsHub();
   const [q, setQ] = useState("");
-  const [tab, setTab] = useState("all");
+  const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [cols, setCols] = useState(STOCK_TABLE_COLUMNS.map((c) => c.id));
+  const [view, setView] = useState<HubView>("table");
+  const [selected, setSelected] = useState<string[]>([]);
   const [open, setOpen] = useState<CatalogProduct | null>(null);
+  const [moves, setMoves] = useState<StockMovementRow[]>([]);
+  const [branchNames, setBranchNames] = useState<Record<string, string>>({});
+  const [userNames, setUserNames] = useState<Record<string, string>>({});
+  const [lotNumbers, setLotNumbers] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setPage(1);
+  }, [sectionKpi]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await ensureSession(controller.signal);
+      const [branches, users, lots] = await Promise.all([
+        listAllBranches(controller.signal).catch(() => []),
+        listAllUsers(controller.signal).catch(() => []),
+        listAllLots(controller.signal).catch(() => []),
+      ]);
+      setBranchNames(Object.fromEntries(branches.map((b) => [b.id, b.name])));
+      setUserNames(Object.fromEntries(users.map((u) => [u.id, u.name])));
+      setLotNumbers(Object.fromEntries(lots.map((l) => [l.id, l.lotNumber])));
+    })();
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      setMoves([]);
+      return;
+    }
+    const controller = new AbortController();
+    void listAllStockMovements({ productId: open.id }, controller.signal)
+      .then(setMoves)
+      .catch(() => setMoves([]));
+    return () => controller.abort();
+  }, [open]);
+
+  const seed = useMemo<CatalogProduct[]>(
+    () =>
+      products.map((p) => ({
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        barcode: p.barcode ?? "",
+        category: p.category,
+        baseUnit: p.unit,
+        minimumStock: p.minimumStock ?? 20,
+        isManufactured: Boolean(p.isManufactured),
+        onHand: p.stock,
+      })),
+    [products],
+  );
 
   const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const status = chips.find((c) => c.field === "status")?.value;
     return seed.filter((r) => {
-      if (q && !`${r.name} ${r.sku}`.toLowerCase().includes(q.toLowerCase())) return false;
-      if (tab === "low") return r.onHand > 0 && r.onHand < r.minimumStock;
-      if (tab === "out") return r.onHand <= 0;
-      if (tab === "ok") return r.onHand >= r.minimumStock;
+      if (needle && !`${r.name} ${r.sku}`.toLowerCase().includes(needle)) return false;
+      if (sectionKpi === "healthy") return r.onHand >= r.minimumStock;
+      if (sectionKpi === "risk") return r.onHand > 0 && r.onHand < r.minimumStock;
+      if (sectionKpi === "dead") return r.onHand <= 0;
+      if (sectionKpi === "made") return r.isManufactured;
+      if (status === "Healthy") return r.onHand >= r.minimumStock;
+      if (status === "Below min") return r.onHand > 0 && r.onHand < r.minimumStock;
+      if (status === "Zero") return r.onHand <= 0;
       return true;
     });
-  }, [q, tab]);
+  }, [q, chips, sectionKpi, seed]);
 
-  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
-  const shown = rows.slice((page - 1) * PAGE, page * PAGE);
-  const moves = open ? stockMovements.filter((m) => m.productId === open.id) : [];
+  const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(rows.length / pageSize));
+  const shown = pageSize === PAGE_SIZE_ALL ? rows : rows.slice((page - 1) * pageSize, page * pageSize);
+  const chartData = rows
+    .map((row) => ({ id: row.id, label: row.name, value: row.onHand }))
+    .sort((a, b) => b.value - a.value);
+  const show = (id: string) => cols.includes(id);
+  const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
   return (
-    <div className="ui-stack">
-      <PageHead title="Stock" />
-      <p className="ui-note">
-        On-hand is the sum of ProductLot remaining_quantity. Sales never skip FIFO. Branch lot rows only appear when that branch has branch_lot_enabled.
-      </p>
-      <div className="ui-kpi-row">
-        <KpiCard label="Healthy" value={seed.filter((p) => p.onHand >= p.minimumStock).length} hint="At or above min" tone="ok" />
-        <KpiCard label="At risk" value={seed.filter((p) => p.onHand > 0 && p.onHand < p.minimumStock).length} hint="Below minimum" tone="warn" />
-        <KpiCard label="Dead" value={seed.filter((p) => p.onHand <= 0).length} hint="Zero remaining" tone="danger" />
-        <KpiCard label="SKUs" value={seed.length} hint="Catalog" tone="phantom" />
-      </div>
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All" },
-          { id: "ok", label: "Healthy" },
-          { id: "low", label: "Below min" },
-          { id: "out", label: "Zero" },
-        ]}
-      />
+    <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
-        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Name or SKU" />}
-        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
+        toolbar={
+          <HubToolbar
+            columns={STOCK_TABLE_COLUMNS}
+            cols={cols}
+            onCols={setCols}
+            chips={chips}
+            onApply={(chip) => {
+              setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
+              setPage(1);
+            }}
+            onRemove={(field) => {
+              setChips((c) => c.filter((x) => x.field !== field));
+              setPage(1);
+            }}
+            onClear={() => {
+              setChips([]);
+              setPage(1);
+            }}
+            filterFields={[{ id: "status", label: "Status", options: ["Healthy", "Below min", "Zero"] }]}
+            search={q}
+            onSearch={(v) => {
+              setQ(v);
+              setPage(1);
+            }}
+            searchPlaceholder="Search stock"
+            view={view}
+            onView={setView}
+          />
+        }
+        body={view === "insights" ? <HubChart type="bar" title="On-hand stock by product" data={chartData} /> : undefined}
+        footer={
+          <Pagination
+            page={Math.min(page, pages)}
+            pages={pages}
+            total={rows.length}
+            pageSize={pageSize}
+            onPageSize={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
+            onChange={setPage}
+          />
+        }
       >
         <THead>
           <tr>
+            <Th className="ui-check-col">
+              <Checkbox
+                checked={allShownSelected}
+                onChange={(e) => {
+                  if (e.target.checked) setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
+                  else setSelected((s) => s.filter((id) => !shown.some((r) => r.id === id)));
+                }}
+              />
+            </Th>
             <Th>Product</Th>
-            <Th>SKU</Th>
-            <Th>Base unit</Th>
-            <Th>On hand</Th>
-            <Th>Minimum</Th>
-            <Th>Status</Th>
-            <Th />
+            {show("sku") ? <Th>SKU</Th> : null}
+            {show("unit") ? <Th>Base unit</Th> : null}
+            {show("onHand") ? <Th>On hand</Th> : null}
+            {show("minimum") ? <Th>Minimum</Th> : null}
+            {show("status") ? <Th>Status</Th> : null}
+            <Th>Actions</Th>
           </tr>
         </THead>
         <tbody>
-          {shown.length === 0 ? <EmptyRow cols={7} /> : null}
+          {shown.length === 0 ? <EmptyRow cols={cols.length + 2} /> : null}
           {shown.map((row) => {
             const dead = row.onHand <= 0;
             const low = !dead && row.onHand < row.minimumStock;
             return (
               <tr key={row.id}>
+                <Td className="ui-check-col">
+                  <Checkbox
+                    checked={selected.includes(row.id)}
+                    onChange={(e) => {
+                      setSelected((s) => (e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id)));
+                    }}
+                  />
+                </Td>
                 <Td>
                   {row.name}
-                  {row.isManufactured ? <span className="ui-note"> Manufactured</span> : null}
+                  {row.isManufactured ? <span className="sub">Manufactured</span> : null}
                 </Td>
-                <Td>{row.sku}</Td>
-                <Td>{row.baseUnit}</Td>
-                <Td numeric>{qty(row.onHand, row.baseUnit)}</Td>
-                <Td numeric>{qty(row.minimumStock, row.baseUnit)}</Td>
-                <Td>
-                  <Badge tone={dead ? "danger" : low ? "warn" : "ok"}>{dead ? "Out" : low ? "Low" : "OK"}</Badge>
-                </Td>
+                {show("sku") ? <Td>{row.sku}</Td> : null}
+                {show("unit") ? <Td>{row.baseUnit}</Td> : null}
+                {show("onHand") ? <Td numeric>{qty(row.onHand, row.baseUnit)}</Td> : null}
+                {show("minimum") ? <Td numeric>{qty(row.minimumStock, row.baseUnit)}</Td> : null}
+                {show("status") ? (
+                  <Td>
+                    <Badge tone={dead ? "danger" : low ? "warn" : "ok"}>{dead ? "Out" : low ? "Low" : "OK"}</Badge>
+                  </Td>
+                ) : null}
                 <Td>
                   <Button size="icon" variant="ghost" onClick={() => setOpen(row)} aria-label="Movements">
                     <Eye size={15} />
@@ -112,8 +221,7 @@ export function StockPage() {
 
       <Drawer open={Boolean(open)} title={open ? `${open.name} movements` : "Movements"} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
         {open ? (
-          <div className="ui-stack">
-            <p className="ui-note">StockMovement is the audit log. Positive = in, negative = out. Receive more on Lots.</p>
+          <div className="ui-stack [display:grid] [gap:12px]">
             <Table>
               <THead>
                 <tr>
@@ -134,9 +242,9 @@ export function StockPage() {
                       <Badge tone={m.quantity < 0 ? "danger" : "ok"}>{m.type}</Badge>
                     </Td>
                     <Td numeric>{m.quantity}</Td>
-                    <Td>{lotNumber(m.productLotId)}</Td>
-                    <Td>{branchName(m.branchId)}</Td>
-                    <Td>{userName(m.createdBy)}</Td>
+                    <Td>{(lotNumbers[m.productLotId] ?? m.productLotId) || "—"}</Td>
+                    <Td>{branchNames[m.branchId] ?? m.branchId}</Td>
+                    <Td>{userNames[m.createdBy] ?? m.createdBy}</Td>
                   </tr>
                 ))}
               </tbody>

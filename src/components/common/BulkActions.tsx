@@ -24,11 +24,11 @@ export function BulkActions({
       }
     >
       {count ? (
-        <div className="ui-pop-list" onClick={() => setOpen(false)}>
+        <div className="ui-pop-list [display:grid] [max-height:240px] [overflow:auto]" onClick={() => setOpen(false)}>
           {children}
         </div>
       ) : (
-        <p className="ui-page-meta" style={{ padding: 8 }}>
+        <p className="ui-page-meta [font-size:12px] [color:var(--muted)] [white-space:nowrap]" style={{ padding: 8 }}>
           Select rows first
         </p>
       )}
@@ -40,13 +40,19 @@ export function BulkAction({
   icon,
   children,
   onClick,
+  danger,
 }: {
   icon?: ReactNode;
   children: ReactNode;
   onClick: () => void;
+  danger?: boolean;
 }) {
   return (
-    <button type="button" className="ui-pop-item" onClick={onClick}>
+    <button
+      type="button"
+      className={danger ? "ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer] is-danger" : "ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"}
+      onClick={onClick}
+    >
       {icon}
       {children}
     </button>

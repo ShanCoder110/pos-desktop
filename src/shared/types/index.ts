@@ -1,21 +1,20 @@
 export type StockPick = "oldest" | "newest" | "ask";
 export type PrintSize = "thermal" | "a4";
+export type PaperWidth = "MM_58" | "MM_80" | "A4";
+export type AppLanguage = "EN" | "UR";
 export type BranchKind = "retail" | "repair";
 export type Unit = "pc" | "m";
 export type InvoiceStatus = "paid" | "partial" | "credit" | "held";
 export type RepairStatus = "open" | "done" | "delivered";
 export type ReturnKind = "refund" | "exchange" | "claim" | "damage";
-export type TxnKind =
-  | "sale"
-  | "credit"
-  | "purchase"
-  | "expense"
-  | "salary"
-  | "return"
-  | "repair";
+export type TxnKind = "sale" | "credit" | "purchase" | "expense" | "salary" | "return" | "repair";
 
 export interface ShopSettings {
   shopName: string;
+  legalName: string;
+  phone: string;
+  email: string;
+  address: string;
   footer: string;
   showBalanceOnSlip: boolean;
   printSize: PrintSize;
@@ -26,6 +25,27 @@ export interface ShopSettings {
   defaultTax: number;
   defaultDiscount: number;
   isMainServer: boolean;
+  currencySymbol: string;
+  currencyCode: string;
+  language: AppLanguage;
+  expiryReminderDays: number;
+  payoutDeductFrom: "PROFIT" | "REVENUE";
+  invoicePrefix: string;
+  skuPrefix: string;
+  lotPrefix: string;
+  fifoEnabled: boolean;
+  receiptShopName: string;
+  paperWidth: PaperWidth;
+  showLogo: boolean;
+  showCashierName: boolean;
+  showItemDiscount: boolean;
+  tagline: string;
+  contactLine: string;
+  promoUrdu: string;
+  printerName: string;
+  printerPaperWidth: PaperWidth;
+  copies: number;
+  splitLongBill: boolean;
 }
 
 export interface Shop {
@@ -65,14 +85,46 @@ export interface BomLine {
   id: string;
   productId: string;
   quantity: number;
+  unitId?: string;
+  baseQuantity?: number;
+}
+
+export interface ProductBranchStock {
+  branchId: string;
+  branchName: string;
+  quantity: number;
+}
+
+export interface ProductSellUnit {
+  id: string;
+  name: string;
+  symbol?: string;
+  kind?: "base" | "bigger" | "smaller" | "pack" | "small";
+  contains: number;
+  cost: number;
+  min: number;
+  wholesale: number;
+  price: number;
+  barcode: string;
+  priceManual?: {
+    cost?: boolean;
+    min?: boolean;
+    wholesale?: boolean;
+    price?: boolean;
+  };
 }
 
 export interface Product {
   id: string;
+  categoryId?: string;
+  baseUnitId?: string;
   name: string;
   sku: string;
+  barcode?: string;
   category: string;
-  unit: Unit;
+  unit: string;
+  supplierId?: string;
+  minimumStock?: number;
   isLinear: boolean;
   isManufactured: boolean;
   packQty: number | null;
@@ -81,13 +133,21 @@ export interface Product {
   min: number;
   wholesale: number;
   retail: number;
+  warrantyEnabled?: boolean;
   warrantyQty: number;
   warrantyUnit: WarrantyUnit;
   warrantyDays: number;
+  warrantyNote?: string;
   claims: number;
   damaged: number;
   stock: number;
+  totalStock?: number;
+  branchStock?: ProductBranchStock[];
   components: BomLine[];
+  sellUnits?: ProductSellUnit[];
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Lot {

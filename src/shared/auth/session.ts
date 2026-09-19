@@ -1,50 +1,27 @@
 import { createContext, useContext } from "react";
-import type { AuthSession, OwnerProfile, ShopProfile } from "@/shared/types";
+import type { AuthUser, SetupFormPayload } from "@/services/auth";
 
-const KEY = "pos.session";
+export type AuthPhase = "loading" | "needs_setup" | "anonymous" | "authenticated";
 
-/** Login and first-time setup are skipped until auth is wired for real. */
-export const AUTH_ENABLED: boolean = false;
-
-export const emptySession: AuthSession = {
-  shop: null,
-  owner: null,
-  loggedIn: false,
-};
-
-export function loadSession(): AuthSession {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return emptySession;
-    const parsed = JSON.parse(raw) as AuthSession;
-    return {
-      shop: parsed.shop ?? null,
-      owner: parsed.owner ?? null,
-      loggedIn: Boolean(parsed.loggedIn),
-    };
-  } catch {
-    return emptySession;
-  }
-}
-
-export function saveSession(session: AuthSession) {
-  localStorage.setItem(KEY, JSON.stringify(session));
-}
+/** Set to false to skip login/setup and auto-use seed credentials. */
+export const AUTH_ENABLED = true;
 
 export const SessionContext = createContext<{
-  session: AuthSession;
-  saveShop: (shop: ShopProfile) => void;
-  saveOwner: (owner: OwnerProfile) => void;
-  completeSetup: (shop: ShopProfile, owner: OwnerProfile) => void;
-  login: (email: string, password: string) => string | null;
-  logout: () => void;
+  phase: AuthPhase;
+  user: AuthUser | null;
+  shopName: string | null;
+  login: (email: string, password: string) => Promise<string | null>;
+  logout: () => Promise<void>;
+  completeSetup: (payload: SetupFormPayload) => Promise<string | null>;
+  refreshStatus: () => Promise<void>;
 }>({
-  session: emptySession,
-  saveShop: () => undefined,
-  saveOwner: () => undefined,
-  completeSetup: () => undefined,
-  login: () => "Not ready",
-  logout: () => undefined,
+  phase: "loading",
+  user: null,
+  shopName: null,
+  login: async () => "Not ready",
+  logout: async () => undefined,
+  completeSetup: async () => "Not ready",
+  refreshStatus: async () => undefined,
 });
 
 export function useSession() {

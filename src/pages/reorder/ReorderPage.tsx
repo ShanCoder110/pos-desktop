@@ -1,6 +1,6 @@
 import { Navigate } from "react-router-dom";
-import { routes } from "@/shared/constants/routes";
+import { productsHref } from "@/shared/constants/products";
 
 export function ReorderPage() {
-  return <Navigate to={routes.lots} replace />;
+  return <Navigate to={productsHref("lots")} replace />;
 }

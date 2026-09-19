@@ -1,54 +1,102 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AUTH_ENABLED, SessionContext, type AuthPhase } from "@/shared/auth/session";
+import { AUTH_COPY } from "@/shared/constants/auth";
 import {
-  emptySession,
-  loadSession,
-  saveSession,
-  SessionContext,
-} from "@/shared/auth/session";
-import type { AuthSession, OwnerProfile, ShopProfile } from "@/shared/types";
+  authStatus,
+  loginWithDevice,
+  logout as apiLogout,
+  me,
+  setupShop,
+  type AuthUser,
+  type SetupFormPayload,
+} from "@/services/auth";
+import { clearTokens, getAccessToken } from "@/services/authToken";
+import { getDeviceId } from "@/utils/device";
+import { isAbortError } from "@/utils/async";
 
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<AuthSession>(() => loadSession());
+  const [phase, setPhase] = useState<AuthPhase>("loading");
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [shopName, setShopName] = useState<string | null>(null);
+
+  const refreshStatus = useCallback(async () => {
+    if (!AUTH_ENABLED) {
+      setPhase("authenticated");
+      return;
+    }
+    try {
+      const status = await authStatus();
+      setShopName(status.shopName ?? null);
+      if (status.needsSetup) {
+        clearTokens();
+        setUser(null);
+        setPhase("needs_setup");
+        return;
+      }
+      if (!getAccessToken()) {
+        setUser(null);
+        setPhase("anonymous");
+        return;
+      }
+      const session = await me();
+      setUser(session.user);
+      setShopName(status.shopName ?? null);
+      setPhase("authenticated");
+    } catch (error) {
+      if (isAbortError(error)) return;
+      clearTokens();
+      setUser(null);
+      setPhase("anonymous");
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshStatus();
+  }, [refreshStatus]);
 
   const value = useMemo(
     () => ({
-      session,
-      saveShop: (shop: ShopProfile) => {
-        const next = { ...session, shop, loggedIn: false };
-        setSession(next);
-        saveSession(next);
+      phase,
+      user,
+      shopName,
+      refreshStatus,
+      login: async (email: string, password: string) => {
+        try {
+          const response = await loginWithDevice(email, password);
+          setUser(response.user);
+          setPhase("authenticated");
+          return null;
+        } catch (error) {
+          return error instanceof Error && error.message.trim()
+            ? error.message.trim()
+            : AUTH_COPY.invalidCredentials;
+        }
       },
-      saveOwner: (owner: OwnerProfile) => {
-        const next = { ...session, owner, loggedIn: false };
-        setSession(next);
-        saveSession(next);
+      logout: async () => {
+        await apiLogout();
+        setUser(null);
+        setPhase("anonymous");
       },
-      completeSetup: (shop: ShopProfile, owner: OwnerProfile) => {
-        const next = { shop, owner, loggedIn: false };
-        setSession(next);
-        saveSession(next);
-      },
-      login: (email: string, password: string) => {
-        if (!session.owner) return "Set up the shop first";
-        const match =
-          email.trim().toLowerCase() === session.owner.email.toLowerCase() &&
-          password === session.owner.password;
-        if (!match) return "Email or password is wrong";
-        const next = { ...session, loggedIn: true };
-        setSession(next);
-        saveSession(next);
-        return null;
-      },
-      logout: () => {
-        const next = { ...session, loggedIn: false };
-        setSession(next);
-        saveSession(next);
+      completeSetup: async (payload: SetupFormPayload) => {
+        try {
+          const response = await setupShop({
+            ...payload,
+            deviceId: getDeviceId(),
+            deviceName: payload.deviceName ?? "Counter 1",
+          });
+          setUser(response.user);
+          setShopName(payload.shopName);
+          setPhase("authenticated");
+          return null;
+        } catch (error) {
+          return error instanceof Error && error.message.trim()
+            ? error.message.trim()
+            : "Could not complete setup";
+        }
       },
     }),
-    [session],
+    [phase, user, shopName, refreshStatus],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
-
-export { emptySession };

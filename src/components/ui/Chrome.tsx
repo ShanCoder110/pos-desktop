@@ -13,8 +13,8 @@ export function PageHeader({
 }) {
   if (!hint && !actions) return null;
   return (
-    <div className="mgmt-page-toolbar">
-      {hint ? <p className="mgmt-page-hint">{hint}</p> : <span />}
+    <div className="mgmt-page-toolbar [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [flex-shrink:0]">
+      {hint ? <p className="mgmt-page-hint [font-size:12px] [font-weight:500] [color:var(--muted)]">{hint}</p> : <span />}
       {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
     </div>
   );

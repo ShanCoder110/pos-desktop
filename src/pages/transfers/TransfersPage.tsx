@@ -1,27 +1,35 @@
-import { useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Eye, Plus } from "lucide-react";
 import {
   Badge,
   Button,
+  Checkbox,
   Drawer,
   EmptyRow,
+  HubChart,
   Field,
-  KpiCard,
-  PageHead,
+  PAGE_SIZE_ALL,
   Pagination,
-  SearchInput,
   SelectInput,
   Table,
-  Tabs,
+  TableRowsSkeleton,
   Td,
   TextArea,
   THead,
   Th,
+  dateInRange,
+  rangeForPeriod,
 } from "@/components/common";
-import { transfers as seed, branchName, lotNumber, productName, userName, branches, productLots } from "@/shared/domain/mock";
+import type { DateRangeFilter } from "@/components/common";
+import type { FilterChip } from "@/components/common/FilterPicker";
+import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
+import { useProductsHub } from "@/pages/products/ProductsLayout";
 import type { StockTransferRow, TransferStatus } from "@/shared/domain/types";
-
-const PAGE = 10;
+import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import { TRANSFER_TABLE_COLUMNS } from "@/shared/constants/products";
+import { ensureSession } from "@/services/auth";
+import { listAllTransfers } from "@/services/transfers";
+import { listAllBranches, type BranchResponse } from "@/services/org";
 
 function tone(s: TransferStatus) {
   if (s === "COMPLETED") return "ok" as const;
@@ -30,87 +38,227 @@ function tone(s: TransferStatus) {
 }
 
 export function TransfersPage() {
+  const { setActions, sectionKpi, products } = useProductsHub();
+  const [transfers, setTransfers] = useState<StockTransferRow[]>([]);
+  const [branches, setBranches] = useState<BranchResponse[]>([]);
   const [q, setQ] = useState("");
-  const [tab, setTab] = useState("all");
+  const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [cols, setCols] = useState(TRANSFER_TABLE_COLUMNS.map((c) => c.id));
+  const [view, setView] = useState<HubView>("table");
+  const [dateRange, setDateRange] = useState<DateRangeFilter>(() => rangeForPeriod("all"));
+  const [selected, setSelected] = useState<string[]>([]);
   const [open, setOpen] = useState<StockTransferRow | null>(null);
+  const [loading, setLoading] = useState({ page: true });
+
+  const branchNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    branches.forEach((b) => {
+      map[b.id] = b.name;
+    });
+    return map;
+  }, [branches]);
+
+  const productNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    products.forEach((p) => {
+      map[p.id] = p.name;
+    });
+    return map;
+  }, [products]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [sectionKpi]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      await ensureSession(controller.signal);
+      const [transferRows, branchRows] = await Promise.all([
+        listAllTransfers(controller.signal).catch(() => [] as StockTransferRow[]),
+        listAllBranches(controller.signal).catch(() => [] as BranchResponse[]),
+      ]);
+      setTransfers(transferRows);
+      setBranches(branchRows);
+    })().finally(() => setLoading((current) => ({ ...current, page: false })));
+    return () => controller.abort();
+  }, []);
+
+  useLayoutEffect(() => {
+    setActions(
+      <Button
+        variant="primary"
+        icon={<Plus size={14} />}
+        onClick={() => setOpen(transfers[0] ?? null)}
+      >
+        Add transfer
+      </Button>,
+    );
+    return () => setActions(null);
+  }, [setActions, transfers]);
 
   const rows = useMemo(() => {
-    return seed.filter((r) => {
-      const text = `${branchName(r.fromBranchId)} ${branchName(r.toBranchId)} ${r.notes}`.toLowerCase();
-      if (q && !text.includes(q.toLowerCase())) return false;
-      if (tab !== "all") return r.status === tab.toUpperCase();
+    const needle = q.trim().toLowerCase();
+    const status = chips.find((c) => c.field === "status")?.value?.toUpperCase();
+    return transfers.filter((r) => {
+      if (!dateInRange(r.createdAt, dateRange)) return false;
+      if (needle) {
+        const text =
+          `${branchNames[r.fromBranchId] ?? ""} ${branchNames[r.toBranchId] ?? ""} ${r.notes}`.toLowerCase();
+        if (!text.includes(needle)) return false;
+      }
+      if (sectionKpi === "PENDING" || sectionKpi === "COMPLETED" || sectionKpi === "CANCELLED") {
+        return r.status === sectionKpi;
+      }
+      if (status) return r.status === status;
       return true;
     });
-  }, [q, tab]);
+  }, [transfers, q, chips, sectionKpi, dateRange, branchNames]);
 
-  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
-  const shown = rows.slice((page - 1) * PAGE, page * PAGE);
+  const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(rows.length / pageSize));
+  const shown =
+    pageSize === PAGE_SIZE_ALL ? rows : rows.slice((page - 1) * pageSize, page * pageSize);
+  const chartData = useMemo(() => {
+    const grouped = new Map<string, number>();
+    rows.forEach((row) =>
+      grouped.set(row.status, (grouped.get(row.status) ?? 0) + row.items.length),
+    );
+    return [...grouped.entries()]
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [rows]);
+  const show = (id: string) => cols.includes(id);
+  const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
   return (
-    <div className="ui-stack">
-      <PageHead title="Transfers">
-        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(seed[1])}>
-          New transfer
-        </Button>
-      </PageHead>
-      <p className="ui-note">
-        Completing a transfer writes TRANSFER_OUT on the source branch and TRANSFER_IN on the destination, against the same ProductLot. Warehouse uses BranchLot when branch_lot_enabled is on.
-      </p>
-      <div className="ui-kpi-row">
-        <KpiCard label="Pending" value={seed.filter((t) => t.status === "PENDING").length} hint="Waiting receive" tone="warn" />
-        <KpiCard label="Completed" value={seed.filter((t) => t.status === "COMPLETED").length} hint="Stock moved" tone="ok" />
-        <KpiCard label="Cancelled" value={seed.filter((t) => t.status === "CANCELLED").length} hint="No movement" tone="danger" />
-      </div>
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All" },
-          { id: "pending", label: "Pending" },
-          { id: "completed", label: "Completed" },
-          { id: "cancelled", label: "Cancelled" },
-        ]}
-      />
+    <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
-        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Branch or note" />}
-        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
+        toolbar={
+          <HubToolbar
+            columns={TRANSFER_TABLE_COLUMNS}
+            cols={cols}
+            onCols={setCols}
+            chips={chips}
+            onApply={(chip) => {
+              setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
+              setPage(1);
+            }}
+            onRemove={(field) => {
+              setChips((c) => c.filter((x) => x.field !== field));
+              setPage(1);
+            }}
+            onClear={() => {
+              setChips([]);
+              setPage(1);
+            }}
+            filterFields={[
+              { id: "status", label: "Status", options: ["Pending", "Completed", "Cancelled"] },
+            ]}
+            search={q}
+            onSearch={(v) => {
+              setQ(v);
+              setPage(1);
+            }}
+            searchPlaceholder="Search transfers"
+            view={view}
+            onView={setView}
+            dateRange={dateRange}
+            onDateRange={(range) => {
+              setDateRange(range);
+              setPage(1);
+            }}
+          />
+        }
+        body={
+          view === "insights" ? (
+            <HubChart
+              type="donut"
+              title="Transferred items by status"
+              subtitle={`${rows.length} transfers after search, status, and date filters`}
+              data={chartData}
+            />
+          ) : undefined
+        }
+        footer={
+          <Pagination
+            page={Math.min(page, pages)}
+            pages={pages}
+            total={rows.length}
+            pageSize={pageSize}
+            onPageSize={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
+            onChange={setPage}
+          />
+        }
       >
         <THead>
           <tr>
+            <Th className="ui-check-col">
+              <Checkbox
+                checked={allShownSelected}
+                onChange={(e) => {
+                  if (e.target.checked)
+                    setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
+                  else setSelected((s) => s.filter((id) => !shown.some((r) => r.id === id)));
+                }}
+              />
+            </Th>
             <Th>From</Th>
-            <Th>To</Th>
-            <Th>Status</Th>
-            <Th>Items</Th>
-            <Th>Created</Th>
-            <Th>Completed</Th>
-            <Th>By</Th>
-            <Th />
+            {show("to") ? <Th>To</Th> : null}
+            {show("status") ? <Th>Status</Th> : null}
+            {show("items") ? <Th>Items</Th> : null}
+            {show("created") ? <Th>Created</Th> : null}
+            {show("completed") ? <Th>Completed</Th> : null}
+            {show("by") ? <Th>By</Th> : null}
+            <Th>Actions</Th>
           </tr>
         </THead>
         <tbody>
-          {shown.length === 0 ? <EmptyRow cols={8} /> : null}
-          {shown.map((row) => (
-            <tr key={row.id}>
-              <Td>{branchName(row.fromBranchId)}</Td>
-              <Td>{branchName(row.toBranchId)}</Td>
-              <Td>
-                <Badge tone={tone(row.status)}>{row.status}</Badge>
-              </Td>
-              <Td numeric>{row.items.length}</Td>
-              <Td>{row.createdAt}</Td>
-              <Td>{row.completedAt ?? "—"}</Td>
-              <Td>{userName(row.createdBy)}</Td>
-              <Td>
-                <Button size="icon" variant="ghost" onClick={() => setOpen(row)} aria-label="View">
-                  <Eye size={15} />
-                </Button>
-              </Td>
-            </tr>
-          ))}
+          {loading.page ? (
+            <TableRowsSkeleton columnCount={cols.length} rows={6} selectable hasActions />
+          ) : null}
+          {!loading.page && shown.length === 0 ? <EmptyRow cols={cols.length + 2} /> : null}
+          {!loading.page
+            ? shown.map((row) => (
+                <tr key={row.id}>
+                  <Td className="ui-check-col">
+                    <Checkbox
+                      checked={selected.includes(row.id)}
+                      onChange={(e) => {
+                        setSelected((s) =>
+                          e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
+                        );
+                      }}
+                    />
+                  </Td>
+                  <Td>{branchNames[row.fromBranchId] ?? row.fromBranchId}</Td>
+                  {show("to") ? <Td>{branchNames[row.toBranchId] ?? row.toBranchId}</Td> : null}
+                  {show("status") ? (
+                    <Td>
+                      <Badge tone={tone(row.status)}>{row.status}</Badge>
+                    </Td>
+                  ) : null}
+                  {show("items") ? <Td numeric>{row.items.length}</Td> : null}
+                  {show("created") ? <Td>{row.createdAt}</Td> : null}
+                  {show("completed") ? <Td>{row.completedAt ?? "—"}</Td> : null}
+                  {show("by") ? <Td>{row.createdBy || "—"}</Td> : null}
+                  <Td>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setOpen(row)}
+                      aria-label="View"
+                    >
+                      <Eye size={15} />
+                    </Button>
+                  </Td>
+                </tr>
+              ))
+            : null}
         </tbody>
       </Table>
 
@@ -126,7 +274,7 @@ export function TransfersPage() {
         }
       >
         {open ? (
-          <div className="ui-stack">
+          <div className="ui-stack [display:grid] [gap:12px]">
             <Field label="From">
               <SelectInput value={open.fromBranchId} disabled>
                 {branches.map((b) => (
@@ -157,10 +305,11 @@ export function TransfersPage() {
                 </tr>
               </THead>
               <tbody>
+                {open.items.length === 0 ? <EmptyRow cols={3} /> : null}
                 {open.items.map((item, i) => (
                   <tr key={i}>
-                    <Td>{productName(item.productId)}</Td>
-                    <Td>{lotNumber(item.productLotId) || productLots.find((l) => l.id === item.productLotId)?.lotNumber}</Td>
+                    <Td>{productNames[item.productId] ?? item.productId}</Td>
+                    <Td>{item.productLotId}</Td>
                     <Td numeric>{item.quantity}</Td>
                   </tr>
                 ))}

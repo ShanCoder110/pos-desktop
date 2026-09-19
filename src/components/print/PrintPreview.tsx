@@ -48,9 +48,13 @@ export function PrintPreview({
             </div>
           ) : null}
           <div className="p-4">
-            <p className="text-center text-sm font-bold">{settings.shopName}</p>
+            <p className="text-center text-sm font-bold">
+              {settings.receiptShopName || settings.shopName}
+            </p>
             <p className="text-center text-[10px] text-slate-500">Main counter · Lahore</p>
-            <p className="mt-2 text-center text-[10px]">{duplicate ? "Duplicate" : "Original"} · A-1043</p>
+            <p className="mt-2 text-center text-[10px]">
+              {duplicate ? "Duplicate" : "Original"} · A-1043
+            </p>
             <div className="my-2 border-t border-dashed border-slate-400" />
             <p>Cust: {customer.name}</p>
             {customer.phone ? <p>Ph: {customer.phone}</p> : null}
@@ -75,12 +79,18 @@ export function PrintPreview({
             {settings.showBalanceOnSlip ? (
               <>
                 <div className="flex justify-between">
-                  <span>Old khata</span>
-                  <span>{money(Math.abs(balanceBefore))} {balanceBefore < 0 ? "owe" : balanceBefore > 0 ? "adv" : ""}</span>
+                  <span>Previous balance</span>
+                  <span>
+                    {money(Math.abs(balanceBefore))}{" "}
+                    {balanceBefore < 0 ? "owe" : balanceBefore > 0 ? "adv" : ""}
+                  </span>
                 </div>
                 <div className="flex justify-between font-semibold">
-                  <span>New khata</span>
-                  <span>{money(Math.abs(balanceAfter))} {balanceAfter < 0 ? "owe" : balanceAfter > 0 ? "adv" : ""}</span>
+                  <span>Balance after</span>
+                  <span>
+                    {money(Math.abs(balanceAfter))}{" "}
+                    {balanceAfter < 0 ? "owe" : balanceAfter > 0 ? "adv" : ""}
+                  </span>
                 </div>
               </>
             ) : null}
@@ -105,7 +115,9 @@ export function PrintPreview({
             WhatsApp
           </Button>
           {!hasPhone ? (
-            <p className="text-[11px] text-slate-500">No phone on this customer. WhatsApp stays off.</p>
+            <p className="text-[11px] text-slate-500">
+              No phone on this customer. WhatsApp stays off.
+            </p>
           ) : null}
         </div>
       </div>

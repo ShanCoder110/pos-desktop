@@ -1,0 +1,1 @@
+-- Irreversible: PARTNER role and user unique indexes cannot be safely rolled back in SQLite.

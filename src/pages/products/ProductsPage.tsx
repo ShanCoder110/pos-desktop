@@ -1,19 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
-  AlertTriangle,
   ChevronDown,
-  Clock,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   FileSpreadsheet,
   FileText,
-  Gift,
-  Minus,
   Pencil,
   Plus,
   Printer,
   Receipt,
-  ShieldCheck,
   Tags,
   Trash2,
+  X,
 } from "lucide-react";
 import {
   Badge,
@@ -21,94 +21,112 @@ import {
   BulkActions,
   Button,
   Checkbox,
-  ColumnPicker,
   ConfirmDialog,
   Drawer,
-  Field,
-  FilterChips,
-  FilterPicker,
-  KpiCard,
+  HubChart,
   Menu,
   MenuItem,
-  MoneyInput,
+  PAGE_SIZE_ALL,
   Pagination,
   Popover,
-  SearchInput,
-  SelectInput,
+  SearchableSelect,
   Table,
-  Tabs,
+  TableRowsSkeleton,
   Td,
-  TextInput,
   THead,
   Th,
-  Toggle,
+  Tooltip,
+  TruncatedTooltip,
+  toaster,
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
-import { productCategories, products as seed } from "@/shared/mock";
+import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
+import { ProductForm } from "@/pages/products/ProductForm";
+import { useDebounce } from "@/hooks/useDebounce";
+import { blankProduct } from "@/pages/products/productLots";
+import { formatStockQty, qtyUnits, unitLabel } from "@/pages/products/productQty";
+import { matchesHealth, useProductsHub } from "@/pages/products/ProductsLayout";
+import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
+import {
+  DEFAULT_PRODUCT_COLUMNS,
+  DEFAULT_REORDER_COLUMNS,
+  PRODUCT_COPY,
+  PRODUCT_HEALTH_FROM_LABEL,
+  PRODUCT_HEALTH_LABEL,
+  PRODUCT_INSIGHT_METRICS,
+  PRODUCT_TABLE_COLUMNS,
+  REORDER_PRODUCT_COLUMNS,
+  productsHref,
+  type ProductInsightMetric,
+} from "@/shared/constants/products";
 import { useSettings } from "@/shared/settings";
 import type { Product } from "@/shared/types";
+import type { InvoiceRow } from "@/shared/domain/types";
+import { ensureSession } from "@/services/auth";
+import { listAllRepairs, type RepairResponse } from "@/services/repairs";
+import {
+  createProduct,
+  deleteProduct,
+  searchAllProducts,
+  updateProduct,
+} from "@/services/products";
+import {
+  buildCreateProductPayload,
+  buildUpdateProductPayload,
+  resolveCategoryId,
+} from "@/pages/products/productPayload";
+import { listAllInvoices } from "@/services/sales";
+import {
+  buildProductSalesStats,
+  formatInsightMetricValue,
+  insightMetricDetails,
+  insightMetricLabel,
+  insightMetricValue,
+  productSalesStats,
+} from "@/pages/products/productSalesStats";
 import { exportProductsCsv, exportProductsExcel, printProducts } from "@/utils/exportFile";
-import { money, warrantyDaysOf } from "@/utils/format";
+import { money, shortError } from "@/utils/format";
+import { branchStockTooltip, productTotalStock } from "@/utils/productStock";
 
-const blank: Product = {
-  id: "",
-  sku: "",
-  name: "",
-  category: "Wire",
-  unit: "pc",
-  isLinear: false,
-  isManufactured: false,
-  packQty: null,
-  packPrice: 0,
-  cost: 0,
-  min: 0,
-  wholesale: 0,
-  retail: 0,
-  warrantyQty: 0,
-  warrantyUnit: "months",
-  warrantyDays: 0,
-  claims: 0,
-  damaged: 0,
-  stock: 0,
-  components: [],
-};
+type PriceField = "cost" | "min" | "wholesale" | "retail";
 
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
-}
-
-function nextSku(existing: Product[]) {
-  const used = new Set(existing.map((r) => r.sku));
-  let i = existing.length + 1;
-  let sku = `P-${String(i).padStart(4, "0")}`;
-  while (used.has(sku)) {
-    i += 1;
-    sku = `P-${String(i).padStart(4, "0")}`;
+function unitPrices(row: Product, field: PriceField) {
+  if (row.sellUnits?.length) {
+    return qtyUnits(row.sellUnits).map((unit) => ({
+      id: unit.id,
+      name: unit.name || unitLabel(unit.symbol || row.unit),
+      value: field === "retail" ? unit.price : unit[field],
+    }));
   }
-  return sku;
+
+  const base = {
+    id: `${row.id}-base`,
+    name: unitLabel(row.unit),
+    value: row[field],
+  };
+  if (!row.packQty || row.packQty <= 1) return [base];
+
+  return [
+    {
+      id: `${row.id}-pack`,
+      name: "Pack",
+      value: field === "retail" && row.packPrice > 0 ? row.packPrice : row[field] * row.packQty,
+    },
+    base,
+  ];
 }
 
-function numVal(raw: string) {
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
+function UnitPrice({ row, field }: { row: Product; field: PriceField }) {
+  return (
+    <div className="product-unit-prices grid justify-items-end gap-1 [font-variant-numeric:tabular-nums]">
+      {unitPrices(row, field).map((price) => (
+        <span key={price.id} className="whitespace-nowrap">
+          {money(price.value)} <small className="font-medium text-muted">/ {price.name}</small>
+        </span>
+      ))}
+    </div>
+  );
 }
-
-function numStr(n: number) {
-  return n ? String(n) : "";
-}
-
-const PAGE_SIZE = 10;
-
-const COLUMNS = [
-  { id: "name", label: "Name", locked: true },
-  { id: "sku", label: "SKU" },
-  { id: "category", label: "Category" },
-  { id: "cost", label: "Cost" },
-  { id: "retail", label: "Sell" },
-  { id: "margin", label: "Margin" },
-  { id: "stock", label: "Stock" },
-  { id: "status", label: "Status" },
-];
 
 function marginPct(row: Product) {
   if (!row.cost) return 0;
@@ -117,24 +135,19 @@ function marginPct(row: Product) {
 
 function stockTone(row: Product): "ok" | "warn" | "danger" {
   if (row.stock <= 0) return "danger";
-  if (row.stock < 20) return "warn";
+  if (row.stock < (row.minimumStock ?? 20)) return "warn";
   return "ok";
 }
 
 function stockLabel(row: Product) {
   if (row.stock <= 0) return "Out of stock";
-  if (row.stock < 20) return "Low stock";
+  if (row.stock < (row.minimumStock ?? 20)) return "Low stock";
   return "In stock";
 }
 
-type HealthKpi = "healthy" | "risk" | "stale" | "dead" | "phantom";
-
-function matchesHealth(row: Product, kpi: HealthKpi) {
-  if (kpi === "healthy") return row.stock >= 20;
-  if (kpi === "risk") return row.stock > 0 && row.stock < 20;
-  if (kpi === "stale") return row.claims > 0 || row.damaged > 0;
-  if (kpi === "dead") return row.stock <= 0;
-  return row.isLinear;
+function minAmount(raw: string) {
+  const n = Number(String(raw).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? n : 0;
 }
 
 function ExportMenu({ rows, shopName }: { rows: Product[]; shopName: string }) {
@@ -150,21 +163,40 @@ function ExportMenu({ rows, shopName }: { rows: Product[]; shopName: string }) {
         </Button>
       }
     >
-      <div className="ui-pop-list" onClick={() => setOpen(false)}>
-        <button type="button" className="ui-pop-item" onClick={() => exportProductsCsv(rows)}>
+      <div
+        className="ui-pop-list [display:grid] [max-height:240px] [overflow:auto]"
+        onClick={() => setOpen(false)}
+      >
+        <button
+          type="button"
+          className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"
+          onClick={() => exportProductsCsv(rows)}
+        >
           <FileText size={14} />
           CSV
         </button>
-        <button type="button" className="ui-pop-item" onClick={() => exportProductsExcel(rows)}>
+        <button
+          type="button"
+          className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"
+          onClick={() => exportProductsExcel(rows)}
+        >
           <FileSpreadsheet size={14} />
           Excel
         </button>
-        <div className="ui-pop-sep" />
-        <button type="button" className="ui-pop-item" onClick={() => printProducts(rows, "thermal", shopName)}>
+        <div className="ui-pop-sep [height:1px] [margin:6px_4px] [background:var(--line)]" />
+        <button
+          type="button"
+          className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"
+          onClick={() => printProducts(rows, "thermal", shopName)}
+        >
           <Receipt size={14} />
           Thermal printer
         </button>
-        <button type="button" className="ui-pop-item" onClick={() => printProducts(rows, "a4", shopName)}>
+        <button
+          type="button"
+          className="ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"
+          onClick={() => printProducts(rows, "a4", shopName)}
+        >
           <Printer size={14} />
           A4
         </button>
@@ -175,29 +207,141 @@ function ExportMenu({ rows, shopName }: { rows: Product[]; shopName: string }) {
 
 export function ProductsPage() {
   const { settings } = useSettings();
-  const [rows, setRows] = useState(seed);
+  const {
+    setActions,
+    health,
+    setHealth,
+    section,
+    sectionKpi,
+    lots,
+    setLots,
+    products: rows,
+    categories,
+    units,
+    suppliers,
+    loading,
+    refreshHub,
+  } = useProductsHub();
+  const categoryOptions = categories.map((c) => c.name);
+  const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.name ?? "";
+
+  const navigate = useNavigate();
+  const tab = section === "low" ? "low" : "all";
   const [q, setQ] = useState("");
-  const [tab, setTab] = useState("all");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [cols, setCols] = useState(COLUMNS.map((c) => c.id));
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [cols, setCols] = useState<string[]>(
+    tab === "low" ? DEFAULT_REORDER_COLUMNS : DEFAULT_PRODUCT_COLUMNS,
+  );
+  const [view, setView] = useState<HubView>("table");
+  const [chartLimit, setChartLimit] = useState<"10" | "20" | "50" | "all">("10");
+  const [chartProductId, setChartProductId] = useState("");
+  const [remoteRows, setRemoteRows] = useState<Product[]>([]);
+  const [profitSort, setProfitSort] = useState<"asc" | "desc" | null>(null);
+  const [insightMetric, setInsightMetric] = useState<ProductInsightMetric>("profit");
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [repairJobs, setRepairJobs] = useState<RepairResponse[]>([]);
+  const [productLoading, setProductLoading] = useState({ saving: false, deleting: false });
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<Product | null>(null);
-  const [formTab, setFormTab] = useState("details");
-  const [unitManual, setUnitManual] = useState(false);
   const [remove, setRemove] = useState<Product | null>(null);
   const [blocked, setBlocked] = useState(false);
-  const [kpi, setKpi] = useState<HealthKpi | null>(null);
+  const debouncedGlobalQuery = useDebounce(q.trim(), 320);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        await ensureSession();
+        const [invoiceRows, repairs] = await Promise.all([
+          listAllInvoices(controller.signal).catch(() => [] as InvoiceRow[]),
+          listAllRepairs(controller.signal).catch(() => [] as RepairResponse[]),
+        ]);
+        if (controller.signal.aborted) return;
+        setInvoices(invoiceRows);
+        setRepairJobs(repairs);
+      } catch {
+        if (controller.signal.aborted) return;
+      }
+    })();
+    return () => controller.abort();
+  }, []);
+
+  const salesStats = useMemo(
+    () => buildProductSalesStats(rows, invoices, repairJobs),
+    [rows, invoices, repairJobs],
+  );
+
+  useEffect(() => {
+    if (debouncedGlobalQuery.length < 2) {
+      setRemoteRows([]);
+      return;
+    }
+    const controller = new AbortController();
+    searchAllProducts(debouncedGlobalQuery, controller.signal)
+      .then(setRemoteRows)
+      .catch((error: unknown) => {
+        if ((error as { name?: string })?.name !== "AbortError") setRemoteRows([]);
+      });
+    return () => controller.abort();
+  }, [debouncedGlobalQuery]);
+
+  useEffect(() => {
+    setPage(1);
+    setSelected([]);
+  }, [tab, sectionKpi]);
+
+  useEffect(() => {
+    setCols(tab === "low" ? DEFAULT_REORDER_COLUMNS : DEFAULT_PRODUCT_COLUMNS);
+  }, [tab]);
+
+  useEffect(() => {
+    setChips((prev) => {
+      const without = prev.filter((c) => c.field !== "health");
+      if (!health) return without;
+      return [
+        ...without,
+        { field: "health", label: "Health", value: PRODUCT_HEALTH_LABEL[health] },
+      ];
+    });
+    setPage(1);
+  }, [health]);
+
+  const searchRows = useMemo(() => {
+    if (!q.trim() || !remoteRows.length) return rows;
+    const merged = new Map(rows.map((product) => [product.id, product]));
+    remoteRows.forEach((product) => merged.set(product.id, product));
+    return [...merged.values()];
+  }, [q, remoteRows, rows]);
 
   const filtered = useMemo(() => {
-    return rows.filter((r) => {
+    const list = searchRows.filter((r) => {
       const text = `${r.name} ${r.sku} ${r.category}`.toLowerCase();
       if (q && !text.includes(q.toLowerCase())) return false;
-      if (kpi && !matchesHealth(r, kpi)) return false;
       for (const chip of chips) {
-        if (chip.field === "name" && !r.name.toLowerCase().includes(chip.value.toLowerCase())) return false;
+        if (chip.field === "health") {
+          const key = PRODUCT_HEALTH_FROM_LABEL[chip.value];
+          if (!key || !matchesHealth(r, key)) return false;
+        }
+        if (chip.field === "name" && !r.name.toLowerCase().includes(chip.value.toLowerCase()))
+          return false;
+        if (chip.field === "sku" && !r.sku.toLowerCase().includes(chip.value.toLowerCase()))
+          return false;
         if (chip.field === "category" && r.category !== chip.value) return false;
+        if (chip.field === "sales") {
+          if (productSalesStats(r.id, salesStats).sales < minAmount(chip.value)) return false;
+        }
+        if (chip.field === "profit") {
+          if (productSalesStats(r.id, salesStats).profit < minAmount(chip.value)) return false;
+        }
+        if (chip.field === "cost" && r.cost < minAmount(chip.value)) return false;
+        if (chip.field === "minimumPrice" && r.min < minAmount(chip.value)) return false;
+        if (chip.field === "wholesale" && r.wholesale < minAmount(chip.value)) return false;
+        if (chip.field === "retail" && r.retail < minAmount(chip.value)) return false;
+        if (chip.field === "stockQty" && r.stock < minAmount(chip.value)) return false;
+        if (chip.field === "stockValue" && r.stock * r.cost < minAmount(chip.value)) return false;
+        if (chip.field === "margin" && marginPct(r) < minAmount(chip.value)) return false;
         if (chip.field === "stock") {
           const tone = stockTone(r);
           if (chip.value === "In stock" && tone !== "ok") return false;
@@ -205,220 +349,405 @@ export function ProductsPage() {
           if (chip.value === "Out of stock" && tone !== "danger") return false;
         }
       }
-      if (tab === "low") return r.stock > 0 && r.stock < 20;
-      if (tab === "linear") return r.isLinear;
-      if (tab === "claims") return r.claims > 0 || r.damaged > 0;
+      if (tab === "low") {
+        const minimum = r.minimumStock ?? 20;
+        if (sectionKpi === "below") return r.stock > 0 && r.stock < minimum;
+        if (sectionKpi === "out") return r.stock <= 0;
+        return r.stock < minimum;
+      }
       return true;
     });
-  }, [rows, q, tab, chips, kpi]);
+    return list;
+  }, [searchRows, q, tab, chips, sectionKpi, salesStats]);
 
-  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const shown = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const ordered = useMemo(() => {
+    if (!profitSort) return filtered;
+    return [...filtered].sort((a, b) => {
+      const left = productSalesStats(a.id, salesStats).profit;
+      const right = productSalesStats(b.id, salesStats).profit;
+      return profitSort === "asc" ? left - right : right - left;
+    });
+  }, [filtered, profitSort, salesStats]);
+
+  const pageCount = pageSize === PAGE_SIZE_ALL ? Math.max(ordered.length, 1) : pageSize;
+  const pages = Math.max(1, Math.ceil(ordered.length / pageCount));
+  const shown =
+    pageSize === PAGE_SIZE_ALL ? ordered : ordered.slice((page - 1) * pageSize, page * pageSize);
+  const chartData = useMemo(() => {
+    return filtered
+      .map((product) => {
+        const stats = productSalesStats(product.id, salesStats);
+        const value = insightMetricValue(product, stats, insightMetric);
+        return {
+          id: product.id,
+          label: product.name,
+          value,
+          details: insightMetricDetails(product, stats),
+        };
+      })
+      .sort((a, b) => b.value - a.value);
+  }, [filtered, insightMetric, salesStats]);
+  const chartProduct = searchRows.find((product) => product.id === chartProductId);
+  const chartProductPoint = chartData.find((point) => point.id === chartProductId);
+  const latestLot = (productId: string) =>
+    [...lots]
+      .filter((lot) => lot.productId === productId)
+      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))[0];
   const show = (id: string) => cols.includes(id);
-  const healthCounts: Record<HealthKpi, number> = {
-    healthy: rows.filter((r) => matchesHealth(r, "healthy")).length,
-    risk: rows.filter((r) => matchesHealth(r, "risk")).length,
-    stale: rows.filter((r) => matchesHealth(r, "stale")).length,
-    dead: rows.filter((r) => matchesHealth(r, "dead")).length,
-    phantom: rows.filter((r) => matchesHealth(r, "phantom")).length,
-  };
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
-  function toggleKpi(id: HealthKpi) {
-    setKpi((cur) => (cur === id ? null : id));
-    setTab("all");
+  function removeChip(field: string) {
+    if (field === "health") setHealth(null);
+    setChips((prev) => prev.filter((c) => c.field !== field));
     setPage(1);
   }
 
-  function save() {
-    if (!edit?.name.trim()) return;
-    const next: Product = {
-      ...edit,
-      name: edit.name.trim(),
-      sku: settings.autoSku && !edit.sku.trim() ? nextSku(rows.filter((r) => r.id !== edit.id)) : edit.sku.trim(),
-      warrantyDays: warrantyDaysOf(edit.warrantyQty, edit.warrantyUnit),
-      components: edit.isManufactured ? edit.components.filter((c) => c.productId && c.quantity > 0) : [],
-      packQty: edit.packQty && edit.packQty > 0 ? edit.packQty : null,
-      packPrice: edit.packQty && edit.packQty > 0 ? edit.packPrice : 0,
-    };
-    setRows((prev) => (prev.some((r) => r.id === next.id) ? prev.map((r) => (r.id === next.id ? next : r)) : [...prev, next]));
-    setEdit(null);
+  function clearChips() {
+    setHealth(null);
+    setChips([]);
+    setPage(1);
+  }
+
+  async function commit(
+    next: Product,
+    branchQuantities: Record<string, number> = {},
+  ): Promise<boolean> {
+    const isNewRow = !rows.some((r) => r.id === next.id);
+    const category = resolveCategoryId(next, categories);
+    if (!category) {
+      toaster.error(PRODUCT_COPY.categoryRequired);
+      return false;
+    }
+    if (!units.some((row) => row.symbol === next.unit)) {
+      toaster.error(PRODUCT_COPY.unitRequired);
+      return false;
+    }
+    setProductLoading((current) => ({ ...current, saving: true }));
+    try {
+      if (isNewRow) {
+        const payload = buildCreateProductPayload(next, {
+          categoryId: category.id,
+          units,
+          branchQuantities,
+        });
+        if (!payload) {
+          toaster.error(PRODUCT_COPY.unitRequired);
+          return false;
+        }
+        const created = await createProduct(payload);
+        next.id = created.id;
+        next.categoryId = created.categoryId;
+        next.category = created.category;
+        next.sku = created.sku;
+      } else {
+        const payload = buildUpdateProductPayload(next, {
+          categoryId: category.id,
+          units,
+        });
+        if (!payload) {
+          toaster.error(PRODUCT_COPY.unitRequired);
+          return false;
+        }
+        const updated = await updateProduct(next.id, payload);
+        next.categoryId = updated.categoryId;
+        next.category = updated.category;
+        setLots((prev) => [...prev.filter((lot) => lot.productId !== next.id)]);
+      }
+      await refreshHub();
+      return true;
+    } catch (error) {
+      toaster.error(shortError(error, PRODUCT_COPY.saveFailed));
+      return false;
+    } finally {
+      setProductLoading((current) => ({ ...current, saving: false }));
+    }
   }
 
   const picked = rows.filter((r) => selected.includes(r.id));
 
   function openEdit(row: Product) {
-    const auto = row.packQty && row.packPrice ? round2(row.packPrice / row.packQty) : null;
-    setFormTab("details");
-    setUnitManual(auto != null && Math.abs(auto - row.retail) > 0.009);
-    setEdit(row);
+    setEdit({
+      ...row,
+      barcode: row.barcode ?? "",
+      supplierId: row.supplierId ?? "",
+      minimumStock: row.minimumStock ?? 0,
+      warrantyEnabled: row.warrantyEnabled ?? row.warrantyQty > 0,
+      warrantyNote: row.warrantyNote ?? "",
+    });
   }
 
   function openNew() {
-    openEdit({ ...blank, id: crypto.randomUUID() });
-  }
-
-  function patch(next: Partial<Product>) {
-    setEdit((cur) => (cur ? { ...cur, ...next } : cur));
-  }
-
-  function setPackPrice(packPrice: number) {
-    setEdit((cur) => {
-      if (!cur) return cur;
-      const next = { ...cur, packPrice };
-      if (!unitManual && next.packQty && next.packQty > 0) next.retail = round2(packPrice / next.packQty);
-      return next;
-    });
-  }
-
-  function setPackQty(packQty: number | null) {
-    setEdit((cur) => {
-      if (!cur) return cur;
-      const next = { ...cur, packQty };
-      if (!unitManual && packQty && packQty > 0 && next.packPrice) next.retail = round2(next.packPrice / packQty);
-      return next;
-    });
+    setEdit(blankProduct());
   }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== "F2") return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (remove || blocked || edit) return;
-      openNew();
+      if (edit || remove || blocked) return;
+      if (e.key === "F2") {
+        e.preventDefault();
+        e.stopPropagation();
+        openNew();
+      }
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [edit, remove, blocked]);
 
+  useLayoutEffect(() => {
+    setActions(
+      <>
+        <ExportMenu rows={filtered} shopName={settings.shopName} />
+        <Button variant="primary" icon={<Plus size={14} />} onClick={openNew}>
+          Add Product
+          <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+            F2
+          </kbd>
+        </Button>
+      </>,
+    );
+    return () => setActions(null);
+  }, [filtered, settings.shopName, setActions]);
+
+  const isNew = !edit || !rows.some((r) => r.id === edit.id);
+
   return (
-    <div className="ui-stack">
-      <div className="ui-page-head">
-        <h1 className="ui-page-title">Products</h1>
-        <div className="ui-actions">
-          <ExportMenu rows={filtered} shopName={settings.shopName} />
-          <Button icon={<Plus size={14} />} onClick={openNew}>
-            Add product
-            <kbd className="ui-kbd">F2</kbd>
-          </Button>
-          <BulkActions count={selected.length}>
-            <BulkAction icon={<FileText size={14} />} onClick={() => exportProductsCsv(picked, "selected-products.csv")}>
-              CSV
-            </BulkAction>
-            <BulkAction icon={<FileSpreadsheet size={14} />} onClick={() => exportProductsExcel(picked, "selected-products.xls")}>
-              Excel
-            </BulkAction>
-            <BulkAction icon={<Receipt size={14} />} onClick={() => printProducts(picked, "thermal", settings.shopName)}>
-              Thermal printer
-            </BulkAction>
-            <BulkAction icon={<Printer size={14} />} onClick={() => printProducts(picked, "a4", settings.shopName)}>
-              A4
-            </BulkAction>
-            <BulkAction
-              icon={<Tags size={14} />}
-              onClick={() => {
-                const first = picked[0];
-                if (first) openEdit(first);
-              }}
-            >
-              Edit selected
-            </BulkAction>
-          </BulkActions>
-        </div>
-      </div>
-
-      <div className="ui-kpi-row">
-        <KpiCard
-          label="Healthy"
-          value={healthCounts.healthy}
-          hint="In stock"
-          tone="ok"
-          icon={<ShieldCheck size={16} />}
-          active={kpi === "healthy"}
-          onClick={() => toggleKpi("healthy")}
-        />
-        <KpiCard
-          label="At risk"
-          value={healthCounts.risk}
-          hint="Low stock"
-          tone="warn"
-          icon={<AlertTriangle size={16} />}
-          active={kpi === "risk"}
-          onClick={() => toggleKpi("risk")}
-        />
-        <KpiCard
-          label="Stale"
-          value={healthCounts.stale}
-          hint="Has claims"
-          tone="stale"
-          icon={<Clock size={16} />}
-          active={kpi === "stale"}
-          onClick={() => toggleKpi("stale")}
-        />
-        <KpiCard
-          label="Dead"
-          value={healthCounts.dead}
-          hint="Out of stock"
-          tone="danger"
-          icon={<Trash2 size={16} />}
-          active={kpi === "dead"}
-          onClick={() => toggleKpi("dead")}
-        />
-        <KpiCard
-          label="Phantom"
-          value={healthCounts.phantom}
-          hint="Sold by length"
-          tone="phantom"
-          icon={<Gift size={16} />}
-          active={kpi === "phantom"}
-          onClick={() => toggleKpi("phantom")}
-        />
-      </div>
-
-      <Tabs
-        value={tab}
-        onChange={(id) => {
-          setTab(id);
-          setPage(1);
-        }}
-        items={[
-          { id: "all", label: "All products" },
-          { id: "low", label: "Low stock" },
-          { id: "linear", label: "Sold by length" },
-          { id: "claims", label: "Claims" },
-        ]}
-      />
-
+    <div
+      className={
+        edit
+          ? "products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden] is-drawer-open"
+          : "products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]"
+      }
+    >
       <Table
         toolbar={
-          <>
-            <div className="ui-toolbar-row">
-              <div className="ui-toolbar-left" style={{ width: "100%" }}>
-                <ColumnPicker columns={COLUMNS} value={cols} onChange={setCols} />
-                <FilterPicker
-                  chips={chips}
-                  onApply={(chip) => {
-                    setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
-                    setPage(1);
-                  }}
-                  fields={[
-                    { id: "name", label: "Name" },
-                    { id: "category", label: "Category", options: productCategories },
-                    { id: "stock", label: "Stock", options: ["In stock", "Low stock", "Out of stock"] },
-                  ]}
-                />
-                <SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Search by name, SKU, category" />
-              </div>
-            </div>
-            <FilterChips
-              items={chips}
-              onRemove={(field) => {
-                setChips((prev) => prev.filter((c) => c.field !== field));
-                setPage(1);
-              }}
+          <HubToolbar
+            columns={tab === "low" ? REORDER_PRODUCT_COLUMNS : PRODUCT_TABLE_COLUMNS}
+            cols={cols}
+            onCols={setCols}
+            chips={chips}
+            onApply={(chip) => {
+              setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
+              setPage(1);
+            }}
+            onRemove={removeChip}
+            onClear={clearChips}
+            filterFields={[
+              { id: "name", label: "Name" },
+              { id: "sku", label: "SKU" },
+              { id: "category", label: "Category", options: categoryOptions, searchable: true },
+              {
+                id: "sales",
+                label: "Total sales",
+                placeholder: "Min amount e.g. 5000",
+                numeric: true,
+              },
+              { id: "profit", label: "Profit", placeholder: "Min amount e.g. 1000", numeric: true },
+              {
+                id: "stock",
+                label: "Stock status",
+                options: ["In stock", "Low stock", "Out of stock"],
+              },
+              {
+                id: "stockQty",
+                label: "Stock quantity",
+                placeholder: "Minimum quantity",
+                numeric: true,
+              },
+              {
+                id: "stockValue",
+                label: "Stock value",
+                placeholder: "Minimum stock value",
+                numeric: true,
+              },
+              { id: "cost", label: "Cost price", placeholder: "Minimum cost", numeric: true },
+              {
+                id: "minimumPrice",
+                label: "Minimum price",
+                placeholder: "Minimum amount",
+                numeric: true,
+              },
+              {
+                id: "wholesale",
+                label: "Wholesale price",
+                placeholder: "Minimum wholesale",
+                numeric: true,
+              },
+              { id: "retail", label: "Retail price", placeholder: "Minimum retail", numeric: true },
+              {
+                id: "margin",
+                label: "Margin %",
+                placeholder: "Minimum margin percentage",
+                numeric: true,
+              },
+            ]}
+            search={q}
+            onSearch={(v) => {
+              setQ(v);
+              setPage(1);
+            }}
+            searchPlaceholder="Search by name, SKU, category"
+            view={view}
+            onView={setView}
+            insightControls={
+              <SearchableSelect
+                className="w-[190px] [&_.ui-combo-field]:h-8 [&_.ui-combo-input]:text-[11px]"
+                value={insightMetric}
+                options={PRODUCT_INSIGHT_METRICS.map((metric) => ({
+                  value: metric.id,
+                  label: metric.label,
+                }))}
+                onChange={(value) => {
+                  setInsightMetric(value as ProductInsightMetric);
+                  setChartProductId("");
+                }}
+                clearable={false}
+                searchable={false}
+                placeholder="Metric"
+              />
+            }
+            trailing={
+              selected.length > 0 ? (
+                <BulkActions count={selected.length}>
+                  <BulkAction
+                    icon={<FileText size={14} />}
+                    onClick={() => exportProductsCsv(picked, "selected-products.csv")}
+                  >
+                    CSV
+                  </BulkAction>
+                  <BulkAction
+                    icon={<FileSpreadsheet size={14} />}
+                    onClick={() => exportProductsExcel(picked, "selected-products.xls")}
+                  >
+                    Excel
+                  </BulkAction>
+                  <BulkAction
+                    icon={<Receipt size={14} />}
+                    onClick={() => printProducts(picked, "thermal", settings.shopName)}
+                  >
+                    Thermal printer
+                  </BulkAction>
+                  <BulkAction
+                    icon={<Printer size={14} />}
+                    onClick={() => printProducts(picked, "a4", settings.shopName)}
+                  >
+                    A4
+                  </BulkAction>
+                  <BulkAction
+                    icon={<Tags size={14} />}
+                    onClick={() => {
+                      const first = picked[0];
+                      if (first) openEdit(first);
+                    }}
+                  >
+                    Edit selected
+                  </BulkAction>
+                </BulkActions>
+              ) : null
+            }
+          />
+        }
+        body={
+          view === "insights" ? (
+            <HubChart
+              type="bar"
+              title={insightMetricLabel(insightMetric)}
+              subtitle={`${chartLimit === "all" ? "All" : chartLimit} of ${filtered.length} matching products · completed sales · click a bar for details`}
+              data={chartData}
+              maxItems={chartLimit === "all" ? null : Number(chartLimit)}
+              formatValue={(value) => formatInsightMetricValue(insightMetric, value)}
+              selectedId={chartProductId}
+              onPointClick={(point) => setChartProductId(point.id ?? "")}
+              controls={
+                <div className="flex items-center gap-2">
+                  <SearchableSelect
+                    className="w-[130px] [&_.ui-combo-field]:h-8 [&_.ui-combo-input]:text-[11px]"
+                    value={chartLimit}
+                    options={[
+                      { value: "10", label: "10 products" },
+                      { value: "20", label: "20 products" },
+                      { value: "50", label: "50 products" },
+                      { value: "all", label: "All products" },
+                    ]}
+                    onChange={(value) => setChartLimit(value as "10" | "20" | "50" | "all")}
+                    clearable={false}
+                    searchable={false}
+                    placeholder="Products"
+                  />
+                </div>
+              }
+              sidePanel={
+                chartProduct ? (
+                  <aside
+                    key={chartProduct.id}
+                    className="w-[320px] shrink-0 animate-[slideInRight_.2s_ease-out] bg-bg/20 p-4"
+                  >
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-accent-deep">
+                          Product details
+                        </span>
+                        <h3 className="mt-1 truncate text-[16px] font-extrabold text-ink">
+                          {chartProduct.name}
+                        </h3>
+                        <p className="mt-1 text-[10px] text-muted">
+                          {chartProduct.sku} · {chartProduct.category}
+                        </p>
+                      </div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        aria-label="Close product details"
+                        onClick={() => setChartProductId("")}
+                      >
+                        <X size={15} />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(chartProductPoint?.details ?? []).map((detail) => (
+                        <div
+                          key={detail.label}
+                          className="rounded-lg border border-line bg-bg/50 p-2.5"
+                        >
+                          <span className="block text-[9px] font-semibold text-muted">
+                            {detail.label}
+                          </span>
+                          <strong className="mt-1 block text-[12px] tabular-nums text-ink">
+                            {detail.value}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 rounded-xl border border-line p-3">
+                      <h4 className="mb-3 text-[11px] font-bold text-ink">Pricing</h4>
+                      <div className="grid gap-2 text-[10px]">
+                        {[
+                          ["Cost", chartProduct.cost],
+                          ["Minimum", chartProduct.min],
+                          ["Wholesale", chartProduct.wholesale],
+                          ["Retail", chartProduct.retail],
+                        ].map(([label, value]) => (
+                          <div key={String(label)} className="flex justify-between gap-4">
+                            <span className="text-muted">{label}</span>
+                            <b className="tabular-nums text-ink">{money(Number(value))}</b>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-xl border border-line p-3 text-[10px]">
+                      <div className="flex justify-between gap-4">
+                        <span className="text-muted">Status</span>
+                        <Badge tone={stockTone(chartProduct)}>{stockLabel(chartProduct)}</Badge>
+                      </div>
+                      <div className="mt-2 flex justify-between gap-4">
+                        <span className="text-muted">Minimum stock</span>
+                        <b>{formatStockQty(chartProduct.minimumStock ?? 20)}</b>
+                      </div>
+                    </div>
+                  </aside>
+                ) : null
+              }
             />
-          </>
+          ) : undefined
         }
         footer={
           <Pagination
@@ -436,11 +765,12 @@ export function ProductsPage() {
       >
         <THead>
           <tr>
-            <Th>
+            <Th className="ui-check-col">
               <Checkbox
                 checked={allShownSelected}
                 onChange={(e) => {
-                  if (e.target.checked) setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
+                  if (e.target.checked)
+                    setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
                   else setSelected((s) => s.filter((id) => !shown.some((r) => r.id === id)));
                 }}
               />
@@ -448,361 +778,259 @@ export function ProductsPage() {
             <Th>Name</Th>
             {show("sku") ? <Th>SKU</Th> : null}
             {show("category") ? <Th>Category</Th> : null}
+            {show("supplier") ? <Th>Last supplier</Th> : null}
             {show("cost") ? <Th>Cost</Th> : null}
-            {show("retail") ? <Th>Sell</Th> : null}
+            {show("min") ? <Th>Minimum</Th> : null}
+            {show("wholesale") ? <Th>Wholesale</Th> : null}
+            {show("retail") ? <Th>Retail</Th> : null}
             {show("margin") ? <Th>Margin</Th> : null}
-            {show("stock") ? <Th>Stock</Th> : null}
+            {show("sales") ? <Th>Total sales</Th> : null}
+            {show("profit") ? (
+              <Th>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 border-0 bg-transparent p-0 font:inherit text-inherit"
+                  aria-label="Sort by profit"
+                  aria-pressed={Boolean(profitSort)}
+                  onClick={() =>
+                    setProfitSort((current) =>
+                      current === null ? "desc" : current === "desc" ? "asc" : null,
+                    )
+                  }
+                >
+                  Profit
+                  {profitSort === "desc" ? (
+                    <ArrowDown size={12} />
+                  ) : profitSort === "asc" ? (
+                    <ArrowUp size={12} />
+                  ) : (
+                    <ArrowUpDown size={12} />
+                  )}
+                </button>
+              </Th>
+            ) : null}
+            {show("stock") ? <Th>Qty</Th> : null}
+            {show("minStock") ? <Th>Minimum qty</Th> : null}
+            {show("recommended") ? <Th>Recommended order</Th> : null}
+            {show("lastCost") ? <Th>Last cost</Th> : null}
             {show("status") ? <Th>Status</Th> : null}
             <Th>Actions</Th>
           </tr>
         </THead>
         <tbody>
-          {shown.map((row) => {
-            const tone = stockTone(row);
-            const pct = marginPct(row);
-            return (
-              <tr key={row.id} className={`is-${tone}`}>
-                <Td>
-                  <Checkbox
-                    checked={selected.includes(row.id)}
-                    onChange={(e) => {
-                      setSelected((s) => (e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id)));
-                    }}
-                  />
-                </Td>
-                <Td>
-                  {row.name}
-                  {row.isLinear ? <span className="sub">Sold by meter</span> : null}
-                  {row.packQty ? <span className="sub">Pack of {row.packQty}</span> : null}
-                  {row.isManufactured ? <span className="sub">Production</span> : null}
-                </Td>
-                {show("sku") ? <Td>{row.sku || "—"}</Td> : null}
-                {show("category") ? <Td>{row.category}</Td> : null}
-                {show("cost") ? <Td numeric>{money(row.cost)}</Td> : null}
-                {show("retail") ? <Td numeric>{money(row.retail)}</Td> : null}
-                {show("margin") ? (
-                  <Td numeric>
-                    <span style={{ color: pct >= 0 ? "var(--sale)" : "var(--danger)", fontWeight: 700 }}>
-                      {pct >= 0 ? "+" : ""}
-                      {pct.toFixed(1)}%
-                    </span>
-                  </Td>
-                ) : null}
-                {show("stock") ? (
-                  <Td numeric>
-                    {row.stock} {row.unit}
-                  </Td>
-                ) : null}
-                {show("status") ? (
-                  <Td>
-                    <div className="ui-actions">
-                      <Badge tone={tone}>{stockLabel(row)}</Badge>
-                      {row.stock > 0 ? <Badge tone="ok">Sellable</Badge> : <Badge>Held</Badge>}
-                    </div>
-                  </Td>
-                ) : null}
-                <Td>
-                  <Menu>
-                    <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
-                      Edit
-                    </MenuItem>
-                    <MenuItem
-                      danger
-                      icon={<Trash2 size={14} />}
-                      onClick={() => {
-                        if (row.stock > 0 || row.claims > 0) setBlocked(true);
-                        else setRemove(row);
+          {loading.hub ? (
+            <TableRowsSkeleton
+              columnCount={cols.length}
+              rows={
+                pageSize === PAGE_SIZE_ALL ? Math.min(Math.max(filtered.length, 6), 12) : pageSize
+              }
+              selectable
+              hasActions
+            />
+          ) : (
+            shown.map((row) => {
+              const tone = stockTone(row);
+              const pct = marginPct(row);
+              const lastLot = latestLot(row.id);
+              const minimumStock = row.minimumStock ?? 20;
+              const recommended = Math.max(0, minimumStock * 2 - row.stock);
+              return (
+                <tr key={row.id} className={`is-${tone}`}>
+                  <Td className="ui-check-col">
+                    <Checkbox
+                      checked={selected.includes(row.id)}
+                      onChange={(e) => {
+                        setSelected((s) =>
+                          e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
+                        );
                       }}
-                    >
-                      Delete
-                    </MenuItem>
-                  </Menu>
-                </Td>
-              </tr>
-            );
-          })}
+                    />
+                  </Td>
+                  <Td>
+                    <TruncatedTooltip text={row.name} />
+                    {row.isLinear ? <span className="sub">Sold by meter</span> : null}
+                    {row.isManufactured ? <span className="sub">Production</span> : null}
+                  </Td>
+                  {show("sku") ? <Td>{row.sku || "—"}</Td> : null}
+                  {show("category") ? <Td>{row.category}</Td> : null}
+                  {show("supplier") ? (
+                    <Td>{lastLot ? supplierName(lastLot.supplierId) || "—" : "—"}</Td>
+                  ) : null}
+                  {show("cost") ? (
+                    <Td numeric>
+                      <UnitPrice row={row} field="cost" />
+                    </Td>
+                  ) : null}
+                  {show("min") ? (
+                    <Td numeric>
+                      <UnitPrice row={row} field="min" />
+                    </Td>
+                  ) : null}
+                  {show("wholesale") ? (
+                    <Td numeric>
+                      <UnitPrice row={row} field="wholesale" />
+                    </Td>
+                  ) : null}
+                  {show("retail") ? (
+                    <Td numeric>
+                      <UnitPrice row={row} field="retail" />
+                    </Td>
+                  ) : null}
+                  {show("margin") ? (
+                    <Td numeric>
+                      <span
+                        style={{
+                          color: pct >= 0 ? "var(--sale)" : "var(--danger)",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {pct >= 0 ? "+" : ""}
+                        {pct.toFixed(1)}%
+                      </span>
+                    </Td>
+                  ) : null}
+                  {show("sales") ? (
+                    <Td numeric>{money(productSalesStats(row.id, salesStats).sales)}</Td>
+                  ) : null}
+                  {show("profit") ? (
+                    <Td numeric>
+                      <span
+                        className={
+                          productSalesStats(row.id, salesStats).profit >= 0
+                            ? "font-bold text-sale"
+                            : "font-bold text-danger"
+                        }
+                      >
+                        {money(productSalesStats(row.id, salesStats).profit)}
+                      </span>
+                    </Td>
+                  ) : null}
+                  {show("stock") ? (
+                    <Td numeric>
+                      <Tooltip
+                        content={branchStockTooltip(row)
+                          .split("\n")
+                          .map((line) => (
+                            <span key={line} className="block">
+                              {line}
+                            </span>
+                          ))}
+                      >
+                        <div className="product-qty [display:grid] [gap:1px] [justify-items:end] [font-variant-numeric:tabular-nums] [cursor:help]">
+                          <span>
+                            {formatStockQty(productTotalStock(row))} {unitLabel(row.unit)}
+                          </span>
+                          {(row.branchStock?.length ?? 0) > 1 ? (
+                            <small className="text-muted">
+                              {row.branchStock?.filter((entry) => entry.quantity > 0).length ?? 0}{" "}
+                              branches
+                            </small>
+                          ) : null}
+                        </div>
+                      </Tooltip>
+                    </Td>
+                  ) : null}
+                  {show("minStock") ? <Td numeric>{formatStockQty(minimumStock)}</Td> : null}
+                  {show("recommended") ? (
+                    <Td numeric>
+                      <strong>{formatStockQty(recommended)}</strong>
+                    </Td>
+                  ) : null}
+                  {show("lastCost") ? (
+                    <Td numeric>{lastLot ? money(lastLot.purchasePrice) : money(row.cost)}</Td>
+                  ) : null}
+                  {show("status") ? (
+                    <Td>
+                      <Badge tone={tone}>{stockLabel(row)}</Badge>
+                    </Td>
+                  ) : null}
+                  <Td>
+                    {tab === "low" ? (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={() =>
+                          navigate(productsHref("lots"), { state: { addLotProductId: row.id } })
+                        }
+                      >
+                        Add lot
+                      </Button>
+                    ) : (
+                      <Menu>
+                        <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
+                          Edit
+                        </MenuItem>
+                        <MenuItem
+                          danger
+                          icon={<Trash2 size={14} />}
+                          onClick={() => {
+                            if (row.stock > 0 || row.claims > 0) setBlocked(true);
+                            else setRemove(row);
+                          }}
+                        >
+                          Delete
+                        </MenuItem>
+                      </Menu>
+                    )}
+                  </Td>
+                </tr>
+              );
+            })
+          )}
         </tbody>
       </Table>
 
       <Drawer
         open={Boolean(edit)}
-        title={edit?.name ? "Edit product" : "Add product"}
-        wide
+        size="lg"
         form
-        onClose={() => setEdit(null)}
-        footer={
-          <>
-            <Button onClick={() => setEdit(null)}>Cancel</Button>
-            <Button variant="primary" onClick={save}>
+        dim={false}
+        title={isNew ? "Add Product" : "Edit Product"}
+        subtitle={
+          <p className="product-keys [display:flex] [flex-wrap:wrap] [gap:8px_12px] [margin:0] [font-size:11px] [color:var(--muted)]">
+            <span>
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+                Tab
+              </kbd>{" "}
+              Move
+            </span>
+            <span>
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+                Shift + Tab
+              </kbd>{" "}
+              Back
+            </span>
+            <span>
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+                Enter
+              </kbd>{" "}
+              Select
+            </span>
+            <span>
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+                F12
+              </kbd>{" "}
               Save
-            </Button>
-          </>
+            </span>
+            <span>
+              <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
+                Esc
+              </kbd>{" "}
+              Close
+            </span>
+          </p>
         }
+        onClose={() => setEdit(null)}
       >
         {edit ? (
-          <div className="product-form">
-            <Tabs
-              value={formTab}
-              onChange={setFormTab}
-              items={[
-                { id: "details", label: "Details" },
-                { id: "pack", label: "Pack" },
-                { id: "recipe", label: "Recipe" },
-                { id: "warranty", label: "Warranty" },
-              ]}
-            />
-            {formTab === "details" ? (
-              <div className="product-form-pane">
-                <div className="product-form-grid">
-                  <Field label="Name" className="is-full">
-                    <TextInput
-                      autoFocus
-                      placeholder="e.g. 1.5mm copper wire"
-                      value={edit.name}
-                      onChange={(e) => patch({ name: e.target.value })}
-                    />
-                  </Field>
-                  <Field
-                    label="SKU"
-                    hint={settings.autoSku ? "Assigned when you save." : "Leave blank if you do not use SKUs."}
-                  >
-                    <TextInput
-                      placeholder={settings.autoSku ? "Assigned when saved" : "Optional"}
-                      value={edit.sku}
-                      disabled={settings.autoSku}
-                      onChange={(e) => patch({ sku: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="Category">
-                    <SelectInput value={edit.category} onChange={(e) => patch({ category: e.target.value })}>
-                      {productCategories.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </SelectInput>
-                  </Field>
-                  <Field label="Unit">
-                    <SelectInput
-                      value={edit.unit}
-                      onChange={(e) => patch({ unit: e.target.value as Product["unit"] })}
-                    >
-                      <option value="pc">Piece</option>
-                      <option value="m">Meter</option>
-                    </SelectInput>
-                  </Field>
-                  <div className="product-flag is-full">
-                    <Toggle
-                      checked={edit.isLinear}
-                      onChange={(v) => patch({ isLinear: v, unit: v ? "m" : "pc" })}
-                      label="Sold by length (wire, pipe)"
-                    />
-                  </div>
-                  <Field label="Cost">
-                    <MoneyInput
-                      placeholder="0.00"
-                      value={numStr(edit.cost)}
-                      onChange={(e) => patch({ cost: numVal(e.target.value) })}
-                    />
-                  </Field>
-                  <Field label="Minimum">
-                    <MoneyInput
-                      placeholder="0.00"
-                      value={numStr(edit.min)}
-                      onChange={(e) => patch({ min: numVal(e.target.value) })}
-                    />
-                  </Field>
-                  <Field label="Wholesale">
-                    <MoneyInput
-                      placeholder="0.00"
-                      value={numStr(edit.wholesale)}
-                      onChange={(e) => patch({ wholesale: numVal(e.target.value) })}
-                    />
-                  </Field>
-                  {!edit.packQty ? (
-                    <Field label="Retail">
-                      <MoneyInput
-                        placeholder="0.00"
-                        value={numStr(edit.retail)}
-                        onChange={(e) => patch({ retail: numVal(e.target.value) })}
-                      />
-                    </Field>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-            {formTab === "pack" ? (
-              <div className="product-form-pane">
-                <div className="product-flag">
-                  <Toggle
-                    checked={edit.packQty != null}
-                    onChange={(v) => {
-                      if (!v) {
-                        setEdit((cur) => (cur ? { ...cur, packQty: null, packPrice: 0 } : cur));
-                        return;
-                      }
-                      setUnitManual(false);
-                      setPackQty(edit.isLinear ? 90 : 12);
-                    }}
-                    label="This product is sold in a pack"
-                  />
-                </div>
-                {edit.packQty != null ? (
-                  <div className="product-form-grid">
-                    <Field label="Pack size" hint={edit.isLinear ? "Meters in one coil." : "Pieces in one pack."}>
-                      <TextInput
-                        inputMode="numeric"
-                        placeholder={edit.isLinear ? "e.g. 90" : "e.g. 12"}
-                        value={numStr(edit.packQty)}
-                        onChange={(e) => setPackQty(e.target.value === "" ? 0 : numVal(e.target.value))}
-                      />
-                    </Field>
-                    <Field label="Pack price">
-                      <MoneyInput
-                        placeholder="0.00"
-                        value={numStr(edit.packPrice)}
-                        onChange={(e) => setPackPrice(numVal(e.target.value))}
-                      />
-                    </Field>
-                    <Field
-                      label="Unit price"
-                      hint="Filled from pack price ÷ size. You can change it."
-                      className="is-full"
-                    >
-                      <MoneyInput
-                        placeholder="0.00"
-                        value={numStr(edit.retail)}
-                        onChange={(e) => {
-                          setUnitManual(true);
-                          patch({ retail: numVal(e.target.value) });
-                        }}
-                      />
-                    </Field>
-                  </div>
-                ) : (
-                  <p className="product-note">Turn this on for cartons, coils, or boxes. Pack price and unit price both stay here.</p>
-                )}
-              </div>
-            ) : null}
-            {formTab === "recipe" ? (
-              <div className="product-form-pane">
-                <div className="product-flag">
-                  <Toggle
-                    checked={edit.isManufactured}
-                    onChange={(v) => patch({ isManufactured: v, components: v ? edit.components : [] })}
-                    label="This is a production product"
-                  />
-                </div>
-                {edit.isManufactured ? (
-                  <>
-                    <div className="product-bom-head">
-                      <h3>Items used to make it</h3>
-                      <Button
-                        icon={<Plus size={14} />}
-                        onClick={() =>
-                          patch({
-                            components: [...edit.components, { id: crypto.randomUUID(), productId: "", quantity: 1 }],
-                          })
-                        }
-                      >
-                        Add item
-                      </Button>
-                    </div>
-                    <div className="product-bom">
-                      {edit.components.length === 0 ? (
-                        <p className="product-note">Add the parts, wire, or hardware that go into this product.</p>
-                      ) : (
-                        edit.components.map((line) => (
-                          <div key={line.id} className="product-bom-row">
-                            <Field label="Item">
-                              <SelectInput
-                                value={line.productId}
-                                onChange={(e) =>
-                                  patch({
-                                    components: edit.components.map((c) =>
-                                      c.id === line.id ? { ...c, productId: e.target.value } : c,
-                                    ),
-                                  })
-                                }
-                              >
-                                <option value="">Choose item</option>
-                                {rows
-                                  .filter((r) => r.id !== edit.id)
-                                  .map((r) => (
-                                    <option key={r.id} value={r.id}>
-                                      {r.name}
-                                    </option>
-                                  ))}
-                              </SelectInput>
-                            </Field>
-                            <Field label="Qty">
-                              <TextInput
-                                inputMode="decimal"
-                                placeholder="1"
-                                value={numStr(line.quantity)}
-                                onChange={(e) =>
-                                  patch({
-                                    components: edit.components.map((c) =>
-                                      c.id === line.id ? { ...c, quantity: numVal(e.target.value) } : c,
-                                    ),
-                                  })
-                                }
-                              />
-                            </Field>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              aria-label="Remove item"
-                              onClick={() => patch({ components: edit.components.filter((c) => c.id !== line.id) })}
-                            >
-                              <Minus size={14} />
-                            </Button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <p className="product-note">Turn this on for assembled or manufactured items, then list the components on this tab.</p>
-                )}
-              </div>
-            ) : null}
-            {formTab === "warranty" ? (
-              <div className="product-form-pane">
-                <p className="product-note">Leave duration blank if there is no warranty. Months is the default.</p>
-                <div className="product-form-grid">
-                  <Field label="Duration">
-                    <TextInput
-                      inputMode="numeric"
-                      placeholder="e.g. 12"
-                      value={numStr(edit.warrantyQty)}
-                      onChange={(e) =>
-                        patch({
-                          warrantyQty: numVal(e.target.value),
-                          warrantyDays: warrantyDaysOf(numVal(e.target.value), edit.warrantyUnit),
-                        })
-                      }
-                    />
-                  </Field>
-                  <Field label="Unit">
-                    <SelectInput
-                      value={edit.warrantyUnit}
-                      onChange={(e) => {
-                        const warrantyUnit = e.target.value as Product["warrantyUnit"];
-                        patch({
-                          warrantyUnit,
-                          warrantyDays: warrantyDaysOf(edit.warrantyQty, warrantyUnit),
-                        });
-                      }}
-                    >
-                      <option value="months">Months</option>
-                      <option value="days">Days</option>
-                    </SelectInput>
-                  </Field>
-                </div>
-              </div>
-            ) : null}
-          </div>
+          <ProductForm
+            product={edit}
+            catalog={rows}
+            onChange={setEdit}
+            onCommit={commit}
+            onClose={() => setEdit(null)}
+            saving={productLoading.saving}
+          />
         ) : null}
       </Drawer>
 
@@ -821,11 +1049,24 @@ export function ProductsPage() {
         body={`${remove?.name ?? "This product"} will be removed from the catalog.`}
         onCancel={() => setRemove(null)}
         onConfirm={() => {
-          if (remove) {
-            setRows((p) => p.filter((r) => r.id !== remove.id));
-            setSelected((s) => s.filter((id) => id !== remove.id));
+          if (!remove) {
+            setRemove(null);
+            return;
           }
-          setRemove(null);
+          setProductLoading((current) => ({ ...current, deleting: true }));
+          void deleteProduct(remove.id)
+            .then(() => refreshHub())
+            .then(() => {
+              setSelected((selectedIds) => selectedIds.filter((id) => id !== remove.id));
+              toaster.success(PRODUCT_COPY.deleted);
+              setRemove(null);
+            })
+            .catch((error) => {
+              toaster.error(shortError(error, PRODUCT_COPY.deleteFailed));
+            })
+            .finally(() => {
+              setProductLoading((current) => ({ ...current, deleting: false }));
+            });
         }}
       />
     </div>

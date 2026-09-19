@@ -1,10 +1,16 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { ToastProvider } from "@/components/common/Toast";
+import { applyColorMode, preferredColorMode } from "@/components/common/ThemeToggle";
 import "./index.css";
+
+applyColorMode(preferredColorMode());
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <ToastProvider>
+      <App />
+    </ToastProvider>
   </React.StrictMode>,
 );

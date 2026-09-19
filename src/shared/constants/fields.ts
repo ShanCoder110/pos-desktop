@@ -1,0 +1,47 @@
+import { PK_MOBILE_LENGTH } from "@/shared/constants/phone";
+
+/** Match backend DTO `length(max = …)` so the UI stops before the API rejects. */
+export const FIELD_LIMITS = {
+  text: 120,
+  name: 120,
+  productName: 160,
+  username: 80,
+  password: 200,
+  email: 254,
+  code: 32,
+  symbol: 32,
+  currency: 16,
+  prefix: 16,
+  sku: 64,
+  barcode: 128,
+  phoneDigits: PK_MOBILE_LENGTH,
+  phoneDisplay: 12,
+  address: 500,
+  description: 500,
+  notes: 1000,
+  longNotes: 2000,
+  search: 80,
+  qty: 12,
+  copies: 2,
+  shortNumber: 4,
+  moneyInteger: 10,
+  moneyFraction: 2,
+  moneyChars: 13,
+} as const;
+
+export const FORM_COPY = {
+  nameRequired: "Enter a name",
+  symbolRequired: "Enter a symbol",
+  amountRequired: "Enter an amount",
+  descriptionRequired: "Enter a description",
+  emailRequired: "Enter an email",
+  passwordRequired: "Enter a password",
+  confirmPasswordRequired: "Confirm your password",
+  shopRequired: "Enter the shop name",
+  addressRequired: "Enter an address",
+  firstNameRequired: "Enter a first name",
+  lastNameRequired: "Enter a last name",
+  phoneRequired: "Enter a phone number",
+  usernameRequired: "Enter a username",
+  codeRequired: "Enter a code",
+} as const;

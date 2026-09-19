@@ -1,0 +1,1 @@
+# Clippy defaults for CI / pre-commit. Warnings become errors in CI via `-- -D warnings`.

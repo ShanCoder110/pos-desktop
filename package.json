@@ -4,10 +4,40 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
+    "dev:ui": "vite",
+    "backend": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin api",
+    "backend:watch": "node scripts/run-backend-watch.mjs",
+    "backend:watch:setup": "node scripts/run-cargo.mjs install cargo-watch",
+    "api": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin api",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "node scripts/run-tauri.mjs",
+    "db:migrate": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin db -- migrate",
+    "db:seed": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin db -- seed",
+    "db:status": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin db -- status",
+    "db:new": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin db -- new",
+    "types:generate": "node scripts/generate-types.mjs",
+    "types:check": "node scripts/generate-types.mjs --check",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\" \".prettierrc.json\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
+    "check:rust": "node scripts/run-cargo.mjs fmt --manifest-path src-tauri/Cargo.toml --all -- --check && node scripts/run-cargo.mjs clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "check": "npm run types:check && npm run format:check && npm run lint && npm run check:rust",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "src/**/*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "src/**/*.{css,json}": [
+      "prettier --write"
+    ],
+    "src-tauri/**/*.rs": [
+      "node scripts/run-cargo.mjs fmt --manifest-path src-tauri/Cargo.toml --"
+    ]
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -15,14 +45,24 @@
     "lucide-react": "^1.31.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-hook-form": "^7.88.0",
     "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
+    "@eslint/js": "^9.35.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "@typescript-eslint/eslint-plugin": "^8.43.0",
+    "@typescript-eslint/parser": "^8.43.0",
     "@vitejs/plugin-react": "^4.6.0",
+    "eslint": "^9.35.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.6",
+    "prettier": "^3.6.2",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"

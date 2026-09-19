@@ -3,14 +3,17 @@ import { AUTH_ENABLED, useSession } from "@/shared/auth/session";
 import { routes } from "@/shared/constants/routes";
 
 export function RootRedirect() {
-  const { session } = useSession();
+  const { phase } = useSession();
   if (!AUTH_ENABLED) {
     return <Navigate to={routes.dashboard} replace />;
   }
-  if (!session.shop || !session.owner) {
+  if (phase === "loading") {
+    return <Navigate to={routes.login} replace />;
+  }
+  if (phase === "needs_setup") {
     return <Navigate to={routes.setup} replace />;
   }
-  if (!session.loggedIn) {
+  if (phase !== "authenticated") {
     return <Navigate to={routes.login} replace />;
   }
   return <Navigate to={routes.dashboard} replace />;
