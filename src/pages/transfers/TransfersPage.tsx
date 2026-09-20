@@ -26,10 +26,25 @@ import { TransferDetailDrawer } from "@/pages/transfers/TransferDetailDrawer";
 import { TRANSFER_FORM_ID, TransferForm } from "@/pages/transfers/TransferForm";
 import type { StockTransferRow, TransferStatus } from "@/shared/domain/types";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
-import { TRANSFER_COPY, TRANSFER_TABLE_COLUMNS } from "@/shared/constants/products";
+import {
+  DEFAULT_TRANSFER_COLUMNS,
+  TRANSFER_COPY,
+  TRANSFER_TABLE_COLUMNS,
+} from "@/shared/constants/products";
 import { ensureSession } from "@/services/auth";
 import { getTransfer, listAllTransfers } from "@/services/transfers";
 import { listAllBranches, type BranchResponse } from "@/services/org";
+import {
+  TransferFromStockCell,
+  TransferProductCell,
+  TransferToStockCell,
+} from "@/pages/transfers/TransferTableCells";
+import {
+  transferBranchStockSummary,
+  transferProductLabel,
+  transferTotalMoved,
+} from "@/pages/transfers/transferDetail";
+import { formatTableDateTime } from "@/utils/format";
 
 function mapStatus(status: string): TransferStatus {
   if (status === "RECEIVED" || status === "COMPLETED") return "COMPLETED";
@@ -58,7 +73,7 @@ export function TransfersPage() {
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [cols, setCols] = useState(TRANSFER_TABLE_COLUMNS.map((c) => c.id));
+  const [cols, setCols] = useState(DEFAULT_TRANSFER_COLUMNS);
   const [view, setView] = useState<HubView>("table");
   const [dateRange, setDateRange] = useState<DateRangeFilter>(() => rangeForPeriod("all"));
   const [selected, setSelected] = useState<string[]>([]);
@@ -244,14 +259,16 @@ export function TransfersPage() {
                 }}
               />
             </Th>
-            <Th>From</Th>
+            {show("from") ? <Th>From</Th> : null}
             {show("to") ? <Th>To</Th> : null}
+            {show("product") ? <Th>Product</Th> : null}
+            {show("fromStock") ? <Th>From stock</Th> : null}
+            {show("toStock") ? <Th>To stock</Th> : null}
             {show("status") ? <Th>Status</Th> : null}
-            {show("items") ? <Th>Items</Th> : null}
             {show("created") ? <Th>Created</Th> : null}
             {show("completed") ? <Th>Completed</Th> : null}
-            {show("by") ? <Th>By</Th> : null}
-            <Th>Actions</Th>
+            {show("items") ? <Th>Lines</Th> : null}
+            <Th className="ui-actions-col">Actions</Th>
           </tr>
         </THead>
         <tbody>
@@ -260,43 +277,93 @@ export function TransfersPage() {
           ) : null}
           {!loading.page && shown.length === 0 ? <EmptyRow cols={cols.length + 2} /> : null}
           {!loading.page
-            ? shown.map((row) => (
-                <tr key={row.id}>
-                  <Td className="ui-check-col">
-                    <Checkbox
-                      checked={selected.includes(row.id)}
-                      onChange={(e) => {
-                        setSelected((s) =>
-                          e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
-                        );
-                      }}
-                    />
-                  </Td>
-                  <Td>{branchNames[row.fromBranchId] ?? row.fromBranchId}</Td>
-                  {show("to") ? <Td>{branchNames[row.toBranchId] ?? row.toBranchId}</Td> : null}
-                  {show("status") ? (
-                    <Td>
-                      <Badge tone={tone(mapStatus(row.status))}>
-                        {statusLabel(mapStatus(row.status))}
-                      </Badge>
+            ? shown.map((row) => {
+                const primaryProductId = row.items[0]?.productId;
+                const primaryProduct = primaryProductId
+                  ? products.find((p) => p.id === primaryProductId)
+                  : undefined;
+                const stockSummary = transferBranchStockSummary(row, lots);
+                const movedQty = transferTotalMoved(row);
+                const singleProduct =
+                  row.items.length > 0 &&
+                  row.items.every((item) => item.productId === primaryProductId)
+                    ? primaryProduct
+                    : undefined;
+
+                return (
+                  <tr key={row.id}>
+                    <Td className="ui-check-col">
+                      <Checkbox
+                        checked={selected.includes(row.id)}
+                        onChange={(e) => {
+                          setSelected((s) =>
+                            e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
+                          );
+                        }}
+                      />
                     </Td>
-                  ) : null}
-                  {show("items") ? <Td numeric>{row.items.length}</Td> : null}
-                  {show("created") ? <Td>{row.createdAt}</Td> : null}
-                  {show("completed") ? <Td>{row.completedAt ?? "—"}</Td> : null}
-                  {show("by") ? <Td>{row.createdBy || "—"}</Td> : null}
-                  <Td>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => openTransfer(row)}
-                      aria-label="View"
-                    >
-                      <Eye size={15} />
-                    </Button>
-                  </Td>
-                </tr>
-              ))
+                    {show("from") ? (
+                      <Td>
+                        <span className="transfer-table-branch">
+                          {branchNames[row.fromBranchId] ?? row.fromBranchId}
+                        </span>
+                      </Td>
+                    ) : null}
+                    {show("to") ? (
+                      <Td>
+                        <span className="transfer-table-branch">
+                          {branchNames[row.toBranchId] ?? row.toBranchId}
+                        </span>
+                      </Td>
+                    ) : null}
+                    {show("product") ? (
+                      <Td>
+                        <TransferProductCell
+                          label={transferProductLabel(row, products)}
+                          movedQty={movedQty}
+                          product={singleProduct}
+                        />
+                      </Td>
+                    ) : null}
+                    {show("fromStock") ? (
+                      <Td>
+                        <TransferFromStockCell summary={stockSummary} product={singleProduct} />
+                      </Td>
+                    ) : null}
+                    {show("toStock") ? (
+                      <Td>
+                        <TransferToStockCell summary={stockSummary} product={singleProduct} />
+                      </Td>
+                    ) : null}
+                    {show("status") ? (
+                      <Td>
+                        <Badge tone={tone(mapStatus(row.status))}>
+                          {statusLabel(mapStatus(row.status))}
+                        </Badge>
+                      </Td>
+                    ) : null}
+                    {show("created") ? (
+                      <Td className="transfer-table-when">{formatTableDateTime(row.createdAt)}</Td>
+                    ) : null}
+                    {show("completed") ? (
+                      <Td className="transfer-table-when">
+                        {formatTableDateTime(row.completedAt)}
+                      </Td>
+                    ) : null}
+                    {show("items") ? <Td numeric>{row.items.length}</Td> : null}
+                    <Td className="ui-actions-col">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => openTransfer(row)}
+                        aria-label="View transfer details"
+                      >
+                        <Eye size={15} />
+                      </Button>
+                    </Td>
+                  </tr>
+                );
+              })
             : null}
         </tbody>
       </Table>
