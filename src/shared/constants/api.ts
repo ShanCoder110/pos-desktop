@@ -27,6 +27,8 @@ export const API_ROUTES = {
   productSearch: "/products/search",
   categories: "/categories",
   categoryById: (id: string) => `/categories/${encodeURIComponent(id)}`,
+  cities: "/cities",
+  cityById: (id: string) => `/cities/${encodeURIComponent(id)}`,
   units: "/units",
   unitById: (id: string) => `/units/${encodeURIComponent(id)}`,
   suppliers: "/suppliers",

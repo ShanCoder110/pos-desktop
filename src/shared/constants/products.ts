@@ -47,8 +47,8 @@ export const PRODUCT_HEALTH_FROM_LABEL: Record<string, ProductHealth> = {
 
 export const PRODUCT_FORM_SECTIONS = [
   "details",
-  "branches",
   "units",
+  "branches",
   "lots",
   "recipe",
   "warranty",
@@ -66,7 +66,6 @@ export const PRODUCT_TABLE_COLUMNS = [
   { id: "retail", label: "Retail" },
   { id: "margin", label: "Margin" },
   { id: "sales", label: "Total sales" },
-  { id: "profit", label: "Profit" },
   { id: "stock", label: "Qty" },
   { id: "status", label: "Status" },
 ];
@@ -77,7 +76,6 @@ export const DEFAULT_PRODUCT_COLUMNS = [
   "retail",
   "margin",
   "sales",
-  "profit",
   "stock",
   "status",
 ];
@@ -93,6 +91,9 @@ export const CATEGORY_COPY = {
 } as const;
 
 export const PRODUCT_COPY = {
+  pricingHint: "Hover for cost, minimum, and wholesale",
+  unitProfit: "Unit profit",
+  salesProfit: "Sales profit",
   added: "Product added",
   saved: "Product saved",
   deleted: "Product deleted",
@@ -101,12 +102,65 @@ export const PRODUCT_COPY = {
   loadFailed: "Could not load products",
   categoryRequired: "Choose a category",
   unitRequired: "Choose a unit",
+  unitsHint:
+    "The biggest unit is the stock unit by default. Assign another unit as stock when adding or editing. Qty converts through that unit. Each unit has its own prices and profit.",
+  stockUnit: "Stock unit",
+  makeStockUnit: "Use as stock",
   sessionRequired: "Sign in again to save products",
   branchesTitle: "Branch stock",
   branchesHint: "Split opening quantity across branches. FIFO lots are created per branch.",
   branchesTotal: "Total quantity",
   branchesEmpty: "Leave zero if stock will be received later through lots.",
+  unitPriceTierCost: "Cost",
+  unitPriceTierMin: "Min",
+  unitPriceTierWholesale: "Wholesale",
+  unitPriceTierRetail: "Retail",
+  unitPricesInvalid: "Fix unit prices before saving",
+  unitPriceRequired: "Enter a price",
+  openingQtyRequired: "Enter opening quantity",
+  lowStockAlert: "Low stock alert",
+  lowStockHint:
+    "Alerts when overall stock — total remaining qty from all open lots (all branches) — reaches this or below.",
+  lowStockRequired: "Enter a low stock quantity",
+  unitPricesIncomplete: "Enter all prices on every unit",
+  detailTitle: "Product details",
+  detailSubtitle: "Stock, prices, lots, and branch quantity",
+  detailUnitsTitle: "Units and pricing",
+  detailInfoTitle: "Product info",
+  detailCurrentStock: "In stock",
+  detailBranchStock: "Stock by branch",
+  detailThisBranch: "you are here",
+  detailRetailPrice: "Retail price",
+  detailCurrentLot: "Current lot",
+  detailFifoNow: "FIFO now",
+  detailSku: "SKU",
+  detailType: "Type",
+  detailLotProfit: "Realized profit from this lot",
+  detailVsCost: "vs cost",
+  detailWholesaleProfit: "Wholesale",
+  detailRetailProfit: "Retail",
+  detailBranches: (count: number) => `${count} branch${count === 1 ? "" : "es"}`,
+  detailSingleBranch: "No branch split yet. All quantity is in the current shop.",
+  detailMargin: "Margin",
+  detailBaseUnit: "Base unit",
+  detailNoSales: "No sales yet",
+  detailQtySold: "Qty sold",
+  detailOpenLots: "Open lots",
+  detailNoOpenLots: "No open lots. Receive stock to create a FIFO lot.",
+  detailFifoCost: "FIFO cost",
+  detailLeftInLot: "Left",
+  detailSoldFromLot: "Sold",
+  detailStockValue: "Stock value",
+  derivedPriceTooLow: (tier: string, minimum: string, parentName: string) =>
+    `${tier} can't be less than ${minimum} (proportional to ${parentName})`,
 };
+
+export const PRODUCT_UNIT_PRICE_TIERS = {
+  cost: PRODUCT_COPY.unitPriceTierCost,
+  min: PRODUCT_COPY.unitPriceTierMin,
+  wholesale: PRODUCT_COPY.unitPriceTierWholesale,
+  price: PRODUCT_COPY.unitPriceTierRetail,
+} as const;
 
 export const REORDER_PRODUCT_COLUMNS = [
   { id: "name", label: "Name", locked: true },
@@ -118,6 +172,30 @@ export const REORDER_PRODUCT_COLUMNS = [
 ];
 
 export const DEFAULT_REORDER_COLUMNS = REORDER_PRODUCT_COLUMNS.map((column) => column.id);
+
+export const LOT_COPY = {
+  detailTitle: "Lot details",
+  detailSubtitle: "FIFO cost, quantities, and branch stock",
+  reorderAction: "Reorder",
+  reorderDescription: "Receive another lot for this product",
+  transferAction: "Transfer",
+  transferDescription: "Move stock between branches",
+  editAction: "Edit",
+  editDescription: "Adjust quantities, supplier, and prices",
+  branchStockTitle: "Branch stock",
+  branchStockHint: "Quantity left in each branch for this lot",
+  branchSplitTitle: "Split between branches",
+  branchSplitHint: "Move stock between branches. Saving creates transfer records automatically.",
+  branchSplitTotal: "Remaining in lot",
+  branchSplitAutoPull: "Auto-balance from branch with most stock",
+  branchSplitAutoPullHint:
+    "Only when you go above the free pool — e.g. Main has 450 Gaz and Aleem 90, you can set Main up to 450 without touching Aleem; above that pulls from the branch with the most stock.",
+  branchNeedQty: "Enter quantity for at least one branch",
+  branchMustAllocate: "Allocate the remaining quantity before saving",
+  branchOverAllocated: "Branch quantities cannot exceed lot quantity",
+  filterProduct: "Product",
+  filterStatus: "Status",
+} as const;
 
 export const LOT_TABLE_COLUMNS = [
   { id: "lot", label: "Lot", locked: true },
@@ -147,6 +225,43 @@ export const STOCK_TABLE_COLUMNS = [
   { id: "minimum", label: "Minimum" },
   { id: "status", label: "Status" },
 ];
+
+export const TRANSFER_COPY = {
+  addTitle: "Add transfer",
+  addSubtitle: "Move lot stock between branches",
+  viewTitle: "Transfer details",
+  detailSubtitle: "Products moved and branch stock before and after",
+  detailRoute: "Route",
+  detailItems: "Items moved",
+  detailTotalMoved: "Total moved",
+  detailMovedQty: "Moved",
+  detailBranchChange: "Branch stock for this lot",
+  detailBefore: "Before",
+  detailAfter: "After",
+  detailNotesEmpty: "No notes",
+  routeTitle: "Route",
+  productSectionTitle: "Product",
+  lotsTitle: "Lots to transfer",
+  fromLabel: "From branch",
+  toLabel: "To branch",
+  notesLabel: "Notes",
+  notesPlaceholder: "Optional note for this transfer",
+  lotHint: "Select one or more lots and enter how much to move.",
+  lotsHint: (branch: string) =>
+    `Open lots with stock in ${branch}. You can transfer from more than one lot.`,
+  pickFromBranch: "Select a source branch to see available lots.",
+  pickProduct: "Select a product to see its open lots.",
+  pickToBranch: "Select a destination branch before creating the transfer.",
+  saveAction: "Create transfer",
+  created: "Transfer completed",
+  saveFailed: "Could not create transfer",
+  fromRequired: "Select a source branch",
+  toRequired: "Select a destination branch",
+  sameBranch: "Source and destination must differ",
+  productRequired: "Select a product",
+  lotRequired: "Select at least one lot with quantity",
+  noLots: "No open lots with stock in the source branch for this product.",
+} as const;
 
 export const TRANSFER_TABLE_COLUMNS = [
   { id: "from", label: "From", locked: true },

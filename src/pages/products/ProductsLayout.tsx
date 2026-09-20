@@ -38,6 +38,7 @@ import type { Product } from "@/shared/types";
 import { money, shortError } from "@/utils/format";
 import { createLoadGuard, isAbortError } from "@/utils/async";
 import { toaster } from "@/components/common";
+import { openLotStockValue } from "@/pages/products/productFifo";
 import { PRODUCT_COPY } from "@/shared/constants/products";
 import { ensureSession } from "@/services/auth";
 import { listAllProducts } from "@/services/products";
@@ -115,8 +116,8 @@ export function useProductsHub() {
 }
 
 function CatalogKpis() {
-  const { health, setHealth, products } = useProductsHub();
-  const productCost = products.reduce((total, product) => total + product.cost * product.stock, 0);
+  const { health, setHealth, products, lots } = useProductsHub();
+  const productCost = openLotStockValue(lots, products);
   const counts: Record<ProductHealth, number> = {
     healthy: products.filter((r) => matchesHealth(r, "healthy")).length,
     risk: products.filter((r) => matchesHealth(r, "risk")).length,
@@ -133,6 +134,7 @@ function CatalogKpis() {
       <KpiCard
         label="Product cost"
         value={money(productCost)}
+        hint="At FIFO lot cost"
         tone="info"
         icon={<Wallet size={16} />}
       />
@@ -177,11 +179,11 @@ function CatalogKpis() {
 }
 
 function LotsKpis() {
-  const { sectionKpi, setSectionKpi, lots } = useProductsHub();
+  const { sectionKpi, setSectionKpi, lots, products } = useProductsHub();
   const open = lots.filter((r) => r.remainingQuantity > 0).length;
   const empty = lots.filter((r) => r.remainingQuantity <= 0).length;
   const qtyLeft = lots.reduce((s, r) => s + r.remainingQuantity, 0);
-  const valueLeft = lots.reduce((s, r) => s + r.remainingQuantity * r.purchasePrice, 0);
+  const valueLeft = openLotStockValue(lots, products);
 
   function toggle(id: string) {
     setSectionKpi(sectionKpi === id ? null : id);
