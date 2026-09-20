@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::backend::{
     constants::ERROR_INVALID_ID,
     context::RequestContext,
-    dto::{LotListQuery, LotResponse, Paginated, ReceiveLotRequest},
+    dto::{LotListQuery, LotResponse, Paginated, ReceiveLotRequest, UpdateLotRequest},
     errors::AppError,
     services::LotService,
     AppState,
@@ -37,6 +37,17 @@ pub async fn receive_lot(
 ) -> Result<(StatusCode, Json<LotResponse>), AppError> {
     let lot = LotService::receive(&state.db, &ctx, request).await?;
     Ok((StatusCode::CREATED, Json(lot)))
+}
+
+pub async fn update_lot(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Path(id): Path<String>,
+    Json(request): Json<UpdateLotRequest>,
+) -> Result<Json<LotResponse>, AppError> {
+    Ok(Json(
+        LotService::update(&state.db, &ctx, parse_id(&id)?, request).await?,
+    ))
 }
 
 fn parse_id(value: &str) -> Result<Uuid, AppError> {
