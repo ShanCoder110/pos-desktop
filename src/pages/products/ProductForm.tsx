@@ -20,9 +20,8 @@ import {
   PRODUCT_FORM_SECTIONS,
   type ProductFormSection,
 } from "@/shared/constants/products";
-import { listAllBranches } from "@/services/org";
-import type { Product, ProductSellUnit } from "@/shared/types";
-import { money, shortError, warrantyDaysOf } from "@/utils/format";
+import type { Product, ProductBranchStock, ProductSellUnit } from "@/shared/types";
+import { cn, money, shortError, warrantyDaysOf } from "@/utils/format";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import {
   blankProduct,
@@ -33,12 +32,22 @@ import {
   setLotDamage,
   setLotQty,
 } from "@/pages/products/productLots";
-import { LinkedUnitBoxes, UnitQtyFields } from "@/pages/products/LotFields";
+import { ProductBranchAllocation } from "@/pages/products/BranchStockFields";
+import { mergeBranchStock } from "@/pages/products/branchStockUtils";
+import { ProductUnitMargin } from "@/pages/products/ProductUnitMargin";
 import {
+  firstMissingUnitPrice,
+  hasMissingUnitPrices,
+  unitPriceMissingError,
+} from "@/pages/products/productUnitValidation";
+import { LinkedUnitBoxes, UnitQtyFields } from "@/pages/products/LotFields";
+import { ensureSession } from "@/services/auth";
+import { listAllBranches } from "@/services/org";
+import {
+  applyDerivedPrices,
   baseUnit,
   biggerUnit,
   containsLabel,
-  deriveAll,
   emptyPrices,
   extraKind,
   extraUnits,
@@ -65,6 +74,22 @@ function numStr(n: number) {
   return n ? String(n) : "";
 }
 
+function validationToastMessage(field: string): string {
+  const messages: Record<string, string> = {
+    name: "Name is required",
+    category: PRODUCT_COPY.categoryRequired,
+    unit: PRODUCT_COPY.unitRequired,
+    openingQty: PRODUCT_COPY.openingQtyRequired,
+    lowStock: PRODUCT_COPY.lowStockRequired,
+    cost: PRODUCT_COPY.unitPriceRequired,
+    min: PRODUCT_COPY.unitPriceRequired,
+    wholesale: PRODUCT_COPY.unitPriceRequired,
+    retail: PRODUCT_COPY.unitPriceRequired,
+    unitPrices: PRODUCT_COPY.unitPricesIncomplete,
+  };
+  return messages[field] ?? PRODUCT_COPY.unitPricesIncomplete;
+}
+
 function newExtraUnit(): ProductSellUnit {
   return {
     id: crypto.randomUUID(),
@@ -79,10 +104,10 @@ function newExtraUnit(): ProductSellUnit {
 }
 
 function normalizeKind(u: ProductSellUnit, product: Product): ProductSellUnit["kind"] {
-  if (u.kind === "base" || u.kind === "bigger" || u.kind === "smaller") return u.kind;
-  if (u.kind === "small") return "smaller";
-  if (isBiggerSymbol(u.symbol) && u.symbol !== product.unit) return "bigger";
-  if (u.symbol === product.unit || u.contains <= 1) return "base";
+  if (u.isBase || u.kind === "base" || u.symbol === product.unit) return "base";
+  if (u.kind === "pack" || (isBiggerSymbol(u.symbol) && u.symbol !== product.unit)) return "bigger";
+  if (u.kind === "small" || u.contains > 1) return "smaller";
+  if (u.kind === "bigger" || u.kind === "smaller") return u.kind;
   return "smaller";
 }
 
@@ -114,30 +139,63 @@ function defaultSellUnits(product: Product): ProductSellUnit[] {
     price: product.retail,
     barcode: product.barcode ?? "",
     priceManual: {},
+    isBase: true,
   };
   if (!packN) return [base];
   return [
-    base,
     {
       id: crypto.randomUUID(),
       name: "Pack",
       symbol: "pk",
-      kind: "bigger",
-      contains: packN,
+      kind: "base",
+      contains: 1,
       cost: product.cost * packN,
       min: product.min * packN,
       wholesale: product.wholesale * packN,
       price: product.packPrice || product.retail * packN,
       barcode: "",
       priceManual: {},
+      isBase: true,
     },
+    { ...base, kind: "smaller" as const, contains: packN, isBase: false },
   ];
+}
+
+function applyStockUnit(units: ProductSellUnit[], nextId: string): ProductSellUnit[] {
+  const current = units.find((unit) => unit.kind === "base");
+  const next = units.find((unit) => unit.id === nextId);
+  if (!next) return units;
+  if (current?.id === next.id) {
+    return units.map((unit) =>
+      unit.id === next.id ? { ...unit, kind: "base", contains: 1, isBase: true } : unit,
+    );
+  }
+  const factor = next.contains > 0 ? next.contains : 1;
+  const nextIsBigger = extraKind(next.symbol) === "bigger" || isBiggerSymbol(next.symbol);
+  return units.map((unit) => {
+    if (unit.id === next.id) {
+      return { ...unit, kind: "base" as const, contains: 1, isBase: true };
+    }
+    if (current && unit.id === current.id) {
+      return {
+        ...unit,
+        kind: nextIsBigger ? "smaller" : "bigger",
+        contains: factor,
+        isBase: false,
+      };
+    }
+    return {
+      ...unit,
+      isBase: false,
+      kind: unit.kind === "base" ? extraKind(unit.symbol) : unit.kind,
+    };
+  });
 }
 
 function focusables(root: HTMLElement) {
   return [
     ...root.querySelectorAll<HTMLElement>(
-      "input:not([disabled]):not([type=hidden]):not([type=checkbox]), select:not([disabled]), textarea:not([disabled]), button.toggle, .product-inline-add",
+      "input:not([disabled]):not([type=hidden]):not([type=checkbox]), select:not([disabled]), textarea:not([disabled]), button.toggle, .product-inline-add-btn",
     ),
   ].filter((el) => el.offsetParent !== null);
 }
@@ -159,16 +217,14 @@ export function ProductForm({
   product: Product;
   catalog: Product[];
   onChange: (next: Product) => void;
-  onCommit: (
-    next: Product,
-    branchQuantities?: Record<string, number>,
-  ) => boolean | Promise<boolean>;
+  onCommit: (next: Product) => boolean | Promise<boolean>;
   onClose: () => void;
   saving?: boolean;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [section, setSection] = useState<ProductFormSection>("details");
   const [error, setError] = useState<string | null>(null);
+  const [showValidation, setShowValidation] = useState(false);
   const [flash, setFlash] = useState(false);
   const [keepAdding, setKeepAdding] = useState(
     () => sessionStorage.getItem(STORAGE_KEYS.keepAddingProducts) === "1",
@@ -177,6 +233,8 @@ export function ProductForm({
   const unitCards = useRef<Record<string, HTMLDivElement | null>>({});
   const unitPositions = useRef(new Map<string, DOMRect>());
   const changedUnitId = useRef<string | null>(null);
+  const unitsPaneRef = useRef<HTMLDivElement>(null);
+  const pendingFocusUnitId = useRef<string | null>(null);
   const isNew = !catalog.some((r) => r.id === product.id);
   const {
     lots,
@@ -193,7 +251,7 @@ export function ProductForm({
   >([]);
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
-  const [branchQuantities, setBranchQuantities] = useState<Record<string, number>>({});
+  const [sessionBranchId, setSessionBranchId] = useState("");
   const categoryOptions = useMemo(() => {
     const names = new Set<string>();
     for (const row of [...hubCategories, ...localCategories]) names.add(row.name);
@@ -203,6 +261,32 @@ export function ProductForm({
   const unitRows = hubUnits.length ? hubUnits : localUnits;
   const suppliers = hubSuppliers.length ? hubSuppliers : localSuppliers;
   const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.name ?? "";
+
+  useEffect(() => {
+    if (!isNew) return;
+    const controller = new AbortController();
+    void Promise.all([listAllBranches(controller.signal), ensureSession()])
+      .then(([branchRows, session]) => {
+        const active = branchRows
+          .filter((row) => row.isActive)
+          .map((row) => ({ id: row.id, name: row.name }));
+        const focusId = session?.branchId ?? active[0]?.id ?? "";
+        setBranches(active);
+        setSessionBranchId(focusId);
+        if (!product.branchStock?.length) {
+          onChange({
+            ...product,
+            branchStock: active.map((branch) => ({
+              branchId: branch.id,
+              branchName: branch.name,
+              quantity: branch.id === focusId ? product.stock : 0,
+            })),
+          });
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [isNew, product.id]);
 
   useEffect(() => {
     if (hubCategories.length && hubUnits.length && hubSuppliers.length) return;
@@ -254,52 +338,31 @@ export function ProductForm({
   const openPriceLots = lotDraft.filter((l) => l.remainingQuantity > 0 || l.damagedQuantity > 0);
   const sellingLot = fifoLot(lotDraft);
   const queuedLots = fifoLots(lotDraft).slice(1);
-  const branchTotal = useMemo(
-    () =>
-      Object.values(branchQuantities).reduce(
-        (sum, qty) => sum + (Number.isFinite(qty) ? qty : 0),
-        0,
-      ),
-    [branchQuantities],
+  const branchStock = useMemo(
+    () => mergeBranchStock(branches, product.branchStock),
+    [branches, product.branchStock],
   );
-
+  const branchAllocated = useMemo(
+    () => branchStock.reduce((sum, row) => sum + row.quantity, 0),
+    [branchStock],
+  );
+  const currentBranchName =
+    branches.find((branch) => branch.id === sessionBranchId)?.name ?? "current branch";
   const sections = useMemo(
     () =>
       PRODUCT_FORM_SECTIONS.filter((id) => {
+        if (id === "branches") return isNew;
         if (id === "recipe") return product.isManufactured;
         if (id === "lots") return !isNew;
-        if (id === "branches") return isNew;
         return true;
       }),
     [product.isManufactured, isNew],
   );
 
   useEffect(() => {
-    const controller = new AbortController();
-    listAllBranches(controller.signal)
-      .then((rows) =>
-        setBranches(
-          rows.filter((row) => row.isActive).map((row) => ({ id: row.id, name: row.name })),
-        ),
-      )
-      .catch(() => setBranches([]));
-    return () => controller.abort();
-  }, []);
-
-  useEffect(() => {
-    if (!isNew) return;
-    setBranchQuantities((current) => {
-      const next: Record<string, number> = {};
-      for (const branch of branches) {
-        next[branch.id] = current[branch.id] ?? 0;
-      }
-      return next;
-    });
-  }, [branches, isNew, product.id]);
-
-  useEffect(() => {
     setSection("details");
     setError(null);
+    setShowValidation(false);
     const mine = lots.filter((l) => l.productId === product.id);
     if (mine.length) {
       setLotDraft(mine);
@@ -316,7 +379,13 @@ export function ProductForm({
       setLotOpened({});
     }
     if (!product.sellUnits?.length) {
-      onChange({ ...product, sellUnits: defaultSellUnits(product) });
+      const sellUnits = defaultSellUnits(product);
+      const stock = sellUnits.find((unit) => unit.kind === "base");
+      onChange({
+        ...product,
+        sellUnits,
+        unit: stock?.symbol ?? product.unit,
+      });
     }
     requestAnimationFrame(() => {
       const root = rootRef.current;
@@ -366,6 +435,24 @@ export function ProductForm({
     changedUnitId.current = null;
   }, [section, unitLayoutKey]);
 
+  useLayoutEffect(() => {
+    const id = pendingFocusUnitId.current;
+    if (!id || section !== "units") return;
+    const card = unitCards.current[id];
+    if (!card) return;
+    pendingFocusUnitId.current = null;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    card.scrollIntoView({
+      behavior: reducedMotion ? "auto" : "smooth",
+      block: "nearest",
+    });
+    requestAnimationFrame(() => {
+      const input = card.querySelector<HTMLInputElement>(".product-small-top .ui-combo-input");
+      input?.focus();
+      input?.select();
+    });
+  }, [section, unitLayoutKey]);
+
   useEffect(() => {
     if (!flash) return;
     const t = window.setTimeout(() => setFlash(false), 1400);
@@ -374,6 +461,39 @@ export function ProductForm({
 
   function patch(next: Partial<Product>) {
     onChange({ ...product, sellUnits, ...next });
+  }
+
+  function syncBranchStock(rows: ProductBranchStock[]) {
+    patch({ branchStock: rows });
+  }
+
+  function setOpeningQty(raw: string) {
+    const quantity = raw.trim() === "" ? 0 : Number(raw);
+    if (!Number.isFinite(quantity) || quantity < 0) return;
+    patch({
+      stock: quantity,
+      branchStock: branchStock.map((row) => ({
+        ...row,
+        quantity: row.branchId === sessionBranchId ? quantity : 0,
+      })),
+    });
+  }
+
+  function setLowStock(raw: string) {
+    const quantity = raw.trim() === "" ? 0 : Number(raw);
+    if (!Number.isFinite(quantity) || quantity < 0) return;
+    patch({ minimumStock: quantity });
+  }
+
+  function normalizedBranchStock() {
+    let rows = branchStock;
+    if (!isNew || product.stock <= 0) return rows;
+    const allocated = rows.reduce((sum, row) => sum + row.quantity, 0);
+    if (allocated >= product.stock - 1e-6 || !sessionBranchId) return rows;
+    const leftover = product.stock - allocated;
+    return rows.map((row) =>
+      row.branchId === sessionBranchId ? { ...row, quantity: row.quantity + leftover } : row,
+    );
   }
 
   async function addCategory(name: string) {
@@ -403,14 +523,32 @@ export function ProductForm({
   }
 
   function setUnits(next: ProductSellUnit[]) {
-    patch({ sellUnits: deriveAll(next) });
+    patch({ sellUnits: next });
+  }
+
+  function addExtraUnit() {
+    const unit = newExtraUnit();
+    const seeded = applyDerivedPrices([...sellUnits, unit], unit);
+    pendingFocusUnitId.current = unit.id;
+    changedUnitId.current = unit.id;
+    setUnits([...sellUnits, seeded]);
+  }
+
+  function setStockUnit(unitId: string) {
+    const next = applyStockUnit(sellUnits, unitId);
+    const stock = next.find((unit) => unit.kind === "base");
+    const symbol = stock?.symbol ?? product.unit;
+    onChange({
+      ...product,
+      sellUnits: next,
+      unit: symbol,
+      isLinear: symbol === "m" || symbol === "gaz",
+    });
   }
 
   function setBaseUnit(v: string) {
-    const next = deriveAll(
-      sellUnits.map((row) =>
-        row.id === base.id ? { ...row, symbol: v, name: unitLabel(v), kind: "base" as const } : row,
-      ),
+    const next = sellUnits.map((row) =>
+      row.id === base.id ? { ...row, symbol: v, name: unitLabel(v), kind: "base" as const } : row,
     );
     onChange({ ...product, sellUnits: next, unit: v, isLinear: v === "m" || v === "gaz" });
   }
@@ -461,11 +599,31 @@ export function ProductForm({
     if (!product.name.trim()) return "name";
     if (!product.category) return "category";
     if (!(base?.symbol || product.unit)) return "unit";
+    if (isNew && product.stock <= 0) return "openingQty";
+    if ((product.minimumStock ?? 0) <= 0) return "lowStock";
+    if (isNew && base) {
+      if (base.cost <= 0) return "cost";
+      if (base.min <= 0) return "min";
+      if (base.wholesale <= 0) return "wholesale";
+      if (base.price <= 0) return "retail";
+    }
     return null;
+  }
+
+  function focusMissingUnitPrice() {
+    const missing = firstMissingUnitPrice(sellUnits);
+    if (!missing) return;
+    pendingFocusUnitId.current = missing.unitId;
+    setSection("units");
+    requestAnimationFrame(() => {
+      const card = unitCards.current[missing.unitId];
+      card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
   }
 
   async function save() {
     if (saving) return;
+    setShowValidation(true);
     const field = validate();
     if (field) {
       setError(field);
@@ -473,8 +631,15 @@ export function ProductForm({
         name: "details",
         category: "details",
         unit: "details",
+        openingQty: "details",
+        lowStock: "details",
+        cost: "details",
+        min: "details",
+        wholesale: "details",
+        retail: "details",
       };
       setSection(jump[field] ?? "details");
+      toaster.error(validationToastMessage(field));
       requestAnimationFrame(() => {
         if (rootRef.current) focusField(rootRef.current, field);
       });
@@ -499,6 +664,12 @@ export function ProductForm({
       toaster.warn(`${component?.name ?? "Component"} does not have enough stock`);
       return;
     }
+    if (hasMissingUnitPrices(sellUnits)) {
+      setError("unitPrices");
+      focusMissingUnitPrice();
+      toaster.error(validationToastMessage("unitPrices"));
+      return;
+    }
     const smaller = extras.filter((u) => u.kind === "smaller");
     const stock =
       smaller.find((u) => u.symbol === "m") ??
@@ -509,9 +680,11 @@ export function ProductForm({
     const metersInPack = isBiggerSymbol(base.symbol)
       ? smaller.find((u) => u.symbol === "m" || u.symbol === stockSymbol)?.contains
       : packRow?.contains;
-    const totals = isNew ? { stock: branchTotal, damaged: product.damaged } : lotTotals(lotDraft);
+    const totals = isNew ? { stock: product.stock, damaged: product.damaged } : lotTotals(lotDraft);
+    const openingBranches = isNew ? normalizedBranchStock() : branchStock;
     const next: Product = {
       ...product,
+      branchStock: openingBranches,
       name: product.name.trim(),
       sku: product.sku.trim(),
       barcode: product.barcode?.trim() ?? "",
@@ -523,7 +696,7 @@ export function ProductForm({
       retail: stock?.price ?? base.price,
       packQty: metersInPack && metersInPack > 1 ? metersInPack : null,
       packPrice: packRow?.price ?? 0,
-      stock: isNew ? branchTotal : totals.stock,
+      stock: isNew ? product.stock : totals.stock,
       damaged: totals.damaged,
       sellUnits,
       warrantyEnabled: Boolean(product.warrantyEnabled && product.warrantyQty > 0),
@@ -534,7 +707,7 @@ export function ProductForm({
         ? product.components.filter((c) => c.productId && c.quantity > 0)
         : [],
     };
-    const ok = await Promise.resolve(onCommit(next, isNew ? branchQuantities : undefined));
+    const ok = await Promise.resolve(onCommit(next));
     if (!ok) return;
     if (!isNew) {
       setLots((prev) => [...prev.filter((l) => l.productId !== product.id), ...lotDraft]);
@@ -542,6 +715,7 @@ export function ProductForm({
     if (keepAdding && isNew) {
       setFlash(true);
       setError(null);
+      setShowValidation(false);
       setSection("details");
       onChange(blankProduct());
       return;
@@ -600,7 +774,7 @@ export function ProductForm({
         e.preventDefault();
         e.stopPropagation();
         if (section === "units") {
-          setUnits([...sellUnits, newExtraUnit()]);
+          addExtraUnit();
         } else {
           patch({
             components: [
@@ -651,6 +825,22 @@ export function ProductForm({
   });
 
   const typeValue = product.isManufactured ? "manufactured" : "standard";
+  const lowStockField = (
+    <Field
+      label={PRODUCT_COPY.lowStockAlert}
+      hint={PRODUCT_COPY.lowStockHint}
+      error={error === "lowStock" ? PRODUCT_COPY.lowStockRequired : undefined}
+    >
+      <TextInput
+        data-field="lowStock"
+        inputMode="decimal"
+        maxLength={FIELD_LIMITS.qty}
+        placeholder="e.g. 5"
+        value={numStr(product.minimumStock ?? 0)}
+        onChange={(event) => setLowStock(event.target.value)}
+      />
+    </Field>
+  );
 
   return (
     <div
@@ -681,7 +871,11 @@ export function ProductForm({
               id === "details"
                 ? "Details"
                 : id === "branches"
-                  ? "Branches"
+                  ? `Branches${
+                      product.stock
+                        ? ` · ${formatStockQty(branchAllocated)}/${formatStockQty(product.stock)}`
+                        : ""
+                    }`
                   : id === "units"
                     ? "Units & prices"
                     : id === "lots"
@@ -749,7 +943,27 @@ export function ProductForm({
                 clearable={false}
               />
             </Field>
-            {!isNew ? (
+            {isNew ? (
+              <Field
+                label="Opening quantity"
+                hint={`Goes to ${currentBranchName}. Split on Branches tab.`}
+                error={error === "openingQty" ? PRODUCT_COPY.openingQtyRequired : undefined}
+              >
+                <TextInput
+                  data-field="openingQty"
+                  inputMode="decimal"
+                  maxLength={FIELD_LIMITS.qty}
+                  placeholder="0"
+                  value={product.stock > 0 ? String(product.stock) : ""}
+                  onChange={(event) => setOpeningQty(event.target.value)}
+                />
+              </Field>
+            ) : (
+              lowStockField
+            )}
+            {isNew ? (
+              lowStockField
+            ) : (
               <div className="product-qty-field [display:grid] [gap:6px] is-full">
                 <LinkedUnitBoxes
                   label="Total quantity (all lots)"
@@ -758,7 +972,7 @@ export function ProductForm({
                   stockQty={lotTotals(lotDraft).stock}
                 />
               </div>
-            ) : null}
+            )}
             {isNew ? (
               <Field label="Supplier">
                 <SearchableSelect
@@ -839,7 +1053,11 @@ export function ProductForm({
             </Field>
             {isNew ? (
               <div className="is-full grid grid-cols-2 gap-x-3.5 gap-y-2.5">
-                <Field label="Purchase cost">
+                <Field
+                  label="Purchase cost"
+                  className="product-price-field is-cost"
+                  error={error === "cost" ? PRODUCT_COPY.unitPriceRequired : undefined}
+                >
                   <MoneyInput
                     data-field="cost"
                     placeholder="0.00"
@@ -847,7 +1065,11 @@ export function ProductForm({
                     onChange={(e) => setBaseField("cost", numVal(e.target.value))}
                   />
                 </Field>
-                <Field label="Min price">
+                <Field
+                  label="Min price"
+                  className="product-price-field is-min"
+                  error={error === "min" ? PRODUCT_COPY.unitPriceRequired : undefined}
+                >
                   <MoneyInput
                     data-field="min"
                     placeholder="0.00"
@@ -855,7 +1077,11 @@ export function ProductForm({
                     onChange={(e) => setBaseField("min", numVal(e.target.value))}
                   />
                 </Field>
-                <Field label="Wholesale price">
+                <Field
+                  label="Wholesale price"
+                  className="product-price-field is-wholesale"
+                  error={error === "wholesale" ? PRODUCT_COPY.unitPriceRequired : undefined}
+                >
                   <MoneyInput
                     data-field="wholesale"
                     placeholder="0.00"
@@ -863,7 +1089,11 @@ export function ProductForm({
                     onChange={(e) => setBaseField("wholesale", numVal(e.target.value))}
                   />
                 </Field>
-                <Field label="Retail price">
+                <Field
+                  label="Retail price"
+                  className="product-price-field is-retail"
+                  error={error === "retail" ? PRODUCT_COPY.unitPriceRequired : undefined}
+                >
                   <MoneyInput
                     data-field="retail"
                     placeholder="0.00"
@@ -941,52 +1171,31 @@ export function ProductForm({
         </div>
       ) : null}
 
-      {section === "branches" ? (
+      {section === "branches" && isNew ? (
         <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
-          <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
-            <strong>{PRODUCT_COPY.branchesTitle}</strong>
-            <span>{PRODUCT_COPY.branchesHint}</span>
-          </p>
-          <div className="rounded-lg border border-line bg-bg/40 p-3">
-            <div className="flex items-center justify-between gap-3 text-[12px]">
-              <span className="font-semibold text-sub">{PRODUCT_COPY.branchesTotal}</span>
-              <strong className="tabular-nums text-ink">
-                {formatStockQty(branchTotal)} {unitLabel(product.unit || base.symbol || "pc")}
-              </strong>
-            </div>
-          </div>
-          <div className="product-small-list [display:grid] [gap:10px]">
-            {branches.length === 0 ? (
-              <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
-                {PRODUCT_COPY.branchesEmpty}
-              </p>
-            ) : (
-              branches.map((branch) => (
-                <div
-                  key={branch.id}
-                  className="product-small-card [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)]"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <strong className="text-[13px] text-ink">{branch.name}</strong>
-                  </div>
-                  <UnitQtyFields
-                    label="Quantity"
-                    units={sellUnits}
-                    stockSymbol={product.unit || base.symbol || "pc"}
-                    value={branchQuantities[branch.id] ?? 0}
-                    onChange={(qty) =>
-                      setBranchQuantities((current) => ({ ...current, [branch.id]: qty }))
-                    }
-                  />
-                </div>
-              ))
-            )}
-          </div>
+          {product.stock > 0 ? (
+            <ProductBranchAllocation
+              branches={branches}
+              rows={branchStock}
+              sessionBranchId={sessionBranchId}
+              totalQuantity={product.stock}
+              unitLabel={unitLabel(stockSymbol)}
+              product={product}
+              onChange={syncBranchStock}
+            />
+          ) : (
+            <p className="m-0 text-[11px] text-muted">
+              Enter opening quantity on Details first, then split across branches here.
+            </p>
+          )}
         </div>
       ) : null}
 
       {section === "units" ? (
-        <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
+        <div
+          ref={unitsPaneRef}
+          className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]"
+        >
           {!isNew && openPriceLots.length > 0 ? (
             <Field label="Lot">
               <SearchableSelect
@@ -1013,10 +1222,7 @@ export function ProductForm({
           ) : (
             <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
               <strong>Units & prices</strong>
-              <span>
-                Add a pack or another unit if you need it. Extra prices fill in from the product
-                unit.
-              </span>
+              <span>{PRODUCT_COPY.unitsHint}</span>
             </p>
           )}
           <div className="product-small-list [display:grid] [gap:10px]">
@@ -1034,19 +1240,38 @@ export function ProductForm({
                       : "product-small-card relative [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)]"
                   }
                 >
-                  <div className="product-small-top [display:grid] [grid-template-columns:minmax(0,_1.1fr)_minmax(90px,_1fr)_36px] [gap:8px] [align-items:end]">
+                  <div className="product-small-top [display:grid] [grid-template-columns:minmax(0,_1.1fr)_minmax(90px,_1fr)_auto_36px] [gap:8px] [align-items:end]">
                     <Field label={isBase ? "Product unit" : "Sell as"}>
                       <SearchableSelect
+                        name={isBase ? "product-unit" : "sell-as"}
                         value={row.symbol ?? ""}
                         onChange={(v) => {
                           if (isBase) {
                             setBaseUnit(v);
                             return;
                           }
-                          setExtraField(row.id, {
-                            symbol: v,
-                            name: unitLabel(v),
-                            kind: extraKind(v),
+                          const patched = sellUnits.map((unit) =>
+                            unit.id === row.id
+                              ? {
+                                  ...unit,
+                                  symbol: v,
+                                  name: unitLabel(v),
+                                  kind: extraKind(v),
+                                }
+                              : unit,
+                          );
+                          const stockIsBigger = isBiggerSymbol(base?.symbol);
+                          const next =
+                            !stockIsBigger && extraKind(v) === "bigger"
+                              ? applyStockUnit(patched, row.id)
+                              : patched;
+                          const stock = next.find((unit) => unit.kind === "base");
+                          const symbol = stock?.symbol ?? product.unit;
+                          onChange({
+                            ...product,
+                            sellUnits: next,
+                            unit: symbol,
+                            isLinear: symbol === "m" || symbol === "gaz",
                           });
                         }}
                         placeholder="Pack, Meter, Gaz…"
@@ -1079,6 +1304,17 @@ export function ProductForm({
                         />
                       </Field>
                     )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={isBase ? "soft" : "ghost"}
+                      className={cn("product-stock-unit-btn", isBase && "is-on")}
+                      disabled={isBase}
+                      aria-pressed={isBase}
+                      onClick={() => setStockUnit(row.id)}
+                    >
+                      {isBase ? PRODUCT_COPY.stockUnit : PRODUCT_COPY.makeStockUnit}
+                    </Button>
                     {isBase ? (
                       <span />
                     ) : (
@@ -1100,30 +1336,49 @@ export function ProductForm({
                         ["wholesale", "Wholesale"],
                         ["price", "Retail"],
                       ] as const
-                    ).map(([key, label]) => (
-                      <Field key={key} label={label}>
-                        <MoneyInput
-                          placeholder="0.00"
-                          value={numStr(unitPrice(row, key))}
-                          onChange={(e) => setUnitPrice(row, key, numVal(e.target.value))}
-                        />
-                      </Field>
-                    ))}
+                    ).map(([key, label]) => {
+                      const value = unitPrice(row, key);
+                      const priceError =
+                        showValidation || error === "unitPrices"
+                          ? unitPriceMissingError(value)
+                          : undefined;
+                      return (
+                        <Field
+                          key={key}
+                          label={label}
+                          className={cn(
+                            "product-price-field",
+                            key === "price" ? "is-retail" : `is-${key}`,
+                          )}
+                          error={priceError}
+                        >
+                          <MoneyInput
+                            placeholder="0.00"
+                            value={numStr(value)}
+                            onChange={(e) => setUnitPrice(row, key, numVal(e.target.value))}
+                          />
+                        </Field>
+                      );
+                    })}
                   </div>
+                  <ProductUnitMargin
+                    cost={unitPrice(row, "cost")}
+                    retail={unitPrice(row, "price")}
+                  />
                 </div>
               );
             })}
           </div>
-          <Button
-            className="product-inline-add [align-self:flex-start]"
-            icon={<Plus size={14} />}
-            onClick={() => setUnits([...sellUnits, newExtraUnit()])}
-          >
-            Add unit
-            <kbd className="ui-kbd [display:inline-flex] [align-items:center] [height:18px] [padding:0_5px] [border:1px_solid_var(--line)] [border-radius:4px] [background:var(--bg)] [font-family:var(--mono,_ui-monospace,_monospace)] [font-size:10px] [font-weight:700] [letter-spacing:0.02em] [color:var(--muted)]">
-              Ctrl+N
-            </kbd>
-          </Button>
+          <div className="product-inline-add flex items-center gap-2 self-start">
+            <Button
+              className="product-inline-add-btn"
+              icon={<Plus size={14} />}
+              onClick={addExtraUnit}
+            >
+              Add unit
+            </Button>
+            <kbd className="ui-kbd">Ctrl+N</kbd>
+          </div>
         </div>
       ) : null}
 

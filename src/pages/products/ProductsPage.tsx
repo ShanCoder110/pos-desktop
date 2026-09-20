@@ -1,12 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { useLotDrawer } from "@/pages/lots/useLotDrawer";
 import {
   ChevronDown,
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
   FileSpreadsheet,
   FileText,
+  Info,
+  Layers,
   Pencil,
   Plus,
   Printer,
@@ -41,10 +40,18 @@ import {
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
+import { ProductDetailDrawer } from "@/pages/products/ProductDetailDrawer";
 import { ProductForm } from "@/pages/products/ProductForm";
 import { useDebounce } from "@/hooks/useDebounce";
 import { blankProduct } from "@/pages/products/productLots";
-import { formatStockQty, qtyUnits, unitLabel } from "@/pages/products/productQty";
+import {
+  formatStockQty,
+  isLinearStockUnit,
+  priceBreakdown,
+  productBasePricing,
+  qtyUnits,
+  unitLabel,
+} from "@/pages/products/productQty";
 import { matchesHealth, useProductsHub } from "@/pages/products/ProductsLayout";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import {
@@ -56,12 +63,11 @@ import {
   PRODUCT_INSIGHT_METRICS,
   PRODUCT_TABLE_COLUMNS,
   REORDER_PRODUCT_COLUMNS,
-  productsHref,
   type ProductInsightMetric,
 } from "@/shared/constants/products";
 import { useSettings } from "@/shared/settings";
 import type { Product } from "@/shared/types";
-import type { InvoiceRow } from "@/shared/domain/types";
+import type { InvoiceRow, ProductLotRow } from "@/shared/domain/types";
 import { ensureSession } from "@/services/auth";
 import { listAllRepairs, type RepairResponse } from "@/services/repairs";
 import {
@@ -86,6 +92,8 @@ import {
 } from "@/pages/products/productSalesStats";
 import { exportProductsCsv, exportProductsExcel, printProducts } from "@/utils/exportFile";
 import { money, shortError } from "@/utils/format";
+import { ProductCostDisplay } from "@/pages/products/ProductCostDisplay";
+import { fifoCostForProduct, openLotStockValue } from "@/pages/products/productFifo";
 import { branchStockTooltip, productTotalStock } from "@/utils/productStock";
 
 type PriceField = "cost" | "min" | "wholesale" | "retail";
@@ -128,9 +136,115 @@ function UnitPrice({ row, field }: { row: Product; field: PriceField }) {
   );
 }
 
-function marginPct(row: Product) {
-  if (!row.cost) return 0;
-  return ((row.retail - row.cost) / row.cost) * 100;
+function marginPct(row: Product, lots: ProductLotRow[]) {
+  const cost = fifoCostForProduct(row, lots);
+  const { retail } = productBasePricing(row);
+  if (cost <= 0) return 0;
+  return ((retail - cost) / cost) * 100;
+}
+
+function unitProfit(row: Product, lots: ProductLotRow[]) {
+  const cost = fifoCostForProduct(row, lots);
+  const { retail } = productBasePricing(row);
+  return retail - cost;
+}
+
+function compactFifoCost(row: Product, lots: ProductLotRow[]) {
+  const cost = fifoCostForProduct(row, lots);
+  return priceBreakdown(row, cost).map((price) => (
+    <span key={price.id} className="block whitespace-nowrap">
+      {money(price.value)} / {price.name}
+    </span>
+  ));
+}
+
+function compactPrices(row: Product, field: PriceField) {
+  return unitPrices(row, field).map((price) => (
+    <span key={price.id} className="block whitespace-nowrap">
+      {money(price.value)} / {price.name}
+    </span>
+  ));
+}
+
+function pricingBreakdown(row: Product, salesProfit: number, lots: ProductLotRow[]) {
+  const pct = marginPct(row, lots);
+  const profit = unitProfit(row, lots);
+  const rows: {
+    label: string;
+    field?: PriceField;
+    fifo?: boolean;
+    value?: string;
+    tone?: "sale" | "danger";
+  }[] = [
+    { label: "Cost", fifo: true },
+    { label: "Minimum", field: "min" },
+    { label: "Wholesale", field: "wholesale" },
+    { label: "Retail", field: "retail" },
+    {
+      label: PRODUCT_COPY.unitProfit,
+      value: money(profit),
+      tone: profit >= 0 ? "sale" : "danger",
+    },
+    {
+      label: "Margin",
+      value: `${profit >= 0 ? "+" : ""}${pct.toFixed(1)}%`,
+      tone: profit >= 0 ? "sale" : "danger",
+    },
+    { label: PRODUCT_COPY.salesProfit, value: money(salesProfit) },
+  ];
+
+  return (
+    <div className="grid min-w-[190px] gap-1.5 text-left">
+      {rows.map((entry) => (
+        <div key={entry.label} className="flex items-start justify-between gap-4">
+          <span className="font-medium opacity-85">{entry.label}</span>
+          <span
+            className={
+              entry.tone === "sale"
+                ? "grid justify-items-end gap-0.5 font-bold tabular-nums text-[#86efac]"
+                : entry.tone === "danger"
+                  ? "grid justify-items-end gap-0.5 font-bold tabular-nums text-[#fca5a5]"
+                  : "grid justify-items-end gap-0.5 font-semibold tabular-nums text-right"
+            }
+          >
+            {entry.fifo
+              ? compactFifoCost(row, lots)
+              : entry.field
+                ? compactPrices(row, entry.field)
+                : entry.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PricingBreakdownTrigger({
+  row,
+  lots,
+  salesProfit,
+  children,
+  className,
+  showIcon = false,
+}: {
+  row: Product;
+  lots: ProductLotRow[];
+  salesProfit: number;
+  children: ReactNode;
+  className?: string;
+  showIcon?: boolean;
+}) {
+  return (
+    <Tooltip content={pricingBreakdown(row, salesProfit, lots)}>
+      <span
+        className={`inline-flex max-w-full min-w-0 cursor-help items-center gap-1 ${className ?? ""}`}
+        title={PRODUCT_COPY.pricingHint}
+      >
+        {children}
+        {showIcon ? <Info size={12} className="shrink-0 opacity-55" aria-hidden /> : null}
+      </span>
+    </Tooltip>
+  );
 }
 
 function stockTone(row: Product): "ok" | "warn" | "danger" {
@@ -224,8 +338,8 @@ export function ProductsPage() {
   } = useProductsHub();
   const categoryOptions = categories.map((c) => c.name);
   const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.name ?? "";
+  const { edit: lotEdit, openCreate: openAddLot, lotDrawer } = useLotDrawer();
 
-  const navigate = useNavigate();
   const tab = section === "low" ? "low" : "all";
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
@@ -237,7 +351,6 @@ export function ProductsPage() {
   const [chartLimit, setChartLimit] = useState<"10" | "20" | "50" | "all">("10");
   const [chartProductId, setChartProductId] = useState("");
   const [remoteRows, setRemoteRows] = useState<Product[]>([]);
-  const [profitSort, setProfitSort] = useState<"asc" | "desc" | null>(null);
   const [insightMetric, setInsightMetric] = useState<ProductInsightMetric>("profit");
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [repairJobs, setRepairJobs] = useState<RepairResponse[]>([]);
@@ -245,6 +358,7 @@ export function ProductsPage() {
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<Product | null>(null);
+  const [detail, setDetail] = useState<Product | null>(null);
   const [remove, setRemove] = useState<Product | null>(null);
   const [blocked, setBlocked] = useState(false);
   const debouncedGlobalQuery = useDebounce(q.trim(), 320);
@@ -332,16 +446,18 @@ export function ProductsPage() {
         if (chip.field === "sales") {
           if (productSalesStats(r.id, salesStats).sales < minAmount(chip.value)) return false;
         }
-        if (chip.field === "profit") {
-          if (productSalesStats(r.id, salesStats).profit < minAmount(chip.value)) return false;
-        }
-        if (chip.field === "cost" && r.cost < minAmount(chip.value)) return false;
+        if (chip.field === "cost" && fifoCostForProduct(r, lots) < minAmount(chip.value))
+          return false;
         if (chip.field === "minimumPrice" && r.min < minAmount(chip.value)) return false;
         if (chip.field === "wholesale" && r.wholesale < minAmount(chip.value)) return false;
         if (chip.field === "retail" && r.retail < minAmount(chip.value)) return false;
         if (chip.field === "stockQty" && r.stock < minAmount(chip.value)) return false;
-        if (chip.field === "stockValue" && r.stock * r.cost < minAmount(chip.value)) return false;
-        if (chip.field === "margin" && marginPct(r) < minAmount(chip.value)) return false;
+        if (
+          chip.field === "stockValue" &&
+          openLotStockValue(lots, rows, r.id) < minAmount(chip.value)
+        )
+          return false;
+        if (chip.field === "margin" && marginPct(r, lots) < minAmount(chip.value)) return false;
         if (chip.field === "stock") {
           const tone = stockTone(r);
           if (chip.value === "In stock" && tone !== "ok") return false;
@@ -358,21 +474,12 @@ export function ProductsPage() {
       return true;
     });
     return list;
-  }, [searchRows, q, tab, chips, sectionKpi, salesStats]);
+  }, [searchRows, q, tab, chips, sectionKpi, salesStats, lots, rows]);
 
-  const ordered = useMemo(() => {
-    if (!profitSort) return filtered;
-    return [...filtered].sort((a, b) => {
-      const left = productSalesStats(a.id, salesStats).profit;
-      const right = productSalesStats(b.id, salesStats).profit;
-      return profitSort === "asc" ? left - right : right - left;
-    });
-  }, [filtered, profitSort, salesStats]);
-
-  const pageCount = pageSize === PAGE_SIZE_ALL ? Math.max(ordered.length, 1) : pageSize;
-  const pages = Math.max(1, Math.ceil(ordered.length / pageCount));
+  const pageCount = pageSize === PAGE_SIZE_ALL ? Math.max(filtered.length, 1) : pageSize;
+  const pages = Math.max(1, Math.ceil(filtered.length / pageCount));
   const shown =
-    pageSize === PAGE_SIZE_ALL ? ordered : ordered.slice((page - 1) * pageSize, page * pageSize);
+    pageSize === PAGE_SIZE_ALL ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
   const chartData = useMemo(() => {
     return filtered
       .map((product) => {
@@ -408,10 +515,7 @@ export function ProductsPage() {
     setPage(1);
   }
 
-  async function commit(
-    next: Product,
-    branchQuantities: Record<string, number> = {},
-  ): Promise<boolean> {
+  async function commit(next: Product): Promise<boolean> {
     const isNewRow = !rows.some((r) => r.id === next.id);
     const category = resolveCategoryId(next, categories);
     if (!category) {
@@ -424,11 +528,12 @@ export function ProductsPage() {
     }
     setProductLoading((current) => ({ ...current, saving: true }));
     try {
+      const session = await ensureSession();
       if (isNewRow) {
         const payload = buildCreateProductPayload(next, {
           categoryId: category.id,
           units,
-          branchQuantities,
+          branchId: session?.branchId,
         });
         if (!payload) {
           toaster.error(PRODUCT_COPY.unitRequired);
@@ -482,7 +587,7 @@ export function ProductsPage() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (edit || remove || blocked) return;
+      if (edit || detail || lotEdit || remove || blocked) return;
       if (e.key === "F2") {
         e.preventDefault();
         e.stopPropagation();
@@ -491,7 +596,7 @@ export function ProductsPage() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [edit, remove, blocked]);
+  }, [edit, lotEdit, remove, blocked]);
 
   useLayoutEffect(() => {
     setActions(
@@ -541,7 +646,6 @@ export function ProductsPage() {
                 placeholder: "Min amount e.g. 5000",
                 numeric: true,
               },
-              { id: "profit", label: "Profit", placeholder: "Min amount e.g. 1000", numeric: true },
               {
                 id: "stock",
                 label: "Stock status",
@@ -720,12 +824,16 @@ export function ProductsPage() {
                     <div className="mt-4 rounded-xl border border-line p-3">
                       <h4 className="mb-3 text-[11px] font-bold text-ink">Pricing</h4>
                       <div className="grid gap-2 text-[10px]">
-                        {[
-                          ["Cost", chartProduct.cost],
-                          ["Minimum", chartProduct.min],
-                          ["Wholesale", chartProduct.wholesale],
-                          ["Retail", chartProduct.retail],
-                        ].map(([label, value]) => (
+                        {(() => {
+                          const pricing = productBasePricing(chartProduct);
+                          return [
+                            ["Cost", fifoCostForProduct(chartProduct, lots)],
+                            ["Minimum", chartProduct.min],
+                            ["Wholesale", chartProduct.wholesale],
+                            ["Retail", pricing.retail],
+                            [PRODUCT_COPY.unitProfit, unitProfit(chartProduct, lots)],
+                          ];
+                        })().map(([label, value]) => (
                           <div key={String(label)} className="flex justify-between gap-4">
                             <span className="text-muted">{label}</span>
                             <b className="tabular-nums text-ink">{money(Number(value))}</b>
@@ -785,30 +893,6 @@ export function ProductsPage() {
             {show("retail") ? <Th>Retail</Th> : null}
             {show("margin") ? <Th>Margin</Th> : null}
             {show("sales") ? <Th>Total sales</Th> : null}
-            {show("profit") ? (
-              <Th>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 border-0 bg-transparent p-0 font:inherit text-inherit"
-                  aria-label="Sort by profit"
-                  aria-pressed={Boolean(profitSort)}
-                  onClick={() =>
-                    setProfitSort((current) =>
-                      current === null ? "desc" : current === "desc" ? "asc" : null,
-                    )
-                  }
-                >
-                  Profit
-                  {profitSort === "desc" ? (
-                    <ArrowDown size={12} />
-                  ) : profitSort === "asc" ? (
-                    <ArrowUp size={12} />
-                  ) : (
-                    <ArrowUpDown size={12} />
-                  )}
-                </button>
-              </Th>
-            ) : null}
             {show("stock") ? <Th>Qty</Th> : null}
             {show("minStock") ? <Th>Minimum qty</Th> : null}
             {show("recommended") ? <Th>Recommended order</Th> : null}
@@ -830,25 +914,33 @@ export function ProductsPage() {
           ) : (
             shown.map((row) => {
               const tone = stockTone(row);
-              const pct = marginPct(row);
+              const pct = marginPct(row, lots);
               const lastLot = latestLot(row.id);
               const minimumStock = row.minimumStock ?? 20;
               const recommended = Math.max(0, minimumStock * 2 - row.stock);
               return (
-                <tr key={row.id} className={`is-${tone}`}>
+                <tr
+                  key={row.id}
+                  className={`is-${tone} cursor-pointer`}
+                  onClick={() => setDetail(row)}
+                >
                   <Td className="ui-check-col">
-                    <Checkbox
-                      checked={selected.includes(row.id)}
-                      onChange={(e) => {
-                        setSelected((s) =>
-                          e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
-                        );
-                      }}
-                    />
+                    <div onClick={(event) => event.stopPropagation()}>
+                      <Checkbox
+                        checked={selected.includes(row.id)}
+                        onChange={(e) => {
+                          setSelected((s) =>
+                            e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
+                          );
+                        }}
+                      />
+                    </div>
                   </Td>
                   <Td>
                     <TruncatedTooltip text={row.name} />
-                    {row.isLinear ? <span className="sub">Sold by meter</span> : null}
+                    {isLinearStockUnit(row.unit) ? (
+                      <span className="sub">Sold by {unitLabel(row.unit)}</span>
+                    ) : null}
                     {row.isManufactured ? <span className="sub">Production</span> : null}
                   </Td>
                   {show("sku") ? <Td>{row.sku || "—"}</Td> : null}
@@ -858,30 +950,62 @@ export function ProductsPage() {
                   ) : null}
                   {show("cost") ? (
                     <Td numeric>
-                      <UnitPrice row={row} field="cost" />
+                      <PricingBreakdownTrigger
+                        row={row}
+                        lots={lots}
+                        salesProfit={productSalesStats(row.id, salesStats).profit}
+                        className="justify-end"
+                      >
+                        <ProductCostDisplay
+                          product={row}
+                          stockCost={fifoCostForProduct(row, lots)}
+                        />
+                      </PricingBreakdownTrigger>
                     </Td>
                   ) : null}
                   {show("min") ? (
                     <Td numeric>
-                      <UnitPrice row={row} field="min" />
+                      <PricingBreakdownTrigger
+                        row={row}
+                        lots={lots}
+                        salesProfit={productSalesStats(row.id, salesStats).profit}
+                        className="justify-end"
+                      >
+                        <UnitPrice row={row} field="min" />
+                      </PricingBreakdownTrigger>
                     </Td>
                   ) : null}
                   {show("wholesale") ? (
                     <Td numeric>
-                      <UnitPrice row={row} field="wholesale" />
+                      <PricingBreakdownTrigger
+                        row={row}
+                        lots={lots}
+                        salesProfit={productSalesStats(row.id, salesStats).profit}
+                        className="justify-end"
+                      >
+                        <UnitPrice row={row} field="wholesale" />
+                      </PricingBreakdownTrigger>
                     </Td>
                   ) : null}
                   {show("retail") ? (
                     <Td numeric>
-                      <UnitPrice row={row} field="retail" />
+                      <PricingBreakdownTrigger
+                        row={row}
+                        lots={lots}
+                        salesProfit={productSalesStats(row.id, salesStats).profit}
+                        className="justify-end"
+                        showIcon
+                      >
+                        <UnitPrice row={row} field="retail" />
+                      </PricingBreakdownTrigger>
                     </Td>
                   ) : null}
                   {show("margin") ? (
                     <Td numeric>
                       <span
+                        className="font-bold tabular-nums"
                         style={{
                           color: pct >= 0 ? "var(--sale)" : "var(--danger)",
-                          fontWeight: 700,
                         }}
                       >
                         {pct >= 0 ? "+" : ""}
@@ -891,19 +1015,6 @@ export function ProductsPage() {
                   ) : null}
                   {show("sales") ? (
                     <Td numeric>{money(productSalesStats(row.id, salesStats).sales)}</Td>
-                  ) : null}
-                  {show("profit") ? (
-                    <Td numeric>
-                      <span
-                        className={
-                          productSalesStats(row.id, salesStats).profit >= 0
-                            ? "font-bold text-sale"
-                            : "font-bold text-danger"
-                        }
-                      >
-                        {money(productSalesStats(row.id, salesStats).profit)}
-                      </span>
-                    </Td>
                   ) : null}
                   {show("stock") ? (
                     <Td numeric>
@@ -937,7 +1048,9 @@ export function ProductsPage() {
                     </Td>
                   ) : null}
                   {show("lastCost") ? (
-                    <Td numeric>{lastLot ? money(lastLot.purchasePrice) : money(row.cost)}</Td>
+                    <Td numeric>
+                      <ProductCostDisplay product={row} stockCost={fifoCostForProduct(row, lots)} />
+                    </Td>
                   ) : null}
                   {show("status") ? (
                     <Td>
@@ -945,33 +1058,32 @@ export function ProductsPage() {
                     </Td>
                   ) : null}
                   <Td>
-                    {tab === "low" ? (
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        onClick={() =>
-                          navigate(productsHref("lots"), { state: { addLotProductId: row.id } })
-                        }
-                      >
-                        Add lot
-                      </Button>
-                    ) : (
-                      <Menu>
-                        <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
-                          Edit
-                        </MenuItem>
-                        <MenuItem
-                          danger
-                          icon={<Trash2 size={14} />}
-                          onClick={() => {
-                            if (row.stock > 0 || row.claims > 0) setBlocked(true);
-                            else setRemove(row);
-                          }}
-                        >
-                          Delete
-                        </MenuItem>
-                      </Menu>
-                    )}
+                    <div onClick={(event) => event.stopPropagation()}>
+                      {tab === "low" ? (
+                        <Button size="sm" variant="primary" onClick={() => openAddLot(row.id)}>
+                          Add lot
+                        </Button>
+                      ) : (
+                        <Menu>
+                          <MenuItem icon={<Layers size={14} />} onClick={() => openAddLot(row.id)}>
+                            Add lot
+                          </MenuItem>
+                          <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
+                            Edit
+                          </MenuItem>
+                          <MenuItem
+                            danger
+                            icon={<Trash2 size={14} />}
+                            onClick={() => {
+                              if (row.stock > 0 || row.claims > 0) setBlocked(true);
+                              else setRemove(row);
+                            }}
+                          >
+                            Delete
+                          </MenuItem>
+                        </Menu>
+                      )}
+                    </div>
                   </Td>
                 </tr>
               );
@@ -979,6 +1091,27 @@ export function ProductsPage() {
           )}
         </tbody>
       </Table>
+
+      <ProductDetailDrawer
+        product={detail}
+        lots={lots}
+        salesProfit={detail ? productSalesStats(detail.id, salesStats).profit : 0}
+        salesTotal={detail ? productSalesStats(detail.id, salesStats).sales : 0}
+        salesQty={detail ? productSalesStats(detail.id, salesStats).quantity : 0}
+        supplierLabel={
+          detail ? supplierName(latestLot(detail.id)?.supplierId ?? "") || undefined : undefined
+        }
+        supplierName={supplierName}
+        onClose={() => setDetail(null)}
+        onEdit={(row) => {
+          setDetail(null);
+          openEdit(row);
+        }}
+        onAddLot={(productId) => {
+          setDetail(null);
+          openAddLot(productId);
+        }}
+      />
 
       <Drawer
         open={Boolean(edit)}
@@ -1069,6 +1202,7 @@ export function ProductsPage() {
             });
         }}
       />
+      {lotDrawer}
     </div>
   );
 }
