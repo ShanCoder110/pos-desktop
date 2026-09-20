@@ -2,6 +2,18 @@
 
 Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists current violations / gaps.
 
+## Stock / FIFO audit (2026-09-19)
+
+| Rule | Status |
+|---|---|
+| Opening qty per branch on product create (`openingStocks`) | ✅ |
+| Lot receive split (`branchAllocations`) + session branch default | ✅ |
+| POS sale: this-branch lot FIFO, then other branches (oldest lot, main first) | ✅ `stock_allocation.rs` |
+| POS compact stock `here · total` (no lot numbers) | ✅ |
+| POS / product list prices from **open** FIFO lot cost + unit M/W/R | ✅ cost from oldest remaining lot |
+| Repair / production / replacement FIFO still **single branch** | 🟡 not using fallback |
+| Unit tests for FIFO consume / split lots | 🔴 still missing |
+
 ## UI agent-mistakes audit (2026-09-19)
 
 ### Password eye toggle
