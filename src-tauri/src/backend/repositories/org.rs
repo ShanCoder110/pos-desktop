@@ -19,6 +19,8 @@ struct UserRow {
     email: Option<String>,
     role: String,
     default_branch_id: Option<Uuid>,
+    city_id: Option<Uuid>,
+    city_name: Option<String>,
     is_active: bool,
     last_login_at: Option<chrono::DateTime<chrono::Utc>>,
     total_paid: Option<f64>,
@@ -115,11 +117,13 @@ impl OrgRepository {
         let rows = UserRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
             format!(
-                "SELECT u.id, u.name, u.username, u.phone, u.email, u.role, u.default_branch_id, u.is_active,
-                        u.last_login_at,
+                "SELECT u.id, u.name, u.username, u.phone, u.email, u.role, u.default_branch_id, u.city_id,
+                        ci.name AS city_name, u.is_active, u.last_login_at,
                         CAST(COALESCE((SELECT sle.balance_after FROM staff_ledger_entries sle WHERE sle.user_id = u.id ORDER BY sle.occurred_at DESC, sle.created_at DESC LIMIT 1), 0) AS REAL) AS total_paid,
                         u.created_at, u.updated_at
-                 FROM users u WHERE {where_sql}
+                 FROM users u
+                 LEFT JOIN cities ci ON ci.id = u.city_id AND ci.deleted_at IS NULL
+                 WHERE {where_sql}
                  ORDER BY {sort} {direction}, u.id ASC
                  LIMIT ? OFFSET ?"
             ),
@@ -157,6 +161,32 @@ impl OrgRepository {
         .unwrap_or(false))
     }
 
+    pub async fn branch_code_exists(
+        database: &DatabaseConnection,
+        code: &str,
+        exclude_id: Option<Uuid>,
+    ) -> Result<bool, AppError> {
+        let sql = if exclude_id.is_some() {
+            "SELECT COUNT(*) AS count FROM branches WHERE code = ? AND deleted_at IS NULL AND id != ?"
+        } else {
+            "SELECT COUNT(*) AS count FROM branches WHERE code = ? AND deleted_at IS NULL"
+        };
+        let values = if let Some(id) = exclude_id {
+            vec![code.into(), id.into()]
+        } else {
+            vec![code.into()]
+        };
+        Ok(CountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            sql,
+            values,
+        ))
+        .one(database)
+        .await?
+        .map(|row| row.count > 0)
+        .unwrap_or(false))
+    }
+
     pub async fn create_user(
         database: &DatabaseConnection,
         id: Uuid,
@@ -167,6 +197,7 @@ impl OrgRepository {
         email: Option<&str>,
         role: &str,
         default_branch_id: Option<Uuid>,
+        city_id: Option<Uuid>,
         is_active: bool,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<(), AppError> {
@@ -174,12 +205,13 @@ impl OrgRepository {
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
                 "INSERT INTO users
-                    (id, business_id, default_branch_id, name, username, password_hash, phone, email,
+                    (id, business_id, default_branch_id, city_id, name, username, password_hash, phone, email,
                      role, is_active, last_login_at, created_at, updated_at)
-                 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                 VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
                 [
                     id.into(),
                     default_branch_id.into(),
+                    city_id.into(),
                     name.into(),
                     username.into(),
                     password_hash.into(),
@@ -205,6 +237,7 @@ impl OrgRepository {
         email: Option<&str>,
         role: &str,
         default_branch_id: Option<Uuid>,
+        city_id: Option<Uuid>,
         is_active: bool,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<bool, AppError> {
@@ -214,7 +247,7 @@ impl OrgRepository {
                     DbBackend::Sqlite,
                     "UPDATE users
                      SET name = ?, username = ?, password_hash = ?, phone = ?, email = ?, role = ?,
-                         default_branch_id = ?, is_active = ?, updated_at = ?
+                         default_branch_id = ?, city_id = ?, is_active = ?, updated_at = ?
                      WHERE id = ?",
                     [
                         name.into(),
@@ -224,6 +257,7 @@ impl OrgRepository {
                         email.into(),
                         role.into(),
                         default_branch_id.into(),
+                        city_id.into(),
                         is_active.into(),
                         now.into(),
                         id.into(),
@@ -236,7 +270,7 @@ impl OrgRepository {
                     DbBackend::Sqlite,
                     "UPDATE users
                      SET name = ?, username = ?, phone = ?, email = ?, role = ?,
-                         default_branch_id = ?, is_active = ?, updated_at = ?
+                         default_branch_id = ?, city_id = ?, is_active = ?, updated_at = ?
                      WHERE id = ?",
                     [
                         name.into(),
@@ -245,6 +279,7 @@ impl OrgRepository {
                         email.into(),
                         role.into(),
                         default_branch_id.into(),
+                        city_id.into(),
                         is_active.into(),
                         now.into(),
                         id.into(),
@@ -790,6 +825,8 @@ fn user_response(row: UserRow, permissions: Vec<UserPermissionResponse>) -> User
         email: row.email,
         role: row.role,
         default_branch_id: row.default_branch_id.map(|value| value.to_string()),
+        city_id: row.city_id.map(|value| value.to_string()),
+        city_name: row.city_name,
         is_active: row.is_active,
         last_login_at: row.last_login_at.map(|value| value.to_rfc3339()),
         permissions,

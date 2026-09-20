@@ -30,6 +30,8 @@ pub struct MasterRequest {
     /// Opening balance. Positive = shop owes supplier / customer owes shop. Negative = advance.
     #[serde(default)]
     pub previous_balance: Option<f64>,
+    #[serde(default)]
+    pub city_id: Option<String>,
 }
 
 fn empty_string_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -61,6 +63,8 @@ pub struct MasterResponse {
     pub precision: Option<i16>,
     pub balance: Option<f64>,
     pub is_walk_in: Option<bool>,
+    pub city_id: Option<String>,
+    pub city_name: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

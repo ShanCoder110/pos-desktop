@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::backend::{
     constants::{
-        ERROR_CATEGORY_NOT_FOUND, ERROR_CUSTOMER_NOT_FOUND, ERROR_INVALID_ID,
+        ERROR_CATEGORY_NOT_FOUND, ERROR_CITY_NOT_FOUND, ERROR_CUSTOMER_NOT_FOUND, ERROR_INVALID_ID,
         ERROR_SUPPLIER_NOT_FOUND, ERROR_UNIT_NOT_FOUND,
     },
     context::RequestContext,
@@ -82,6 +82,15 @@ master_handlers!(
     delete_category,
     MasterKind::Category,
     ERROR_CATEGORY_NOT_FOUND
+);
+master_handlers!(
+    list_cities,
+    get_city,
+    create_city,
+    update_city,
+    delete_city,
+    MasterKind::City,
+    ERROR_CITY_NOT_FOUND
 );
 master_handlers!(
     list_units,

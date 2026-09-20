@@ -10,6 +10,7 @@ mod m20260917_000007_ledger_trash_foundation;
 mod m20260918_000008_staff_partner_users;
 mod m20260919_000009_auth_refresh_setup;
 mod m20260920_000010_soft_delete_filter_indexes;
+mod m20260921_000011_cities;
 
 pub struct Migrator;
 
@@ -27,6 +28,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260918_000008_staff_partner_users::Migration),
             Box::new(m20260919_000009_auth_refresh_setup::Migration),
             Box::new(m20260920_000010_soft_delete_filter_indexes::Migration),
+            Box::new(m20260921_000011_cities::Migration),
         ]
     }
 }

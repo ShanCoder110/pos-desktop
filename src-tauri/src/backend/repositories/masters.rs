@@ -14,6 +14,7 @@ use crate::backend::{
 #[derive(Clone, Copy)]
 pub enum MasterKind {
     Category,
+    City,
     Unit,
     Supplier,
     Customer,
@@ -23,6 +24,7 @@ impl MasterKind {
     const fn table(self) -> &'static str {
         match self {
             Self::Category => "product_categories",
+            Self::City => "cities",
             Self::Unit => "units",
             Self::Supplier => "suppliers",
             Self::Customer => "customers",
@@ -31,10 +33,11 @@ impl MasterKind {
 
     const fn projection(self) -> &'static str {
         match self {
-            Self::Category => "id, name, NULL AS symbol, NULL AS phone, NULL AS email, NULL AS address, description AS notes, is_active, NULL AS precision, NULL AS balance, NULL AS is_walk_in, created_at, updated_at",
-            Self::Unit => "id, name, symbol, NULL AS phone, NULL AS email, NULL AS address, NULL AS notes, is_active, precision, NULL AS balance, NULL AS is_walk_in, created_at, updated_at",
-            Self::Supplier => "id, name, NULL AS symbol, phone, email, address, notes, is_active, NULL AS precision, CAST((SELECT sle.balance_after FROM supplier_ledger_entries sle WHERE sle.supplier_id = suppliers.id ORDER BY sle.occurred_at DESC, sle.created_at DESC LIMIT 1) AS REAL) AS balance, NULL AS is_walk_in, created_at, updated_at",
-            Self::Customer => "id, name, NULL AS symbol, phone, email, address, notes, is_active, NULL AS precision, CAST((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id ORDER BY cle.occurred_at DESC, cle.created_at DESC LIMIT 1) AS REAL) AS balance, is_walk_in, created_at, updated_at",
+            Self::Category => "id, name, NULL AS symbol, NULL AS phone, NULL AS email, NULL AS address, description AS notes, is_active, NULL AS precision, NULL AS balance, NULL AS is_walk_in, NULL AS city_id, NULL AS city_name, created_at, updated_at",
+            Self::City => "id, name, NULL AS symbol, NULL AS phone, NULL AS email, NULL AS address, NULL AS notes, is_active, NULL AS precision, NULL AS balance, NULL AS is_walk_in, NULL AS city_id, NULL AS city_name, created_at, updated_at",
+            Self::Unit => "id, name, symbol, NULL AS phone, NULL AS email, NULL AS address, NULL AS notes, is_active, precision, NULL AS balance, NULL AS is_walk_in, NULL AS city_id, NULL AS city_name, created_at, updated_at",
+            Self::Supplier => "id, name, NULL AS symbol, phone, email, address, notes, is_active, NULL AS precision, CAST((SELECT sle.balance_after FROM supplier_ledger_entries sle WHERE sle.supplier_id = suppliers.id ORDER BY sle.occurred_at DESC, sle.created_at DESC LIMIT 1) AS REAL) AS balance, NULL AS is_walk_in, city_id, (SELECT c.name FROM cities c WHERE c.id = suppliers.city_id AND c.deleted_at IS NULL LIMIT 1) AS city_name, created_at, updated_at",
+            Self::Customer => "id, name, NULL AS symbol, phone, email, address, notes, is_active, NULL AS precision, CAST((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id ORDER BY cle.occurred_at DESC, cle.created_at DESC LIMIT 1) AS REAL) AS balance, is_walk_in, city_id, (SELECT c.name FROM cities c WHERE c.id = customers.city_id AND c.deleted_at IS NULL LIMIT 1) AS city_name, created_at, updated_at",
         }
     }
 }
@@ -52,6 +55,8 @@ struct MasterRow {
     precision: Option<i16>,
     balance: Option<rust_decimal::Decimal>,
     is_walk_in: Option<bool>,
+    city_id: Option<Uuid>,
+    city_name: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -75,6 +80,8 @@ impl From<MasterRow> for MasterResponse {
             precision: row.precision,
             balance: row.balance.and_then(|value| value.to_f64()),
             is_walk_in: row.is_walk_in,
+            city_id: row.city_id.map(|value| value.to_string()),
+            city_name: row.city_name,
             created_at: row.created_at.to_rfc3339(),
             updated_at: row.updated_at.to_rfc3339(),
         }
@@ -321,7 +328,7 @@ fn conditions(kind: MasterKind, query: &PageQuery) -> (String, Vec<sea_orm::Valu
                 values.push(pattern.clone().into());
                 values.push(pattern.into());
             }
-            MasterKind::Category => {
+            MasterKind::Category | MasterKind::City => {
                 parts.push("lower(name) LIKE ?".to_owned());
                 values.push(pattern.into());
             }
@@ -365,28 +372,40 @@ fn push_like(
     }
 }
 
+fn parse_city_id(request: &MasterRequest) -> Option<Uuid> {
+    request
+        .city_id
+        .as_deref()
+        .and_then(|value| Uuid::parse_str(value).ok())
+}
+
 fn insert_statement(
     kind: MasterKind,
     id: Uuid,
     now: chrono::DateTime<chrono::Utc>,
     request: &MasterRequest,
 ) -> (&'static str, Vec<sea_orm::Value>) {
+    let city_id = parse_city_id(request);
     match kind {
         MasterKind::Category => (
             "INSERT INTO product_categories (id, name, description, is_active, version, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
             vec![id.into(), request.name.trim().into(), request.notes.clone().into(), request.is_active.into(), now.to_rfc3339().into(), now.to_rfc3339().into()],
+        ),
+        MasterKind::City => (
+            "INSERT INTO cities (id, name, is_active, version, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",
+            vec![id.into(), request.name.trim().into(), request.is_active.into(), now.to_rfc3339().into(), now.to_rfc3339().into()],
         ),
         MasterKind::Unit => (
             "INSERT INTO units (id, name, symbol, precision, is_active, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
             vec![id.into(), request.name.trim().into(), request.symbol.clone().unwrap_or_default().trim().into(), request.precision.unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), now.to_rfc3339().into()],
         ),
         MasterKind::Supplier => (
-            "INSERT INTO suppliers (id, name, phone, email, address, notes, is_active, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
-            vec![id.into(), request.name.trim().into(), request.phone.clone().unwrap_or_default().into(), request.email.clone().unwrap_or_default().into(), request.address.clone().unwrap_or_default().into(), request.notes.clone().unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), now.to_rfc3339().into()],
+            "INSERT INTO suppliers (id, name, phone, email, address, city_id, notes, is_active, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+            vec![id.into(), request.name.trim().into(), request.phone.clone().unwrap_or_default().into(), request.email.clone().unwrap_or_default().into(), request.address.clone().unwrap_or_default().into(), city_id.into(), request.notes.clone().unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), now.to_rfc3339().into()],
         ),
         MasterKind::Customer => (
-            "INSERT INTO customers (id, name, phone, email, address, is_walk_in, notes, is_active, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
-            vec![id.into(), request.name.trim().into(), request.phone.clone().unwrap_or_default().into(), request.email.clone().into(), request.address.clone().unwrap_or_default().into(), request.is_walk_in.into(), request.notes.clone().unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), now.to_rfc3339().into()],
+            "INSERT INTO customers (id, name, phone, email, address, city_id, is_walk_in, notes, is_active, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+            vec![id.into(), request.name.trim().into(), request.phone.clone().unwrap_or_default().into(), request.email.clone().into(), request.address.clone().unwrap_or_default().into(), city_id.into(), request.is_walk_in.into(), request.notes.clone().unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), now.to_rfc3339().into()],
         ),
     }
 }
@@ -397,22 +416,27 @@ fn update_statement(
     now: chrono::DateTime<chrono::Utc>,
     request: &MasterRequest,
 ) -> (&'static str, Vec<sea_orm::Value>) {
+    let city_id = parse_city_id(request);
     match kind {
         MasterKind::Category => (
             "UPDATE product_categories SET name = ?, description = ?, is_active = ?, version = version + 1, updated_at = ? WHERE id = ?",
             vec![request.name.trim().into(), request.notes.clone().into(), request.is_active.into(), now.to_rfc3339().into(), id.into()],
+        ),
+        MasterKind::City => (
+            "UPDATE cities SET name = ?, is_active = ?, version = version + 1, updated_at = ? WHERE id = ?",
+            vec![request.name.trim().into(), request.is_active.into(), now.to_rfc3339().into(), id.into()],
         ),
         MasterKind::Unit => (
             "UPDATE units SET name = ?, symbol = ?, precision = ?, is_active = ?, version = version + 1, updated_at = ? WHERE id = ?",
             vec![request.name.trim().into(), request.symbol.clone().unwrap_or_default().trim().into(), request.precision.unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), id.into()],
         ),
         MasterKind::Supplier => (
-            "UPDATE suppliers SET name = ?, phone = ?, email = ?, address = ?, notes = ?, is_active = ?, version = version + 1, updated_at = ? WHERE id = ?",
-            vec![request.name.trim().into(), request.phone.clone().unwrap_or_default().into(), request.email.clone().unwrap_or_default().into(), request.address.clone().unwrap_or_default().into(), request.notes.clone().unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), id.into()],
+            "UPDATE suppliers SET name = ?, phone = ?, email = ?, address = ?, city_id = ?, notes = ?, is_active = ?, version = version + 1, updated_at = ? WHERE id = ?",
+            vec![request.name.trim().into(), request.phone.clone().unwrap_or_default().into(), request.email.clone().unwrap_or_default().into(), request.address.clone().unwrap_or_default().into(), city_id.into(), request.notes.clone().unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), id.into()],
         ),
         MasterKind::Customer => (
-            "UPDATE customers SET name = ?, phone = ?, email = ?, address = ?, is_walk_in = ?, notes = ?, is_active = ?, version = version + 1, updated_at = ? WHERE id = ?",
-            vec![request.name.trim().into(), request.phone.clone().unwrap_or_default().into(), request.email.clone().into(), request.address.clone().unwrap_or_default().into(), request.is_walk_in.into(), request.notes.clone().unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), id.into()],
+            "UPDATE customers SET name = ?, phone = ?, email = ?, address = ?, city_id = ?, is_walk_in = ?, notes = ?, is_active = ?, version = version + 1, updated_at = ? WHERE id = ?",
+            vec![request.name.trim().into(), request.phone.clone().unwrap_or_default().into(), request.email.clone().into(), request.address.clone().unwrap_or_default().into(), city_id.into(), request.is_walk_in.into(), request.notes.clone().unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), id.into()],
         ),
     }
 }
