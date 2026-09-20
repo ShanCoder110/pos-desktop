@@ -463,7 +463,7 @@ async fn allocate_fifo(
 ) -> Result<(Decimal, Uuid), AppError> {
     let lots = FifoLotRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        "SELECT bl.id AS branch_lot_id, bl.product_lot_id, bl.remaining_base_quantity AS remaining, pl.purchase_price_per_base AS unit_cost FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE bl.branch_id = ? AND pl.product_id = ? AND bl.remaining_base_quantity > 0 AND pl.deleted_at IS NULL ORDER BY pl.received_date ASC, pl.created_at ASC",
+        "SELECT bl.id AS branch_lot_id, bl.product_lot_id, bl.remaining_base_quantity AS remaining, CAST(pl.purchase_price_per_base AS REAL) AS unit_cost FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE bl.branch_id = ? AND pl.product_id = ? AND bl.remaining_base_quantity > 0 AND pl.deleted_at IS NULL ORDER BY pl.received_date ASC, pl.created_at ASC",
         [branch_id.into(), product_id.into()],
     ))
     .all(transaction)
