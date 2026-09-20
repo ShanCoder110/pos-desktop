@@ -1,9 +1,10 @@
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult, QueryFilter, Statement,
+    ActiveModelTrait, ActiveValue, ActiveValue::Set, ColumnTrait, ConnectionTrait,
+    DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult, QueryFilter,
+    Statement,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::backend::{
@@ -217,17 +218,85 @@ impl ProductRepository {
         units: Vec<product_unit::ActiveModel>,
     ) -> Result<(), AppError> {
         let now = chrono::Utc::now();
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "UPDATE product_units SET deleted_at = ?, is_active = 0, version = version + 1, updated_at = ? WHERE product_id = ? AND deleted_at IS NULL",
-                [now.into(), now.into(), product_id.into()],
-            ))
+        let existing = ProductUnit::find()
+            .filter(product_unit::Column::ProductId.eq(product_id))
+            .all(transaction)
             .await?;
-        for unit in units {
-            unit.insert(transaction).await?;
+        let mut kept_ids = HashSet::new();
+
+        for incoming in units {
+            let incoming_id = active_value(&incoming.id);
+            let unit_id = active_value(&incoming.unit_id)
+                .ok_or_else(|| AppError::internal("sellUnits.unitId is required"))?;
+            let conversion = active_value(&incoming.conversion_to_base)
+                .ok_or_else(|| AppError::internal("sellUnits.contains is required"))?;
+
+            let matched = incoming_id
+                .and_then(|id| existing.iter().find(|row| row.id == id))
+                .or_else(|| {
+                    existing
+                        .iter()
+                        .find(|row| row.unit_id == unit_id && row.conversion_to_base == conversion)
+                });
+
+            if let Some(row) = matched {
+                merge_unit(row, incoming, now).update(transaction).await?;
+                kept_ids.insert(row.id);
+            } else {
+                let model = incoming.insert(transaction).await?;
+                kept_ids.insert(model.id);
+            }
+        }
+
+        for row in existing.iter() {
+            if row.deleted_at.is_none() && !kept_ids.contains(&row.id) {
+                let mut active: product_unit::ActiveModel = row.clone().into();
+                active.deleted_at = Set(Some(now));
+                active.is_active = Set(false);
+                active.version = Set(row.version + 1);
+                active.updated_at = Set(now);
+                active.update(transaction).await?;
+            }
         }
         Ok(())
+    }
+}
+
+fn active_value<T: Clone>(value: &ActiveValue<T>) -> Option<T>
+where
+    sea_orm::Value: From<T>,
+{
+    match value {
+        ActiveValue::Set(v) | ActiveValue::Unchanged(v) => Some(v.clone()),
+        ActiveValue::NotSet => None,
+    }
+}
+
+fn merge_unit(
+    existing: &product_unit::Model,
+    incoming: product_unit::ActiveModel,
+    now: chrono::DateTime<chrono::Utc>,
+) -> product_unit::ActiveModel {
+    product_unit::ActiveModel {
+        id: Set(existing.id),
+        product_id: Set(existing.product_id),
+        unit_id: incoming.unit_id,
+        display_name: incoming.display_name,
+        conversion_to_base: incoming.conversion_to_base,
+        cost_reference: incoming.cost_reference,
+        minimum_price: incoming.minimum_price,
+        wholesale_price: incoming.wholesale_price,
+        retail_price: incoming.retail_price,
+        barcode: incoming.barcode,
+        is_base: incoming.is_base,
+        is_default_sale_unit: incoming.is_default_sale_unit,
+        sort_order: incoming.sort_order,
+        is_active: Set(true),
+        version: Set(existing.version + 1),
+        deleted_at: Set(None),
+        origin_device_id: Set(existing.origin_device_id),
+        created_at: Set(existing.created_at),
+        updated_at: Set(now),
     }
 }
 
@@ -246,7 +315,7 @@ fn projection_sql(branch_id: Option<Uuid>) -> (String, Vec<sea_orm::Value>) {
         )
     };
     let sql = format!(
-        "SELECT p.id, p.category_id, p.base_unit_id, p.name, p.sku, p.barcode, p.product_type, p.minimum_stock, p.warranty_duration, p.warranty_unit, p.warranty_note, p.is_active, p.created_at, p.updated_at, c.name AS category, u.symbol AS unit_symbol, {stock_expr} AS stock, {damaged_expr} AS damaged, CAST(COALESCE((SELECT pl.purchase_price_per_base FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL ORDER BY pl.received_date DESC, pl.created_at DESC LIMIT 1), 0) AS REAL) AS current_cost, (SELECT pl.supplier_id FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL ORDER BY pl.received_date DESC, pl.created_at DESC LIMIT 1) AS supplier_id, COALESCE((SELECT COUNT(*) FROM warranty_claim_items wci WHERE wci.product_id = p.id), 0) AS claims FROM products p JOIN product_categories c ON c.id = p.category_id JOIN units u ON u.id = p.base_unit_id"
+        "SELECT p.id, p.category_id, p.base_unit_id, p.name, p.sku, p.barcode, p.product_type, p.minimum_stock, p.warranty_duration, p.warranty_unit, p.warranty_note, p.is_active, p.created_at, p.updated_at, c.name AS category, u.symbol AS unit_symbol, {stock_expr} AS stock, {damaged_expr} AS damaged, CAST(COALESCE((SELECT pl.purchase_price_per_base FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND pl.remaining_base_quantity > 0 ORDER BY pl.received_date ASC, pl.created_at ASC LIMIT 1), (SELECT pl.purchase_price_per_base FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL ORDER BY pl.received_date DESC, pl.created_at DESC LIMIT 1), 0) AS REAL) AS current_cost, (SELECT pl.supplier_id FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND pl.remaining_base_quantity > 0 ORDER BY pl.received_date ASC, pl.created_at ASC LIMIT 1) AS supplier_id, COALESCE((SELECT COUNT(*) FROM warranty_claim_items wci WHERE wci.product_id = p.id), 0) AS claims FROM products p JOIN product_categories c ON c.id = p.category_id JOIN units u ON u.id = p.base_unit_id"
     );
     let _ = &mut values;
     (sql, values)
@@ -387,9 +456,12 @@ async fn hydrate(
             let first_bigger = units
                 .iter()
                 .find(|unit| unit.conversion_to_base > Decimal::ONE);
-            let cost = base
-                .and_then(|unit| unit.cost_reference)
-                .unwrap_or(row.current_cost);
+            let cost = if row.current_cost > Decimal::ZERO {
+                row.current_cost
+            } else {
+                base.and_then(|unit| unit.cost_reference)
+                    .unwrap_or(row.current_cost)
+            };
             let min = base.map(|unit| unit.minimum_price).unwrap_or_default();
             let wholesale = base.map(|unit| unit.wholesale_price).unwrap_or_default();
             let retail = base.map(|unit| unit.retail_price).unwrap_or_default();
@@ -429,6 +501,7 @@ async fn hydrate(
                         wholesale: decimal(unit.wholesale_price),
                         price: decimal(unit.retail_price),
                         barcode: unit.barcode.unwrap_or_default(),
+                        is_base: unit.is_base,
                         is_default: unit.is_default_sale_unit,
                     }
                 })

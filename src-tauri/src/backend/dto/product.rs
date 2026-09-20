@@ -136,6 +136,7 @@ pub struct ProductSellUnitResponse {
     pub wholesale: f64,
     pub price: f64,
     pub barcode: String,
+    pub is_base: bool,
     pub is_default: bool,
 }
 
@@ -254,6 +255,7 @@ mod tests {
                 is_default: true,
             }],
             opening_stock: None,
+            opening_stocks: vec![],
         };
         assert!(request.validate().is_err());
     }
