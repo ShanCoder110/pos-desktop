@@ -1,5 +1,6 @@
 import { UserRound } from "lucide-react";
 import {
+  CitySelect,
   Field,
   FormSection,
   PhoneField,
@@ -24,16 +25,19 @@ export type EmployeeFormValues = {
   phone: string;
   role: UserRole;
   branchId: string;
+  cityId: string;
   isActive: boolean;
 };
 
 export function EmployeeForm({
   employee,
   branches,
+  isNew,
   onValid,
 }: {
   employee: StaffUser;
   branches: Branch[];
+  isNew: boolean;
   onValid: (values: EmployeeFormValues) => Promise<void>;
 }) {
   const {
@@ -48,6 +52,7 @@ export function EmployeeForm({
       phone: formatPkMobile(employee.phone),
       role: employee.role,
       branchId: employee.branchId || branches[0]?.id || "",
+      cityId: employee.cityId ?? "",
       isActive: employee.isActive,
     },
   });
@@ -87,6 +92,11 @@ export function EmployeeForm({
             />
           )}
         />
+        <Controller
+          name="cityId"
+          control={control}
+          render={({ field }) => <CitySelect value={field.value} onChange={field.onChange} />}
+        />
         <Field label="Employee role" error={fieldMessage(errors, "role")}>
           <Controller
             name="role"
@@ -125,19 +135,21 @@ export function EmployeeForm({
             )}
           />
         </Field>
-        <div className="supplier-active-card">
-          <div>
-            <strong>Active employee</strong>
-            <span>Inactive staff stay in records but are off payroll</span>
+        {!isNew ? (
+          <div className="supplier-active-card">
+            <div>
+              <strong>Active employee</strong>
+              <span>Inactive staff stay in records but are off payroll</span>
+            </div>
+            <Controller
+              name="isActive"
+              control={control}
+              render={({ field }) => (
+                <Toggle checked={field.value} onChange={field.onChange} label="" />
+              )}
+            />
           </div>
-          <Controller
-            name="isActive"
-            control={control}
-            render={({ field }) => (
-              <Toggle checked={field.value} onChange={field.onChange} label="" />
-            )}
-          />
-        </div>
+        ) : null}
       </FormSection>
     </form>
   );

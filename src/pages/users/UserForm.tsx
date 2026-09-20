@@ -1,5 +1,6 @@
 import { KeyRound, Mail, Shield, UserRound } from "lucide-react";
 import {
+  CitySelect,
   Field,
   FormSection,
   PhoneField,
@@ -34,6 +35,7 @@ export type UserFormValues = {
   password: string;
   role: UserAccessRole;
   branchId: string;
+  cityId: string;
   isActive: boolean;
   permissions: Record<string, boolean>;
 };
@@ -65,6 +67,7 @@ export function UserForm({
       password: "",
       role: (user.role as UserAccessRole) || "CASHIER",
       branchId: user.branchId || branches[0]?.id || "",
+      cityId: user.cityId ?? "",
       isActive: user.isActive,
       permissions: user.permissions ?? defaultPermissionsForRole("CASHIER"),
     },
@@ -117,6 +120,11 @@ export function UserForm({
             {...register("email", { validate: validateUserEmail })}
           />
         </Field>
+        <Controller
+          name="cityId"
+          control={control}
+          render={({ field }) => <CitySelect value={field.value} onChange={field.onChange} />}
+        />
         <Field
           label={isNew ? "Password" : "New password"}
           hint={
@@ -181,19 +189,21 @@ export function UserForm({
             )}
           />
         </Field>
-        <div className="supplier-active-card">
-          <div>
-            <strong>Active user</strong>
-            <span>Can sign in when on</span>
+        {!isNew ? (
+          <div className="supplier-active-card">
+            <div>
+              <strong>Active user</strong>
+              <span>Can sign in when on</span>
+            </div>
+            <Controller
+              name="isActive"
+              control={control}
+              render={({ field }) => (
+                <Toggle checked={field.value} onChange={field.onChange} label="" />
+              )}
+            />
           </div>
-          <Controller
-            name="isActive"
-            control={control}
-            render={({ field }) => (
-              <Toggle checked={field.value} onChange={field.onChange} label="" />
-            )}
-          />
-        </div>
+        ) : null}
       </FormSection>
 
       <FormSection title={USERS_COPY.permissionsTitle} icon={<Shield size={14} />}>

@@ -121,6 +121,7 @@ const blankUser = (branches: Branch[]): StaffUser => ({
   username: "",
   role: "CASHIER",
   branchId: branches[0]?.id ?? "",
+  cityId: "",
   isActive: true,
   totalPaid: 0,
   permissions: defaultPermissionsForRole("CASHIER"),
@@ -300,7 +301,8 @@ export function UsersPage() {
         email: values.email.trim(),
         role: values.role,
         defaultBranchId: values.branchId,
-        isActive: values.isActive,
+        cityId: values.cityId || undefined,
+        isActive: isNew ? true : values.isActive,
         permissions: permissionsPayload(values.permissions),
       };
 
@@ -453,7 +455,7 @@ export function UsersPage() {
                 {show("phone") ? <Th>Phone</Th> : null}
                 {show("role") ? <Th>User role</Th> : null}
                 {show("branch") ? <Th>Branch</Th> : null}
-                {show("status") ? <Th>Status</Th> : null}
+                {show("city") ? <Th>City</Th> : null}
                 <Th />
               </tr>
             </THead>
@@ -484,13 +486,7 @@ export function UsersPage() {
                         </Td>
                       ) : null}
                       {show("branch") ? <Td>{branchName(row.branchId)}</Td> : null}
-                      {show("status") ? (
-                        <Td>
-                          <Badge tone={row.isActive ? "ok" : "danger"}>
-                            {row.isActive ? STAFF_STATUS_ACTIVE : STAFF_STATUS_INACTIVE}
-                          </Badge>
-                        </Td>
-                      ) : null}
+                      {show("city") ? <Td>{row.cityName || "—"}</Td> : null}
                       <Td>
                         <div onClick={(event) => event.stopPropagation()}>
                           <Menu>

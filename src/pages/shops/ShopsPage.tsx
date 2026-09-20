@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import {
   Badge,
@@ -16,15 +16,23 @@ import {
   Th,
   Toggle,
   SelectInput,
+  toaster,
 } from "@/components/common";
 import type { Branch, BranchSetting, BranchType } from "@/shared/domain/types";
-import { FIELD_LIMITS, FORM_COPY } from "@/shared/constants/fields";
+import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { PK_MOBILE_COPY } from "@/shared/constants/phone";
 import { Controller, useAppForm } from "@/hooks/useAppForm";
 import { fieldMessage, requiredTrim } from "@/utils/form";
 import { formatPkMobile, optionalPkMobile } from "@/utils/phone";
 import { ensureSession } from "@/services/auth";
-import { listAllBranches, mapBranch, mapBranchSetting } from "@/services/org";
+import { handleApiError } from "@/utils/apiError";
+import {
+  createBranch,
+  listAllBranches,
+  mapBranch,
+  mapBranchSetting,
+  updateBranch,
+} from "@/services/org";
 
 function typeTone(t: BranchType) {
   if (t === "STORE") return "ok" as const;
@@ -35,50 +43,83 @@ function typeTone(t: BranchType) {
 
 const SHOP_FORM_ID = "shop-form";
 
+function blankBranch(): Branch {
+  return {
+    id: "",
+    name: "",
+    code: "",
+    type: "STORE",
+    phone: "",
+    address: "",
+    isActive: true,
+  };
+}
+
+type ShopFormValues = {
+  name: string;
+  type: BranchType;
+  phone: string;
+  address: string;
+  fifoEnabled: boolean;
+  allowNegativeStock: boolean;
+};
+
 function ShopEditForm({
   branch,
-  lotEnabled,
-  negativeStock,
+  isNew,
+  fifoEnabled,
+  allowNegativeStock,
+  saving,
   onValid,
 }: {
   branch: Branch;
-  lotEnabled: boolean;
-  negativeStock: boolean;
-  onValid: () => void;
+  isNew: boolean;
+  fifoEnabled: boolean;
+  allowNegativeStock: boolean;
+  saving: boolean;
+  onValid: (values: ShopFormValues) => Promise<void>;
 }) {
   const {
     register,
     handleSubmit,
     control,
     formState: { errors },
-  } = useAppForm({
+  } = useAppForm<ShopFormValues>({
     defaultValues: {
       name: branch.name,
-      code: branch.code,
       type: branch.type,
       phone: formatPkMobile(branch.phone),
       address: branch.address,
+      fifoEnabled,
+      allowNegativeStock,
     },
   });
+
   return (
     <form
       id={SHOP_FORM_ID}
-      className="ui-stack [display:grid] [gap:12px]"
-      onSubmit={handleSubmit(() => onValid())}
+      className="ui-stack grid gap-3"
+      onSubmit={handleSubmit(async (values) => {
+        try {
+          await onValid(values);
+        } catch (error) {
+          toaster.error(handleApiError(error, "Could not save branch"));
+        }
+      })}
     >
       <Field label="Name" error={fieldMessage(errors, "name")}>
         <TextInput
+          autoFocus
           placeholder="e.g. Main Store"
-          {...register("name", { validate: requiredTrim(FORM_COPY.nameRequired) })}
+          disabled={saving}
+          {...register("name", { validate: requiredTrim("Name is required") })}
         />
       </Field>
-      <Field label="Code" error={fieldMessage(errors, "code")}>
-        <TextInput
-          maxLength={FIELD_LIMITS.code}
-          placeholder="e.g. MAIN"
-          {...register("code", { validate: requiredTrim(FORM_COPY.codeRequired) })}
-        />
-      </Field>
+      {!isNew ? (
+        <Field label="Code">
+          <TextInput value={branch.code} readOnly disabled />
+        </Field>
+      ) : null}
       <Field label="Type">
         <Controller
           name="type"
@@ -86,7 +127,8 @@ function ShopEditForm({
           render={({ field }) => (
             <SelectInput
               value={field.value}
-              onChange={(event) => field.onChange(event.target.value)}
+              disabled={saving}
+              onChange={(event) => field.onChange(event.target.value as BranchType)}
             >
               <option value="STORE">Store</option>
               <option value="WAREHOUSE">Warehouse</option>
@@ -104,6 +146,7 @@ function ShopEditForm({
           <PhoneField
             error={fieldMessage(errors, "phone")}
             value={field.value}
+            disabled={saving}
             onChange={field.onChange}
             onBlur={field.onBlur}
           />
@@ -113,11 +156,41 @@ function ShopEditForm({
         <TextInput
           maxLength={FIELD_LIMITS.address}
           placeholder="e.g. Hall Road, Lahore"
+          disabled={saving}
           {...register("address")}
         />
       </Field>
-      <Toggle checked={lotEnabled} onChange={() => undefined} label="Branch lot tracking" />
-      <Toggle checked={negativeStock} onChange={() => undefined} label="Allow negative stock" />
+      <div className="grid gap-2 rounded-xl border border-line bg-paper p-3">
+        <Controller
+          name="fifoEnabled"
+          control={control}
+          render={({ field }) => (
+            <Toggle
+              checked={field.value}
+              onChange={(checked) => field.onChange(checked)}
+              label="Sell oldest lots first (FIFO)"
+            />
+          )}
+        />
+        <p className="m-0 text-[11px] leading-relaxed text-muted">
+          When on, sales at this branch use stock from the oldest received lots first for cost and
+          supplier tracking.
+        </p>
+        <Controller
+          name="allowNegativeStock"
+          control={control}
+          render={({ field }) => (
+            <Toggle
+              checked={field.value}
+              onChange={(checked) => field.onChange(checked)}
+              label="Allow negative stock"
+            />
+          )}
+        />
+        <p className="m-0 text-[11px] leading-relaxed text-muted">
+          When on, this branch can sell below zero quantity instead of blocking the sale.
+        </p>
+      </div>
     </form>
   );
 }
@@ -126,17 +199,22 @@ export function ShopsPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [settings, setSettings] = useState<BranchSetting[]>([]);
   const [open, setOpen] = useState<Branch | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    const rows = await listAllBranches(signal).catch(() => []);
+    setBranches(rows.map(mapBranch));
+    setSettings(rows.map(mapBranchSetting).filter((s): s is BranchSetting => s !== null));
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
       await ensureSession(controller.signal);
-      const rows = await listAllBranches(controller.signal).catch(() => []);
-      setBranches(rows.map(mapBranch));
-      setSettings(rows.map(mapBranchSetting).filter((s): s is BranchSetting => s !== null));
+      await refresh(controller.signal);
     })();
     return () => controller.abort();
-  }, []);
+  }, [refresh]);
 
   const setting = useMemo(() => {
     const map = new Map<string, BranchSetting>();
@@ -144,22 +222,49 @@ export function ShopsPage() {
     return (id: string) => map.get(id);
   }, [settings]);
 
+  const isNew = Boolean(open && !open.id);
+
+  async function saveBranch(values: ShopFormValues) {
+    if (!open || saving) return;
+    setSaving(true);
+    try {
+      const payload = {
+        name: values.name.trim(),
+        type: values.type,
+        phone: values.phone.trim() || undefined,
+        address: values.address.trim() || undefined,
+        isActive: open.isActive,
+        settings: {
+          fifoEnabled: values.fifoEnabled,
+          allowNegativeStock: values.allowNegativeStock,
+        },
+      };
+      if (isNew) {
+        await createBranch(payload);
+        toaster.success("Branch added");
+      } else {
+        await updateBranch(open.id, { ...payload, code: open.code });
+        toaster.success("Branch saved");
+      }
+      await refresh();
+      setOpen(null);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div className="ui-stack [display:grid] [gap:12px]">
+    <div className="ui-stack grid gap-3">
       <PageHead title="Branches">
-        <Button
-          variant="primary"
-          icon={<Plus size={14} />}
-          onClick={() => setOpen(branches[0] ?? null)}
-        >
+        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setOpen(blankBranch())}>
           Add branch
         </Button>
       </PageHead>
-      <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
-        STORE sells. WAREHOUSE holds bulk lots. REPAIR and PRODUCTION consume components.
-        BranchSetting controls lot tracking and negative stock per location.
+      <p className="ui-note text-[12px] leading-relaxed text-muted">
+        STORE sells. WAREHOUSE holds bulk lots. REPAIR and PRODUCTION consume components. Branch
+        code is generated from the name when you create a branch.
       </p>
-      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
+      <div className="ui-kpi-row grid grid-cols-5 gap-2.5">
         <KpiCard
           label="Active"
           value={branches.filter((b) => b.isActive).length}
@@ -173,9 +278,9 @@ export function ShopsPage() {
           tone="info"
         />
         <KpiCard
-          label="Lot tracking"
+          label="FIFO"
           value={settings.filter((s) => s.branchLotEnabled).length}
-          hint="BranchLot rows"
+          hint="Oldest lots first"
           tone="warn"
         />
       </div>
@@ -186,7 +291,7 @@ export function ShopsPage() {
             <Th>Code</Th>
             <Th>Type</Th>
             <Th>Phone</Th>
-            <Th>Lot tracking</Th>
+            <Th>FIFO</Th>
             <Th>Negative stock</Th>
             <Th>Active</Th>
             <Th />
@@ -235,24 +340,30 @@ export function ShopsPage() {
 
       <Drawer
         open={Boolean(open)}
-        title={open?.name ?? "Branch"}
-        onClose={() => setOpen(null)}
+        title={isNew ? "Add branch" : (open?.name ?? "Branch")}
+        onClose={() => {
+          if (!saving) setOpen(null);
+        }}
         footer={
           <>
-            <Button onClick={() => setOpen(null)}>Cancel</Button>
-            <Button variant="primary" type="submit" form={SHOP_FORM_ID}>
-              Save
+            <Button disabled={saving} onClick={() => setOpen(null)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" form={SHOP_FORM_ID} disabled={saving}>
+              {saving ? "Saving…" : isNew ? "Add branch" : "Save"}
             </Button>
           </>
         }
       >
         {open ? (
           <ShopEditForm
-            key={open.id}
+            key={open.id || "new"}
             branch={open}
-            lotEnabled={Boolean(setting(open.id)?.branchLotEnabled)}
-            negativeStock={Boolean(setting(open.id)?.allowNegativeStock)}
-            onValid={() => setOpen(null)}
+            isNew={isNew}
+            fifoEnabled={Boolean(setting(open.id)?.branchLotEnabled ?? true)}
+            allowNegativeStock={Boolean(setting(open.id)?.allowNegativeStock)}
+            saving={saving}
+            onValid={saveBranch}
           />
         ) : null}
       </Drawer>
