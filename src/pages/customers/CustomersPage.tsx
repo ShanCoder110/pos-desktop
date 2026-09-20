@@ -22,6 +22,7 @@ import {
   EntityCell,
   EntityDetailDrawer,
   type DetailAction,
+  CitySelect,
   Field,
   HubChart,
   HubChartGrid,
@@ -127,6 +128,7 @@ const blank: DomainCustomer = {
   id: "",
   name: "",
   phone: "",
+  cityId: "",
   address: "",
   currentBalance: 0,
   notes: "",
@@ -136,6 +138,7 @@ const blank: DomainCustomer = {
 type CustomerFormValues = {
   name: string;
   phone: string;
+  cityId: string;
   address: string;
   previousBalance: string;
   openingSide: typeof CUSTOMER_OPENING_OWES | typeof CUSTOMER_OPENING_ADVANCE;
@@ -179,6 +182,7 @@ function CustomerEditForm({
     defaultValues: {
       name: customer.name,
       phone: formatPkMobile(customer.phone),
+      cityId: customer.cityId ?? "",
       address: customer.address,
       previousBalance: "",
       openingSide: CUSTOMER_OPENING_OWES,
@@ -221,6 +225,11 @@ function CustomerEditForm({
             onBlur={field.onBlur}
           />
         )}
+      />
+      <Controller
+        name="cityId"
+        control={control}
+        render={({ field }) => <CitySelect value={field.value} onChange={field.onChange} />}
       />
       <Field label="Address">
         <TextInput
@@ -314,19 +323,21 @@ function CustomerEditForm({
           </Field>
         </div>
       )}
-      <div className="supplier-active-card">
-        <div>
-          <strong>Active customer</strong>
-          <span>Show when selling on name</span>
+      {!isNew ? (
+        <div className="supplier-active-card">
+          <div>
+            <strong>Active customer</strong>
+            <span>Show when selling on name</span>
+          </div>
+          <Controller
+            name="isActive"
+            control={control}
+            render={({ field }) => (
+              <Toggle checked={field.value} onChange={field.onChange} label="" />
+            )}
+          />
         </div>
-        <Controller
-          name="isActive"
-          control={control}
-          render={({ field }) => (
-            <Toggle checked={field.value} onChange={field.onChange} label="" />
-          )}
-        />
-      </div>
+      ) : null}
     </form>
   );
 }
@@ -853,8 +864,9 @@ export function CustomersPage() {
       const payload = {
         name: values.name.trim(),
         phone: phone || undefined,
+        cityId: values.cityId || undefined,
         address: values.address.trim(),
-        isActive: values.isActive,
+        isActive: isNew ? true : values.isActive,
         isWalkIn: false,
         ...(isNew && openingAmount(values.previousBalance)
           ? {
@@ -1091,8 +1103,8 @@ export function CustomersPage() {
                     {show("name") ? <Th>Name</Th> : null}
                     {show("phone") ? <Th>Phone</Th> : null}
                     {show("address") ? <Th>Address</Th> : null}
+                    {show("city") ? <Th>City</Th> : null}
                     {show("balance") ? <Th>Balance</Th> : null}
-                    {show("status") ? <Th>Status</Th> : null}
                     <Th />
                   </tr>
                 </THead>
@@ -1128,6 +1140,7 @@ export function CustomersPage() {
                               <Td>{row.phone ? formatPkMobile(row.phone) : "—"}</Td>
                             ) : null}
                             {show("address") ? <Td>{row.address || "—"}</Td> : null}
+                            {show("city") ? <Td>{row.cityName || "—"}</Td> : null}
                             {show("balance") ? (
                               <Td numeric>
                                 <span
@@ -1140,13 +1153,6 @@ export function CustomersPage() {
                                   {balance.amount}
                                   <small>{balance.label}</small>
                                 </span>
-                              </Td>
-                            ) : null}
-                            {show("status") ? (
-                              <Td>
-                                <Badge tone={row.isActive ? "ok" : "danger"}>
-                                  {row.isActive ? CUSTOMER_STATUS_ACTIVE : CUSTOMER_STATUS_INACTIVE}
-                                </Badge>
                               </Td>
                             ) : null}
                             <Td>

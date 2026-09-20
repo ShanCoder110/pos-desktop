@@ -28,8 +28,8 @@ export const CUSTOMER_TABLE_COLUMNS: ColumnOption[] = [
   { id: "name", label: "Name" },
   { id: "phone", label: "Phone" },
   { id: "address", label: "Address" },
+  { id: "city", label: "City" },
   { id: "balance", label: "Balance" },
-  { id: "status", label: "Status" },
 ];
 
 export const CUSTOMER_LEDGER_COLUMNS: ColumnOption[] = [

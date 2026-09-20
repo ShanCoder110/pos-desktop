@@ -1,36 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
+import { BookOpen, Building2, Pencil, Plus, Scale, Trash2, Wallet } from "lucide-react";
 import {
-  BookOpen,
-  Building2,
-  CircleDot,
-  MapPin,
-  Pencil,
-  Phone,
-  Plus,
-  Scale,
-  Trash2,
-  Wallet,
-} from "lucide-react";
-import {
-  Badge,
   Button,
   ConfirmDialog,
   Drawer,
   EmptyRow,
   EntityCell,
-  EntityDetailDrawer,
-  type DetailAction,
   Field,
-  FormSection,
   HubChart,
   HubChartGrid,
   KpiCard,
   Menu,
   MenuItem,
   MoneyInput,
-  MoneyDisplay,
   PageHead,
-  PhoneField,
   Pagination,
   SelectInput,
   Table,
@@ -39,17 +22,20 @@ import {
   Tabs,
   Td,
   TextArea,
-  TextInput,
   THead,
   Th,
-  Toggle,
   toaster,
 } from "@/components/common";
 import type { DateRangeFilter } from "@/components/common/DateRangePeriodPicker";
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { rangeForPeriod } from "@/components/common/DateRangePeriodPicker";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
-import { FIELD_LIMITS } from "@/shared/constants/fields";
+import {
+  SUPPLIER_FORM_ID,
+  SupplierEditForm,
+  type SupplierFormValues,
+} from "@/pages/suppliers/SupplierEditForm";
+import { SupplierDetailDrawer } from "@/pages/suppliers/SupplierDetailDrawer";
 import type { SupplierRow } from "@/shared/domain/types";
 import { Controller, useAppForm } from "@/hooks/useAppForm";
 import { useQueryTab } from "@/hooks/useQueryTab";
@@ -58,7 +44,6 @@ import {
   adjustDelta,
   balanceInputDraft,
   cn,
-  formatEntityRef,
   limitMoneyDraft,
   money,
   shortError,
@@ -81,11 +66,7 @@ import {
   recordSupplierPayment,
   type SupplierLedgerEntry,
 } from "@/services/purchasing";
-import {
-  validateAdjustBalanceNotes,
-  validateSupplierName,
-  validateSupplierPhone,
-} from "@/validations/supplier.validation";
+import { validateAdjustBalanceNotes } from "@/validations/supplier.validation";
 import { DEFAULT_LEDGER_DATE_PERIOD } from "@/shared/constants/charts";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import { listEmptyMessage } from "@/shared/constants/empty";
@@ -115,7 +96,6 @@ import {
 } from "@/shared/constants/suppliers";
 
 const PAGE = DEFAULT_PAGE_SIZE;
-const SUPPLIER_FORM_ID = "supplier-form";
 const SUPPLIER_ADJUST_FORM_ID = "supplier-adjust-form";
 const SUPPLIER_PAY_FORM_ID = "supplier-pay-form";
 const blank: SupplierRow = {
@@ -123,6 +103,7 @@ const blank: SupplierRow = {
   name: "",
   phone: "",
   email: "",
+  cityId: "",
   address: "",
   notes: "",
   currentBalance: 0,
@@ -130,198 +111,6 @@ const blank: SupplierRow = {
   openingSide: SUPPLIER_OPENING_WE_OWE,
   isActive: true,
 };
-
-type SupplierFormValues = {
-  name: string;
-  phone: string;
-  address: string;
-  previousBalance: string;
-  openingSide: typeof SUPPLIER_OPENING_WE_OWE | typeof SUPPLIER_OPENING_THEY_OWE;
-  isActive: boolean;
-};
-
-function SupplierEditForm({
-  row,
-  isNew,
-  onValid,
-}: {
-  row: SupplierRow;
-  isNew: boolean;
-  onValid: (values: SupplierFormValues) => Promise<void>;
-}) {
-  const {
-    register,
-    handleSubmit,
-    control,
-    watch,
-    setError,
-    formState: { errors },
-  } = useAppForm<SupplierFormValues>({
-    defaultValues: {
-      name: row.name,
-      phone: formatPkMobile(row.phone),
-      address: row.address,
-      previousBalance: row.previousBalance ?? "",
-      openingSide: row.openingSide ?? SUPPLIER_OPENING_WE_OWE,
-      isActive: row.isActive,
-    },
-  });
-  const openingSide = watch("openingSide");
-  const previousBalance = watch("previousBalance");
-
-  return (
-    <form
-      id={SUPPLIER_FORM_ID}
-      className="drawer-form"
-      onSubmit={handleSubmit(async (values) => {
-        try {
-          await onValid(values);
-        } catch (error) {
-          assignApiError(setError, shortError(error, SUPPLIER_COPY.saveFailed), "name");
-        }
-      })}
-    >
-      <FormSection title="Supplier details" icon={<Building2 size={14} />}>
-        <Field label="Name" error={fieldMessage(errors, "name")}>
-          <TextInput
-            autoFocus
-            startIcon={<Building2 size={15} />}
-            placeholder="Enter name"
-            maxLength={FIELD_LIMITS.name}
-            {...register("name", { validate: validateSupplierName })}
-          />
-        </Field>
-        <Controller
-          name="phone"
-          control={control}
-          rules={{ validate: validateSupplierPhone }}
-          render={({ field }) => (
-            <PhoneField
-              error={fieldMessage(errors, "phone")}
-              value={field.value}
-              onChange={field.onChange}
-              onBlur={field.onBlur}
-            />
-          )}
-        />
-        <Field label="Address">
-          <TextInput
-            startIcon={<MapPin size={15} />}
-            placeholder="Enter address"
-            maxLength={FIELD_LIMITS.address}
-            {...register("address")}
-          />
-        </Field>
-        <div className="supplier-active-card">
-          <div>
-            <strong>Active supplier</strong>
-            <span>Show when receiving stock</span>
-          </div>
-          <Controller
-            name="isActive"
-            control={control}
-            render={({ field }) => (
-              <Toggle checked={field.value} onChange={field.onChange} label="" />
-            )}
-          />
-        </div>
-      </FormSection>
-
-      <FormSection
-        title={isNew ? SUPPLIER_COPY.openingLabel : "Balance"}
-        icon={<Scale size={14} />}
-      >
-        {isNew ? (
-          <div
-            className={cn(
-              "supplier-opening",
-              openingSide === SUPPLIER_OPENING_THEY_OWE ? "is-advance" : "is-owe",
-              !openingAmount(previousBalance) && "is-zero",
-            )}
-          >
-            <Controller
-              name="openingSide"
-              control={control}
-              render={({ field }) => (
-                <div className="supplier-opening-sides">
-                  <button
-                    type="button"
-                    className={cn(
-                      "supplier-opening-side is-owe",
-                      field.value !== SUPPLIER_OPENING_THEY_OWE && "is-on",
-                    )}
-                    onClick={() => field.onChange(SUPPLIER_OPENING_WE_OWE)}
-                  >
-                    {SUPPLIER_COPY.payable}
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "supplier-opening-side is-advance",
-                      field.value === SUPPLIER_OPENING_THEY_OWE && "is-on",
-                    )}
-                    onClick={() => field.onChange(SUPPLIER_OPENING_THEY_OWE)}
-                  >
-                    {SUPPLIER_COPY.advance}
-                  </button>
-                </div>
-              )}
-            />
-            <Field
-              label={SUPPLIER_COPY.openingAmount}
-              hint={
-                openingSide === SUPPLIER_OPENING_THEY_OWE
-                  ? SUPPLIER_COPY.advanceHint
-                  : SUPPLIER_COPY.payableHint
-              }
-            >
-              <Controller
-                name="previousBalance"
-                control={control}
-                render={({ field }) => (
-                  <MoneyInput
-                    placeholder="0"
-                    className={
-                      openingAmount(field.value)
-                        ? openingSide === SUPPLIER_OPENING_THEY_OWE
-                          ? "[color:var(--sale)] [font-weight:750]"
-                          : "[color:var(--hold)] [font-weight:750]"
-                        : undefined
-                    }
-                    value={field.value}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      field.onChange(limitMoneyDraft(next.replace(/^\s*-/, "")));
-                    }}
-                  />
-                )}
-              />
-            </Field>
-            <p className="supplier-opening-readout">
-              {openingAmount(previousBalance)
-                ? `${money(openingAmount(previousBalance))} — ${openingSide === SUPPLIER_OPENING_THEY_OWE ? SUPPLIER_COPY.advanceSummary : SUPPLIER_COPY.payableSummary}`
-                : SUPPLIER_COPY.openingNone}
-            </p>
-          </div>
-        ) : (
-          <div
-            className={cn(
-              "supplier-opening",
-              row.currentBalance < 0 ? "is-advance" : row.currentBalance > 0 ? "is-owe" : "is-zero",
-            )}
-          >
-            <Field
-              label="Balance"
-              hint={`${row.currentBalance < 0 ? SUPPLIER_COPY.advance : row.currentBalance > 0 ? SUPPLIER_COPY.payable : SUPPLIER_BALANCE_SETTLED} · ${SUPPLIER_COPY.ledgerBalanceHint}`}
-            >
-              <MoneyDisplay value={row.currentBalance} />
-            </Field>
-          </div>
-        )}
-      </FormSection>
-    </form>
-  );
-}
 
 function supplierBalance(n: number) {
   if (n > 0) return { amount: money(n), label: SUPPLIER_BALANCE_PAYABLE, tone: "warn" as const };
@@ -591,6 +380,8 @@ function mapSupplier(record: MasterRecord): SupplierRow {
     name: record.name,
     phone: record.phone ?? "",
     email: record.email ?? "",
+    cityId: record.cityId ?? "",
+    cityName: record.cityName ?? "",
     address: record.address ?? "",
     notes: record.notes ?? "",
     currentBalance: record.balance ?? 0,
@@ -853,8 +644,9 @@ export function SuppliersPage() {
       const payload = {
         name: values.name.trim(),
         phone: phone || undefined,
+        cityId: values.cityId || undefined,
         address: values.address.trim(),
-        isActive: values.isActive,
+        isActive: isNew ? true : values.isActive,
         ...(isNew && openingAmount(values.previousBalance)
           ? {
               previousBalance:
@@ -1094,8 +886,8 @@ export function SuppliersPage() {
                     {show("name") ? <Th>Name</Th> : null}
                     {show("phone") ? <Th>Phone</Th> : null}
                     {show("address") ? <Th>Address</Th> : null}
+                    {show("city") ? <Th>City</Th> : null}
                     {show("balance") ? <Th>Balance</Th> : null}
-                    {show("status") ? <Th>Status</Th> : null}
                     <Th />
                   </tr>
                 </THead>
@@ -1131,6 +923,7 @@ export function SuppliersPage() {
                               <Td>{row.phone ? formatPkMobile(row.phone) : "—"}</Td>
                             ) : null}
                             {show("address") ? <Td>{row.address || "—"}</Td> : null}
+                            {show("city") ? <Td>{row.cityName || "—"}</Td> : null}
                             {show("balance") ? (
                               <Td numeric>
                                 <span
@@ -1143,13 +936,6 @@ export function SuppliersPage() {
                                   {balance.amount}
                                   <small>{balance.label}</small>
                                 </span>
-                              </Td>
-                            ) : null}
-                            {show("status") ? (
-                              <Td>
-                                <Badge tone={row.isActive ? "ok" : "danger"}>
-                                  {row.isActive ? SUPPLIER_STATUS_ACTIVE : SUPPLIER_STATUS_INACTIVE}
-                                </Badge>
                               </Td>
                             ) : null}
                             <Td>
@@ -1372,116 +1158,14 @@ export function SuppliersPage() {
       </TabSheet>
 
       {detail ? (
-        <EntityDetailDrawer
-          open
-          title={SUPPLIER_COPY.detailTitle}
-          subtitle={SUPPLIER_COPY.detailSubtitle}
+        <SupplierDetailDrawer
+          supplier={detail}
+          canAdjust={canAdjust}
           onClose={() => setDetail(null)}
-          identity={{
-            name: detail.name,
-            reference: formatEntityRef("SUP", detail.id),
-            referenceLabel: SUPPLIER_COPY.detailReferenceLabel,
-            badge: (
-              <Badge tone={detail.isActive ? "ok" : "danger"}>
-                {detail.isActive ? SUPPLIER_STATUS_ACTIVE : SUPPLIER_STATUS_INACTIVE}
-              </Badge>
-            ),
-            icon: <Building2 size={18} />,
-            tone: "teal",
-          }}
-          summaries={[
-            {
-              label: "Balance",
-              value: supplierBalance(detail.currentBalance).amount,
-              hint: supplierBalance(detail.currentBalance).label,
-              tone:
-                detail.currentBalance > 0
-                  ? "owe"
-                  : detail.currentBalance < 0
-                    ? "advance"
-                    : "neutral",
-              icon: <Wallet size={15} />,
-            },
-            {
-              label: "Status",
-              value: detail.isActive ? SUPPLIER_STATUS_ACTIVE : SUPPLIER_STATUS_INACTIVE,
-              hint: detail.isActive
-                ? SUPPLIER_COPY.statusActiveHint
-                : SUPPLIER_COPY.statusInactiveHint,
-              tone: detail.isActive ? "ok" : "danger",
-              icon: <CircleDot size={15} />,
-            },
-          ]}
-          fieldsSectionTitle={SUPPLIER_COPY.contactSection}
-          onEditFields={() => {
-            setDetail(null);
-            setEdit(detail);
-          }}
-          fields={[
-            { label: "Name", value: detail.name, icon: <Building2 size={14} /> },
-            {
-              label: "Phone",
-              value: detail.phone ? formatPkMobile(detail.phone) : "—",
-              icon: <Phone size={14} />,
-              emptyHint: SUPPLIER_COPY.noPhoneHint,
-            },
-            {
-              label: "Address",
-              value: detail.address || "—",
-              icon: <MapPin size={14} />,
-              emptyHint: SUPPLIER_COPY.noAddressHint,
-            },
-          ]}
-          actions={[
-            {
-              label:
-                detail.currentBalance < 0
-                  ? SUPPLIER_COPY.receiveFromSupplier
-                  : SUPPLIER_COPY.paySupplier,
-              description: SUPPLIER_COPY.paySupplierAction,
-              icon: <Wallet size={15} />,
-              tone: "accent" as const,
-              onClick: () => {
-                setDetail(null);
-                setPay(detail);
-              },
-            },
-            ...(canAdjust
-              ? [
-                  {
-                    label: SUPPLIER_COPY.adjustTitle,
-                    description: SUPPLIER_COPY.adjustBalanceAction,
-                    icon: <Scale size={15} />,
-                    tone: "warn",
-                    onClick: () => {
-                      setDetail(null);
-                      setAdjust(detail);
-                    },
-                  } satisfies DetailAction,
-                ]
-              : []),
-            {
-              label: SUPPLIER_COPY.viewLedger,
-              description: SUPPLIER_COPY.viewLedgerAction,
-              icon: <BookOpen size={15} />,
-              tone: "info" as const,
-              onClick: () => {
-                setDetail(null);
-                openLedger(detail);
-              },
-            },
-            {
-              label: "Edit supplier",
-              description: SUPPLIER_COPY.editSupplierAction,
-              icon: <Pencil size={15} />,
-              tone: "edit" as const,
-              onClick: () => {
-                setDetail(null);
-                setEdit(detail);
-              },
-            },
-          ]}
-          meta={{ createdAt: detail.createdAt, updatedAt: detail.updatedAt }}
+          onEdit={setEdit}
+          onPay={setPay}
+          onAdjust={setAdjust}
+          onLedger={openLedger}
         />
       ) : null}
 
