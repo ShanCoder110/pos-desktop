@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Eye, Plus } from "lucide-react";
 import {
   Badge,
@@ -7,14 +8,11 @@ import {
   Drawer,
   EmptyRow,
   HubChart,
-  Field,
   PAGE_SIZE_ALL,
   Pagination,
-  SelectInput,
   Table,
   TableRowsSkeleton,
   Td,
-  TextArea,
   THead,
   Th,
   dateInRange,
@@ -24,12 +22,20 @@ import type { DateRangeFilter } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
+import { TransferDetailDrawer } from "@/pages/transfers/TransferDetailDrawer";
+import { TRANSFER_FORM_ID, TransferForm } from "@/pages/transfers/TransferForm";
 import type { StockTransferRow, TransferStatus } from "@/shared/domain/types";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
-import { TRANSFER_TABLE_COLUMNS } from "@/shared/constants/products";
+import { TRANSFER_COPY, TRANSFER_TABLE_COLUMNS } from "@/shared/constants/products";
 import { ensureSession } from "@/services/auth";
-import { listAllTransfers } from "@/services/transfers";
+import { getTransfer, listAllTransfers } from "@/services/transfers";
 import { listAllBranches, type BranchResponse } from "@/services/org";
+
+function mapStatus(status: string): TransferStatus {
+  if (status === "RECEIVED" || status === "COMPLETED") return "COMPLETED";
+  if (status === "CANCELLED") return "CANCELLED";
+  return "PENDING";
+}
 
 function tone(s: TransferStatus) {
   if (s === "COMPLETED") return "ok" as const;
@@ -37,8 +43,15 @@ function tone(s: TransferStatus) {
   return "danger" as const;
 }
 
+function statusLabel(status: TransferStatus) {
+  if (status === "COMPLETED") return "Completed";
+  if (status === "CANCELLED") return "Cancelled";
+  return "Pending";
+}
+
 export function TransfersPage() {
-  const { setActions, sectionKpi, products } = useProductsHub();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { setActions, sectionKpi, products, lots, refreshHub } = useProductsHub();
   const [transfers, setTransfers] = useState<StockTransferRow[]>([]);
   const [branches, setBranches] = useState<BranchResponse[]>([]);
   const [q, setQ] = useState("");
@@ -49,8 +62,13 @@ export function TransfersPage() {
   const [view, setView] = useState<HubView>("table");
   const [dateRange, setDateRange] = useState<DateRangeFilter>(() => rangeForPeriod("all"));
   const [selected, setSelected] = useState<string[]>([]);
-  const [open, setOpen] = useState<StockTransferRow | null>(null);
+  const [viewTransfer, setViewTransfer] = useState<StockTransferRow | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState({ page: true });
+
+  const prefilledProductId = searchParams.get("productId") ?? undefined;
+  const prefilledLotId = searchParams.get("lotId") ?? undefined;
 
   const branchNames = useMemo(() => {
     const map: Record<string, string> = {};
@@ -60,13 +78,10 @@ export function TransfersPage() {
     return map;
   }, [branches]);
 
-  const productNames = useMemo(() => {
-    const map: Record<string, string> = {};
-    products.forEach((p) => {
-      map[p.id] = p.name;
-    });
-    return map;
-  }, [products]);
+  const loadTransfers = useCallback(async (signal?: AbortSignal) => {
+    const rows = await listAllTransfers(signal).catch(() => [] as StockTransferRow[]);
+    setTransfers(rows);
+  }, []);
 
   useEffect(() => {
     setPage(1);
@@ -76,33 +91,54 @@ export function TransfersPage() {
     const controller = new AbortController();
     void (async () => {
       await ensureSession(controller.signal);
-      const [transferRows, branchRows] = await Promise.all([
-        listAllTransfers(controller.signal).catch(() => [] as StockTransferRow[]),
+      const [, branchRows] = await Promise.all([
+        loadTransfers(controller.signal),
         listAllBranches(controller.signal).catch(() => [] as BranchResponse[]),
       ]);
-      setTransfers(transferRows);
       setBranches(branchRows);
     })().finally(() => setLoading((current) => ({ ...current, page: false })));
     return () => controller.abort();
-  }, []);
+  }, [loadTransfers]);
+
+  useEffect(() => {
+    if (prefilledProductId || prefilledLotId) {
+      setCreateOpen(true);
+    }
+  }, [prefilledProductId, prefilledLotId]);
+
+  function openCreate() {
+    setCreateOpen(true);
+  }
+
+  function closeCreate() {
+    setCreateOpen(false);
+    if (prefilledProductId || prefilledLotId) {
+      setSearchParams({}, { replace: true });
+    }
+  }
+
+  function openTransfer(row: StockTransferRow) {
+    setViewTransfer(row);
+    const controller = new AbortController();
+    void getTransfer(row.id, controller.signal)
+      .then((fresh) => setViewTransfer(fresh))
+      .catch(() => undefined);
+  }
 
   useLayoutEffect(() => {
     setActions(
-      <Button
-        variant="primary"
-        icon={<Plus size={14} />}
-        onClick={() => setOpen(transfers[0] ?? null)}
-      >
+      <Button variant="primary" icon={<Plus size={14} />} onClick={openCreate}>
         Add transfer
       </Button>,
     );
     return () => setActions(null);
-  }, [setActions, transfers]);
+  }, [setActions]);
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const status = chips.find((c) => c.field === "status")?.value?.toUpperCase();
     return transfers.filter((r) => {
+      const mapped = mapStatus(r.status);
       if (!dateInRange(r.createdAt, dateRange)) return false;
       if (needle) {
         const text =
@@ -110,9 +146,9 @@ export function TransfersPage() {
         if (!text.includes(needle)) return false;
       }
       if (sectionKpi === "PENDING" || sectionKpi === "COMPLETED" || sectionKpi === "CANCELLED") {
-        return r.status === sectionKpi;
+        return mapped === sectionKpi;
       }
-      if (status) return r.status === status;
+      if (status) return mapped === status;
       return true;
     });
   }, [transfers, q, chips, sectionKpi, dateRange, branchNames]);
@@ -122,9 +158,10 @@ export function TransfersPage() {
     pageSize === PAGE_SIZE_ALL ? rows : rows.slice((page - 1) * pageSize, page * pageSize);
   const chartData = useMemo(() => {
     const grouped = new Map<string, number>();
-    rows.forEach((row) =>
-      grouped.set(row.status, (grouped.get(row.status) ?? 0) + row.items.length),
-    );
+    rows.forEach((row) => {
+      const label = statusLabel(mapStatus(row.status));
+      grouped.set(label, (grouped.get(label) ?? 0) + row.items.length);
+    });
     return [...grouped.entries()]
       .map(([label, value]) => ({ label, value }))
       .sort((a, b) => b.value - a.value);
@@ -239,7 +276,9 @@ export function TransfersPage() {
                   {show("to") ? <Td>{branchNames[row.toBranchId] ?? row.toBranchId}</Td> : null}
                   {show("status") ? (
                     <Td>
-                      <Badge tone={tone(row.status)}>{row.status}</Badge>
+                      <Badge tone={tone(mapStatus(row.status))}>
+                        {statusLabel(mapStatus(row.status))}
+                      </Badge>
                     </Td>
                   ) : null}
                   {show("items") ? <Td numeric>{row.items.length}</Td> : null}
@@ -250,7 +289,7 @@ export function TransfersPage() {
                     <Button
                       size="icon"
                       variant="ghost"
-                      onClick={() => setOpen(row)}
+                      onClick={() => openTransfer(row)}
                       aria-label="View"
                     >
                       <Eye size={15} />
@@ -263,61 +302,45 @@ export function TransfersPage() {
       </Table>
 
       <Drawer
-        open={Boolean(open)}
-        title="Transfer"
-        onClose={() => setOpen(null)}
+        open={createOpen}
+        size="xl"
+        form
+        title={TRANSFER_COPY.addTitle}
+        subtitle={<p className="ui-drawer-subtitle">{TRANSFER_COPY.addSubtitle}</p>}
+        onClose={closeCreate}
         footer={
           <>
-            <Button onClick={() => setOpen(null)}>Close</Button>
-            {open?.status === "PENDING" ? <Button variant="primary">Mark completed</Button> : null}
+            <Button onClick={closeCreate} disabled={creating}>
+              Cancel
+            </Button>
+            <Button type="submit" form={TRANSFER_FORM_ID} variant="primary" disabled={creating}>
+              {creating ? "Saving…" : TRANSFER_COPY.saveAction}
+            </Button>
           </>
         }
       >
-        {open ? (
-          <div className="ui-stack [display:grid] [gap:12px]">
-            <Field label="From">
-              <SelectInput value={open.fromBranchId} disabled>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </SelectInput>
-            </Field>
-            <Field label="To">
-              <SelectInput value={open.toBranchId} disabled>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </SelectInput>
-            </Field>
-            <Field label="Notes">
-              <TextArea value={open.notes} readOnly />
-            </Field>
-            <Table>
-              <THead>
-                <tr>
-                  <Th>Product</Th>
-                  <Th>Lot</Th>
-                  <Th>Qty</Th>
-                </tr>
-              </THead>
-              <tbody>
-                {open.items.length === 0 ? <EmptyRow cols={3} /> : null}
-                {open.items.map((item, i) => (
-                  <tr key={i}>
-                    <Td>{productNames[item.productId] ?? item.productId}</Td>
-                    <Td>{item.productLotId}</Td>
-                    <Td numeric>{item.quantity}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
-        ) : null}
+        <TransferForm
+          products={products}
+          lots={lots}
+          branches={branches}
+          initialProductId={prefilledProductId}
+          initialLotId={prefilledLotId}
+          onClose={closeCreate}
+          onSavingChange={setCreating}
+          onSaved={() => {
+            void loadTransfers();
+            void refreshHub();
+          }}
+        />
       </Drawer>
+
+      <TransferDetailDrawer
+        transfer={viewTransfer}
+        products={products}
+        lots={lots}
+        branches={branches}
+        onClose={() => setViewTransfer(null)}
+      />
     </div>
   );
 }
