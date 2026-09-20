@@ -232,7 +232,7 @@ impl StockRepository {
 
         let direction = query.page.sort_direction.unwrap_or_default().sql();
         let sql = format!(
-            "SELECT sm.id, sm.branch_id, sm.product_id, p.name AS product_name, sm.product_lot_id, sm.type AS movement_type, sm.displayed_quantity, sm.displayed_unit_name, sm.base_quantity_delta, sm.unit_cost, sm.total_cost, sm.reference_type, sm.reference_id, sm.notes, sm.occurred_at, sm.created_by, sm.created_at FROM stock_movements sm JOIN products p ON p.id = sm.product_id WHERE {conditions} ORDER BY sm.created_at {direction}, sm.id DESC LIMIT ? OFFSET ?"
+            "SELECT sm.id, sm.branch_id, sm.product_id, p.name AS product_name, sm.product_lot_id, sm.type AS movement_type, sm.displayed_quantity, sm.displayed_unit_name, sm.base_quantity_delta, CAST(sm.unit_cost AS REAL) AS unit_cost, CAST(sm.total_cost AS REAL) AS total_cost, sm.reference_type, sm.reference_id, sm.notes, sm.occurred_at, sm.created_by, sm.created_at FROM stock_movements sm JOIN products p ON p.id = sm.product_id WHERE {conditions} ORDER BY sm.created_at {direction}, sm.id DESC LIMIT ? OFFSET ?"
         );
         let mut page_values = values;
         page_values.push((query.page.per_page as i64).into());

@@ -100,6 +100,8 @@ export function mapCustomer(record: MasterRecord, balance = 0): DomainCustomer {
     id: record.id,
     name: record.name,
     phone: record.phone ?? "",
+    cityId: record.cityId ?? "",
+    cityName: record.cityName ?? "",
     address: record.address ?? "",
     currentBalance: balance,
     notes: record.notes ?? "",

@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown, Plus, X } from "lucide-react";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { cn } from "@/utils/format";
+
+const MENU_GAP = 6;
+const MENU_Z = 80;
 
 export type SelectOption = { value: string; label: string };
 
@@ -39,7 +43,11 @@ export function SearchableSelect({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [hi, setHi] = useState(0);
+  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number } | null>(
+    null,
+  );
   const root = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const selected = options.find((o) => o.value === value);
 
@@ -57,9 +65,47 @@ export function SearchableSelect({
     !options.some((option) => option.label.trim().toLowerCase() === cleanQuery.toLowerCase()),
   );
 
+  const placeMenu = useCallback(() => {
+    const anchor = root.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const menuHeight = menuRef.current?.offsetHeight ?? 220;
+    const below = rect.bottom + MENU_GAP;
+    const above = rect.top - MENU_GAP - menuHeight;
+    const fitsBelow = below + menuHeight <= window.innerHeight - 8;
+    const top = fitsBelow ? below : Math.max(8, above);
+    setMenuStyle({
+      top,
+      left: rect.left,
+      width: rect.width,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuStyle(null);
+      return;
+    }
+    placeMenu();
+    requestAnimationFrame(() => placeMenu());
+  }, [open, placeMenu, filtered.length, canCreate]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onReflow = () => placeMenu();
+    window.addEventListener("scroll", onReflow, true);
+    window.addEventListener("resize", onReflow);
+    return () => {
+      window.removeEventListener("scroll", onReflow, true);
+      window.removeEventListener("resize", onReflow);
+    };
+  }, [open, placeMenu]);
+
   useEffect(() => {
     function onDoc(e: MouseEvent) {
-      if (!root.current?.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (root.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -205,54 +251,75 @@ export function SearchableSelect({
           <ChevronDown size={14} />
         </span>
       </div>
-      {open ? (
-        <div
-          className="ui-combo-menu [position:absolute] [top:calc(100%_+_6px)] [left:0] [right:0] [z-index:30] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)] [box-shadow:0_12px_28px_rgba(15,_23,_42,_0.12)] [overflow:hidden]"
-          role="listbox"
-        >
-          <div className="ui-combo-list [max-height:220px] [overflow:auto] [padding:6px]">
-            {filtered.length === 0 && !canCreate ? (
-              <div className="ui-combo-empty [padding:18px_10px] [text-align:center] [font-size:12px] [color:var(--muted)]">
-                {emptyMessage}
-              </div>
-            ) : (
-              filtered.map((opt, i) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  role="option"
-                  aria-selected={opt.value === value}
-                  className={cn(
-                    "ui-combo-item [display:flex] [align-items:center] [justify-content:space-between] [gap:8px] [width:100%] [min-height:34px] [padding:0_10px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:13px] [text-align:left] [cursor:pointer]",
-                    opt.value === value && "is-on",
-                    i === hi && "is-hi",
-                  )}
-                  onMouseEnter={() => setHi(i)}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => pick(opt.value)}
-                >
-                  <span>{opt.label}</span>
-                  {opt.value === value ? <Check size={14} /> : null}
-                </button>
-              ))
-            )}
-            {canCreate ? (
-              <button
-                type="button"
-                className={cn(
-                  "ui-combo-item mt-1 flex min-h-9 w-full items-center gap-2 rounded-md border-0 border-t border-line bg-transparent px-2.5 text-left text-[13px] font-semibold text-accent-deep",
-                  hi === filtered.length && "is-hi",
+      {open
+        ? createPortal(
+            <div
+              ref={menuRef}
+              className="ui-combo-menu [position:fixed] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)] [box-shadow:0_12px_28px_rgba(15,_23,_42,_0.12)] [overflow:hidden]"
+              role="listbox"
+              style={
+                menuStyle
+                  ? {
+                      top: menuStyle.top,
+                      left: menuStyle.left,
+                      width: menuStyle.width,
+                      zIndex: MENU_Z,
+                    }
+                  : {
+                      position: "fixed",
+                      top: 0,
+                      left: 0,
+                      visibility: "hidden",
+                      pointerEvents: "none",
+                      zIndex: MENU_Z,
+                    }
+              }
+            >
+              <div className="ui-combo-list [max-height:220px] [overflow:auto] [padding:6px]">
+                {filtered.length === 0 && !canCreate ? (
+                  <div className="ui-combo-empty [padding:18px_10px] [text-align:center] [font-size:12px] [color:var(--muted)]">
+                    {emptyMessage}
+                  </div>
+                ) : (
+                  filtered.map((opt, i) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="option"
+                      aria-selected={opt.value === value}
+                      className={cn(
+                        "ui-combo-item [display:flex] [align-items:center] [justify-content:space-between] [gap:8px] [width:100%] [min-height:34px] [padding:0_10px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:13px] [text-align:left] [cursor:pointer]",
+                        opt.value === value && "is-on",
+                        i === hi && "is-hi",
+                      )}
+                      onMouseEnter={() => setHi(i)}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => pick(opt.value)}
+                    >
+                      <span>{opt.label}</span>
+                      {opt.value === value ? <Check size={14} /> : null}
+                    </button>
+                  ))
                 )}
-                onMouseEnter={() => setHi(filtered.length)}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={create}
-              >
-                <Plus size={14} /> {createLabel} “{cleanQuery}”
-              </button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+                {canCreate ? (
+                  <button
+                    type="button"
+                    className={cn(
+                      "ui-combo-item mt-1 flex min-h-9 w-full items-center gap-2 rounded-md border-0 border-t border-line bg-transparent px-2.5 text-left text-[13px] font-semibold text-accent-deep",
+                      hi === filtered.length && "is-hi",
+                    )}
+                    onMouseEnter={() => setHi(filtered.length)}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={create}
+                  >
+                    <Plus size={14} /> {createLabel} “{cleanQuery}”
+                  </button>
+                ) : null}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

@@ -182,14 +182,19 @@ impl ProductService {
         let Some(model) = ProductRepository::model(database, id).await? else {
             return Err(AppError::NotFound(ERROR_PRODUCT_NOT_FOUND));
         };
-        let base_unit_id = model.base_unit_id;
-        if let Some(sell_units) = &request.sell_units {
+        let mut base_unit_id = model.base_unit_id;
+        if let Some(sell_units) = &mut request.sell_units {
+            ensure_one_stock_unit(&base_unit_id.to_string(), sell_units);
             validate_sell_units(&base_unit_id.to_string(), sell_units)?;
+            if let Some(stock) = sell_units.iter().find(|unit| unit.is_base) {
+                base_unit_id = parse_uuid(&stock.unit_id, "sellUnits.unitId")?;
+            }
         }
 
         let transaction = database.begin().await?;
         let now = chrono::Utc::now();
         let mut active: product::ActiveModel = model.into();
+        active.base_unit_id = Set(base_unit_id);
         if let Some(name) = request.name {
             active.name = Set(name.trim().to_owned());
         }
@@ -361,7 +366,36 @@ fn unit_active_model(
     })
 }
 
-fn validate_sell_units(base_unit_id: &str, units: &[ProductUnitInput]) -> Result<(), AppError> {
+fn ensure_one_stock_unit(base_unit_id: &str, units: &mut [ProductUnitInput]) {
+    if units.is_empty() {
+        return;
+    }
+    let marked: Vec<usize> = units
+        .iter()
+        .enumerate()
+        .filter(|(_, unit)| unit.is_base)
+        .map(|(index, _)| index)
+        .collect();
+    let idx = if marked.len() == 1 {
+        marked[0]
+    } else {
+        units
+            .iter()
+            .position(|unit| unit.unit_id == base_unit_id)
+            .or_else(|| units.iter().position(|unit| unit.contains == Decimal::ONE))
+            .unwrap_or(0)
+    };
+    let default_idx = units.iter().position(|unit| unit.is_default).unwrap_or(idx);
+    for (index, unit) in units.iter_mut().enumerate() {
+        unit.is_base = index == idx;
+        unit.is_default = index == default_idx;
+        if unit.is_base {
+            unit.contains = Decimal::ONE;
+        }
+    }
+}
+
+fn validate_sell_units(_base_unit_id: &str, units: &[ProductUnitInput]) -> Result<(), AppError> {
     let base_count = units.iter().filter(|unit| unit.is_base).count();
     if units.is_empty() || base_count != 1 {
         return Err(AppError::Validation(ERROR_INVALID_PRODUCT_UNITS.into()));
@@ -370,7 +404,7 @@ fn validate_sell_units(base_unit_id: &str, units: &[ProductUnitInput]) -> Result
         .iter()
         .find(|unit| unit.is_base)
         .expect("validated base");
-    if base.contains != Decimal::ONE || base.unit_id != base_unit_id {
+    if base.contains != Decimal::ONE {
         return Err(AppError::Validation(ERROR_BASE_UNIT_CONVERSION.into()));
     }
     Ok(())
@@ -384,6 +418,10 @@ fn normalize_create(request: &mut CreateProductRequest) {
         unit.min = money_value(unit.min);
         unit.wholesale = money_value(unit.wholesale);
         unit.price = money_value(unit.price);
+    }
+    ensure_one_stock_unit(&request.base_unit_id, &mut request.sell_units);
+    if let Some(stock) = request.sell_units.iter().find(|unit| unit.is_base) {
+        request.base_unit_id = stock.unit_id.clone();
     }
     if let Some(opening) = &mut request.opening_stock {
         opening.quantity = quantity(opening.quantity);
@@ -442,6 +480,7 @@ mod tests {
                 is_default: true,
             }],
             opening_stock: None,
+            opening_stocks: vec![],
         };
         normalize_create(&mut request);
         assert_eq!(
@@ -473,6 +512,7 @@ mod tests {
                 phone: None,
                 email: None,
                 address: None,
+                city_id: None,
                 notes: None,
                 is_active: true,
                 precision: None,
@@ -525,6 +565,7 @@ mod tests {
                 received_date: "2026-09-09".into(),
                 expiry_date: None,
             }),
+            opening_stocks: vec![],
         };
 
         let product = ProductService::create(&database, &context, request)
@@ -537,5 +578,162 @@ mod tests {
         assert_eq!(product.cost, 10.0);
         assert_eq!(product.sell_units.len(), 1);
         let _ = Database::connect("sqlite::memory:").await;
+    }
+
+    #[tokio::test]
+    async fn updates_product_units_in_place_without_unique_violation() {
+        let database = connect_memory().await.expect("memory db");
+        let context = RequestContext {
+            session_id: Uuid::new_v4(),
+            user_id: Uuid::parse_str(SEED_USER_ID).unwrap(),
+            branch_id: Uuid::parse_str(SEED_BRANCH_ID).unwrap(),
+            device_id: Uuid::parse_str(SEED_DEVICE_ID).unwrap(),
+            cash_session_id: None,
+            role: "OWNER".into(),
+            name: "Owner".into(),
+            username: "owner".into(),
+        };
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "Wire".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("create category");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("load seeded units")
+            .data
+            .into_iter()
+            .find(|unit| unit.symbol.as_deref() == Some("pc"))
+            .expect("seeded Piece unit");
+        let created = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Cable".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::new(2, 0),
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(10, 0),
+                    min: Decimal::new(12, 0),
+                    wholesale: Decimal::new(14, 0),
+                    price: Decimal::new(16, 0),
+                    barcode: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(5, 0),
+                    cost: Decimal::new(10, 0),
+                    received_date: "2026-09-09".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("create product");
+        let product_id = Uuid::parse_str(&created.id).expect("product id");
+        let unit_row_id = created.sell_units[0].id.clone();
+
+        let updated = ProductService::update(
+            &database,
+            &context,
+            product_id,
+            UpdateProductRequest {
+                name: Some("Cable updated".into()),
+                category_id: None,
+                minimum_stock: Some(Decimal::new(3, 0)),
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                is_active: None,
+                sell_units: Some(vec![ProductUnitInput {
+                    id: Some(unit_row_id.clone()),
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(11, 0),
+                    min: Decimal::new(13, 0),
+                    wholesale: Decimal::new(15, 0),
+                    price: Decimal::new(17, 0),
+                    barcode: None,
+                    is_base: true,
+                    is_default: true,
+                }]),
+            },
+        )
+        .await
+        .expect("update product once");
+
+        assert_eq!(updated.name, "Cable updated");
+        assert_eq!(updated.sell_units.len(), 1);
+        assert_eq!(updated.sell_units[0].id, unit_row_id);
+        assert_eq!(updated.sell_units[0].cost, 11.0);
+
+        let updated_again = ProductService::update(
+            &database,
+            &context,
+            product_id,
+            UpdateProductRequest {
+                name: Some("Cable updated again".into()),
+                category_id: None,
+                minimum_stock: None,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                is_active: None,
+                sell_units: Some(vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(12, 0),
+                    min: Decimal::new(14, 0),
+                    wholesale: Decimal::new(16, 0),
+                    price: Decimal::new(18, 0),
+                    barcode: None,
+                    is_base: true,
+                    is_default: true,
+                }]),
+            },
+        )
+        .await
+        .expect("update product twice");
+
+        assert_eq!(updated_again.name, "Cable updated again");
+        assert_eq!(updated_again.sell_units.len(), 1);
+        assert_eq!(updated_again.sell_units[0].id, unit_row_id);
+        assert_eq!(updated_again.sell_units[0].cost, 12.0);
     }
 }

@@ -74,6 +74,7 @@ impl OrgService {
         let default_branch_id =
             parse_optional_uuid(request.default_branch_id.as_deref(), "defaultBranchId")?
                 .ok_or_else(|| AppError::Validation(ERROR_USER_BRANCH_REQUIRED.into()))?;
+        let city_id = parse_optional_uuid(request.city_id.as_deref(), "cityId")?;
         ensure_branch(database, default_branch_id).await?;
         let id = Uuid::new_v4();
         let now = now_utc();
@@ -88,6 +89,7 @@ impl OrgService {
             Some(&email),
             &role,
             Some(default_branch_id),
+            city_id,
             request.is_active,
             now,
         )
@@ -117,6 +119,7 @@ impl OrgService {
         let default_branch_id =
             parse_optional_uuid(request.default_branch_id.as_deref(), "defaultBranchId")?
                 .ok_or_else(|| AppError::Validation(ERROR_USER_BRANCH_REQUIRED.into()))?;
+        let city_id = parse_optional_uuid(request.city_id.as_deref(), "cityId")?;
         ensure_branch(database, default_branch_id).await?;
         let password_hash = match request
             .password
@@ -143,6 +146,7 @@ impl OrgService {
             Some(&email),
             &role,
             Some(default_branch_id),
+            city_id,
             request.is_active,
             now,
         )
@@ -208,6 +212,9 @@ impl OrgService {
     ) -> Result<BranchResponse, AppError> {
         request.validate()?;
         let branch_type = normalize_branch_type(&request.branch_type)?;
+        let code =
+            resolve_branch_code(database, request.name.trim(), request.code.as_deref(), None)
+                .await?;
         let id = Uuid::new_v4();
         let now = now_utc();
         if request.is_main {
@@ -217,7 +224,7 @@ impl OrgService {
             database,
             id,
             request.name.trim(),
-            request.code.trim(),
+            &code,
             &branch_type,
             trimmed(&request.phone).as_deref(),
             trimmed(&request.address).as_deref(),
@@ -239,7 +246,17 @@ impl OrgService {
         request: BranchRequest,
     ) -> Result<BranchResponse, AppError> {
         request.validate()?;
+        let existing = OrgRepository::find_branch(database, id)
+            .await?
+            .ok_or(AppError::NotFound(ERROR_BRANCH_NOT_FOUND))?;
         let branch_type = normalize_branch_type(&request.branch_type)?;
+        let code = resolve_branch_code(
+            database,
+            request.name.trim(),
+            request.code.as_deref(),
+            Some((id, &existing.code)),
+        )
+        .await?;
         let now = now_utc();
         if request.is_main {
             OrgRepository::clear_main_branch(database, Some(id), now).await?;
@@ -248,7 +265,7 @@ impl OrgService {
             database,
             id,
             request.name.trim(),
-            request.code.trim(),
+            &code,
             &branch_type,
             trimmed(&request.phone).as_deref(),
             trimmed(&request.address).as_deref(),
@@ -547,4 +564,55 @@ fn normalize_branch_type(branch_type: &str) -> Result<String, AppError> {
     } else {
         Err(AppError::Validation("type is invalid.".into()))
     }
+}
+
+fn branch_code_from_name(name: &str) -> String {
+    let cleaned = name
+        .trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_uppercase();
+    if cleaned.is_empty() {
+        return "BRANCH".to_owned();
+    }
+    cleaned.chars().take(32).collect()
+}
+
+async fn resolve_branch_code(
+    database: &DatabaseConnection,
+    name: &str,
+    requested: Option<&str>,
+    existing: Option<(Uuid, &str)>,
+) -> Result<String, AppError> {
+    if let Some(value) = requested.map(str::trim).filter(|value| !value.is_empty()) {
+        let exclude_id = existing.map(|(id, _)| id);
+        if OrgRepository::branch_code_exists(database, value, exclude_id).await? {
+            return Err(AppError::Validation(
+                "This branch code is already used.".into(),
+            ));
+        }
+        return Ok(value.to_owned());
+    }
+    if let Some((_, code)) = existing {
+        return Ok(code.to_owned());
+    }
+    derive_branch_code(database, name).await
+}
+
+async fn derive_branch_code(database: &DatabaseConnection, name: &str) -> Result<String, AppError> {
+    let base = branch_code_from_name(name);
+    for index in 0..100 {
+        let candidate = if index == 0 {
+            base.clone()
+        } else {
+            format!("{base}{index}")
+        };
+        if !OrgRepository::branch_code_exists(database, &candidate, None).await? {
+            return Ok(candidate);
+        }
+    }
+    Err(AppError::Validation(
+        "Could not generate a unique branch code.".into(),
+    ))
 }

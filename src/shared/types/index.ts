@@ -100,6 +100,8 @@ export interface ProductSellUnit {
   name: string;
   symbol?: string;
   kind?: "base" | "bigger" | "smaller" | "pack" | "small";
+  isBase?: boolean;
+  isDefault?: boolean;
   contains: number;
   cost: number;
   min: number;

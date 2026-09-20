@@ -15,7 +15,13 @@ import { routes } from "@/shared/constants/routes";
 import { MIN_PRODUCT_SEARCH_LENGTH } from "@/shared/constants/api";
 import type { Customer, HeldBill, InvoiceLine, Product } from "@/shared/types";
 import { moneyNum } from "@/utils/format";
-import { posStockLabel, productSellableQty, productTotalStock } from "@/utils/productStock";
+import {
+  posStockCompact,
+  posStockLabel,
+  productBranchStock,
+  productSellableQty,
+  productTotalStock,
+} from "@/utils/productStock";
 import { consumeLots } from "@/utils/lots";
 import { ensureCashSession, ensureSession } from "@/services/auth";
 import { listAllProducts, searchAllProducts } from "@/services/products";
@@ -144,6 +150,10 @@ function readHeldPayload(payload: unknown): HeldPayload | null {
 }
 function listPrice(p: Product, mode: PriceMode) {
   return mode === "wholesale" ? p.wholesale : p.retail;
+}
+
+function openLotPrices(p: Product) {
+  return `C ${money(p.cost)} · M ${money(p.min)} · W ${money(p.wholesale)} · R ${money(p.retail)}`;
 }
 function clockNow() {
   return new Date().toLocaleTimeString("en-GB", { hour12: false });
@@ -376,6 +386,18 @@ export function PosPage() {
     const product = products.find((p) => p.id === productId);
     const pool = product ? productSellableQty(product, sessionBranchId) : 0;
     return +(pool - held).toFixed(3);
+  }
+
+  function cartStockCompact(productId: string, exceptId?: string) {
+    const held = cart
+      .filter((x) => x.productId === productId && x.id !== exceptId)
+      .reduce((s, x) => s + x.baseQty, 0);
+    const product = products.find((p) => p.id === productId);
+    if (!product) return "0";
+    const total = Math.max(0, productTotalStock(product) - held);
+    const here = Math.max(0, productBranchStock(product, sessionBranchId) - held);
+    if (!sessionBranchId || here === total) return qtyStr(total);
+    return `${qtyStr(here)} · ${qtyStr(total)}`;
   }
 
   function totals() {
@@ -1137,7 +1159,9 @@ export function PosPage() {
     }
     return {
       cls: over ? "is-over" : low ? "is-low" : "",
-      lines: [`Left ${qtyStr(left)} ${prettyUnit(pending.unit)}`],
+      lines: [
+        `Here ${qtyStr(Math.max(0, productBranchStock(pending, sessionBranchId)))} · Total ${qtyStr(left)} ${prettyUnit(pending.unit)}`,
+      ],
     };
   })();
 
@@ -1227,7 +1251,7 @@ export function PosPage() {
                   return (
                     <div
                       key={p.id}
-                      className={`search-hit [display:grid] [grid-template-columns:60px_1fr_auto_auto] [gap:8px] [padding:0_10px] [cursor:pointer] [align-items:center] [border-bottom:1px_solid_#f8fafc] [font-size:13px] [height:38px] [box-sizing:border-box] ${i === hit ? "is-active" : ""} ${left < 10 ? "is-low" : ""}`}
+                      className={`search-hit [display:grid] [grid-template-columns:60px_1fr_auto_auto] [gap:8px] [padding:4px_10px] [cursor:pointer] [align-items:center] [border-bottom:1px_solid_#f8fafc] [font-size:13px] [min-height:44px] [box-sizing:border-box] ${i === hit ? "is-active" : ""} ${left < 10 ? "is-low" : ""}`}
                       onMouseEnter={() => setHit(i)}
                       onMouseDown={(e) => {
                         e.preventDefault();
@@ -1249,9 +1273,18 @@ export function PosPage() {
                         className={`stock ${left < 10 ? "is-low" : ""}`}
                         title={posStockLabel(p, sessionBranchId)}
                       >
-                        {posStockLabel(p, sessionBranchId)}
+                        <span className="[font-size:11px] [font-variant-numeric:tabular-nums]">
+                          {posStockCompact(p, sessionBranchId)}
+                        </span>
                       </span>
-                      <span className="price">{money(listPrice(p, priceMode))}</span>
+                      <span className="price [text-align:right]">
+                        <span className="[display:block] [font-weight:700]">
+                          {money(listPrice(p, priceMode))}
+                        </span>
+                        <span className="[display:block] [font-size:9px] [font-weight:500] [color:var(--muted)] [line-height:1.2] [white-space:nowrap]">
+                          {openLotPrices(p)}
+                        </span>
+                      </span>
                     </div>
                   );
                 })}
@@ -1556,8 +1589,11 @@ export function PosPage() {
                             className={`stock-val [font-family:var(--mono)] [font-size:12px] [color:var(--sub)] [white-space:nowrap] [display:inline-flex] [align-items:center] [justify-content:flex-end] [gap:4px] ${left < 10 ? "is-low" : ""}`}
                           >
                             {left < 10 ? WARN_ICO : null}
-                            <span className="stock-num">
-                              {qtyStr(left)} {prettyUnit(item.baseUnit)}
+                            <span
+                              className="stock-num [font-size:11px]"
+                              title="This branch · shop total"
+                            >
+                              {cartStockCompact(item.productId)} {prettyUnit(item.baseUnit)}
                             </span>
                           </span>
                         </td>

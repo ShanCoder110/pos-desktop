@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Field, MoneyInput, SelectInput, TextInput } from "@/components/common";
+import { cn } from "@/utils/format";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import type { ProductSellUnit } from "@/shared/types";
 import {
   baseUnit,
   biggerUnit,
   cascadeDownPrices,
+  displayQtyFromStock,
   formatStockQty,
   priceFromStock,
   pricePerStock,
   pricesFromStockPrice,
   qtyInUnit,
   qtyUnits,
-  stockFromUnitQty,
+  stockFromDisplayQty,
   stockPriceFromMap,
+  unitKind,
   unitLabel,
 } from "@/pages/products/productQty";
 
@@ -30,20 +33,7 @@ function displayQty(n: number) {
   return n ? formatStockQty(n) : "";
 }
 
-type PriceKind = "cost" | "min" | "wholesale" | "retail";
-type PriceMaps = Record<PriceKind, Record<string, number>>;
 type QtyField = "received" | "left" | "damaged";
-
-const PRICE_FIELDS: { key: PriceKind; label: string }[] = [
-  { key: "cost", label: "Cost" },
-  { key: "min", label: "Min" },
-  { key: "wholesale", label: "Wholesale" },
-  { key: "retail", label: "Retail" },
-];
-
-function emptyPriceMaps(): PriceMaps {
-  return { cost: {}, min: {}, wholesale: {}, retail: {} };
-}
 
 function UnitGrid({
   units,
@@ -101,17 +91,17 @@ export function UnitQtyFields({
               value={
                 editingId === unit.id
                   ? draft
-                  : displayQty(qtyInUnit(units, stockSymbol, unit, value))
+                  : displayQty(displayQtyFromStock(units, stockSymbol, unit, value))
               }
               onFocus={() => {
                 setEditingId(unit.id);
-                setDraft(displayQty(qtyInUnit(units, stockSymbol, unit, value)));
+                setDraft(displayQty(displayQtyFromStock(units, stockSymbol, unit, value)));
               }}
               onBlur={() => setEditingId(null)}
               onChange={(event) => {
                 const raw = event.target.value;
                 setDraft(raw);
-                onChange?.(stockFromUnitQty(units, stockSymbol, unit, numVal(raw)));
+                onChange?.(stockFromDisplayQty(units, stockSymbol, unit, numVal(raw)));
               }}
             />
           </Field>
@@ -121,148 +111,160 @@ export function UnitQtyFields({
   );
 }
 
+type UnitPriceKey = "cost" | "min" | "wholesale" | "price";
+
+const UNIT_PRICE_FIELDS: { key: UnitPriceKey; label: string }[] = [
+  { key: "cost", label: "Cost" },
+  { key: "min", label: "Min" },
+  { key: "wholesale", label: "Wholesale" },
+  { key: "price", label: "Retail" },
+];
+
 export function LotUnitLines({
   units,
   stockSymbol,
-  seedKey,
   received,
   left,
   damaged,
   showLeft,
+  showQuantity = true,
+  showPricing = true,
   onReceived,
   onLeft,
   onDamaged,
-  cost,
-  min,
-  wholesale,
-  retail,
-  onCost,
-  onMin,
-  onWholesale,
-  onRetail,
+  onUnitPrice,
 }: {
   units: ProductSellUnit[];
   stockSymbol: string;
-  seedKey: string;
   received: number;
   left: number;
   damaged: number;
   showLeft?: boolean;
-  onReceived: (qty: number) => void;
+  showQuantity?: boolean;
+  showPricing?: boolean;
+  onReceived?: (qty: number) => void;
   onLeft?: (qty: number) => void;
-  onDamaged: (qty: number) => void;
-  cost: number;
-  min: number;
-  wholesale: number;
-  retail: number;
-  onCost: (price: number) => void;
-  onMin: (price: number) => void;
-  onWholesale: (price: number) => void;
-  onRetail: (price: number) => void;
+  onDamaged?: (qty: number) => void;
+  onUnitPrice?: (unitId: string, key: UnitPriceKey, value: number) => void;
 }) {
   const ordered = qtyUnits(units);
-  const unitKey = ordered.map((unit) => `${unit.id}:${unit.contains}`).join("|");
-  const [maps, setMaps] = useState<PriceMaps>(emptyPriceMaps);
   const [qtyEdit, setQtyEdit] = useState<{ id: string; field: QtyField } | null>(null);
   const [qtyDraft, setQtyDraft] = useState("");
-
-  useEffect(() => {
-    setMaps({
-      cost: pricesFromStockPrice(units, stockSymbol, cost),
-      min: pricesFromStockPrice(units, stockSymbol, min),
-      wholesale: pricesFromStockPrice(units, stockSymbol, wholesale),
-      retail: pricesFromStockPrice(units, stockSymbol, retail),
-    });
-  }, [seedKey, unitKey]);
 
   function qtyValue(field: QtyField, unit: ProductSellUnit) {
     const stock = field === "received" ? received : field === "left" ? left : damaged;
     if (qtyEdit?.id === unit.id && qtyEdit.field === field) return qtyDraft;
-    return displayQty(qtyInUnit(units, stockSymbol, unit, stock));
+    return displayQty(displayQtyFromStock(units, stockSymbol, unit, stock));
   }
 
   function setQty(field: QtyField, unit: ProductSellUnit, raw: string) {
     setQtyDraft(raw);
-    const stock = stockFromUnitQty(units, stockSymbol, unit, numVal(raw));
-    if (field === "received") onReceived(stock);
+    const stock = stockFromDisplayQty(units, stockSymbol, unit, numVal(raw));
+    if (field === "received") onReceived?.(stock);
     else if (field === "left") onLeft?.(stock);
-    else onDamaged(stock);
-  }
-
-  function setPrice(kind: PriceKind, unit: ProductSellUnit, raw: string) {
-    const nextKind = cascadeDownPrices(units, stockSymbol, maps[kind], unit, numVal(raw));
-    setMaps((current) => ({ ...current, [kind]: nextKind }));
-    const persist = { cost: onCost, min: onMin, wholesale: onWholesale, retail: onRetail }[kind];
-    persist(stockPriceFromMap(units, stockSymbol, nextKind));
+    else onDamaged?.(stock);
   }
 
   return (
-    <div className="grid gap-3">
+    <div className="product-small-list grid gap-2.5">
       {ordered.map((unit) => (
-        <div key={unit.id} className="grid gap-2 rounded-xl border border-line bg-[#f8fafc] p-3">
-          <strong className="text-[12px] font-bold text-ink">
-            {unit.name || unitLabel(unit.symbol || stockSymbol)}
-          </strong>
-          <div
-            className="grid gap-2"
-            style={{ gridTemplateColumns: `repeat(${showLeft ? 3 : 2}, minmax(88px, 1fr))` }}
-          >
-            <Field label="Received">
-              <TextInput
-                inputMode="decimal"
-                maxLength={FIELD_LIMITS.qty}
-                placeholder="0"
-                value={qtyValue("received", unit)}
-                onFocus={() => {
-                  setQtyEdit({ id: unit.id, field: "received" });
-                  setQtyDraft(displayQty(qtyInUnit(units, stockSymbol, unit, received)));
-                }}
-                onBlur={() => setQtyEdit(null)}
-                onChange={(event) => setQty("received", unit, event.target.value)}
-              />
-            </Field>
-            {showLeft ? (
-              <Field label="Left">
+        <div
+          key={unit.id}
+          className={
+            unitKind(unit) === "base"
+              ? "product-small-card is-base relative grid gap-2 rounded-[10px] border border-line bg-paper p-2.5"
+              : "product-small-card relative grid gap-2 rounded-[10px] border border-line bg-paper p-2.5"
+          }
+        >
+          <div className="flex items-center justify-between gap-2">
+            <strong className="text-[12px] font-bold text-ink">
+              {unit.name || unitLabel(unit.symbol || stockSymbol)}
+            </strong>
+            <span className="text-[10px] text-muted">
+              {unitKind(unit) === "base"
+                ? "Product unit"
+                : unitKind(unit) === "smaller" && unit.contains > 1
+                  ? `1 ${unitLabel(stockSymbol)} = ${formatStockQty(unit.contains)} ${unit.name || unitLabel(unit.symbol || "")}`
+                  : unit.contains > 1
+                    ? `1 ${unit.name || unitLabel(unit.symbol || "")} = ${formatStockQty(unit.contains)} ${unitLabel(stockSymbol)}`
+                    : "Sell as"}
+            </span>
+          </div>
+          {showQuantity ? (
+            <div
+              className="grid gap-2"
+              style={{
+                gridTemplateColumns: `repeat(${showLeft ? 3 : 2}, minmax(0, 1fr))`,
+              }}
+            >
+              <Field label="Qty">
                 <TextInput
                   inputMode="decimal"
                   maxLength={FIELD_LIMITS.qty}
                   placeholder="0"
-                  value={qtyValue("left", unit)}
+                  value={qtyValue("received", unit)}
                   onFocus={() => {
-                    setQtyEdit({ id: unit.id, field: "left" });
-                    setQtyDraft(displayQty(qtyInUnit(units, stockSymbol, unit, left)));
+                    setQtyEdit({ id: unit.id, field: "received" });
+                    setQtyDraft(displayQty(qtyInUnit(units, stockSymbol, unit, received)));
                   }}
                   onBlur={() => setQtyEdit(null)}
-                  onChange={(event) => setQty("left", unit, event.target.value)}
+                  onChange={(event) => setQty("received", unit, event.target.value)}
                 />
               </Field>
-            ) : null}
-            <Field label="Damaged">
-              <TextInput
-                inputMode="decimal"
-                maxLength={FIELD_LIMITS.qty}
-                placeholder="0"
-                value={qtyValue("damaged", unit)}
-                onFocus={() => {
-                  setQtyEdit({ id: unit.id, field: "damaged" });
-                  setQtyDraft(displayQty(qtyInUnit(units, stockSymbol, unit, damaged)));
-                }}
-                onBlur={() => setQtyEdit(null)}
-                onChange={(event) => setQty("damaged", unit, event.target.value)}
-              />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {PRICE_FIELDS.map((field) => (
-              <Field key={field.key} label={field.label}>
-                <MoneyInput
-                  placeholder="0.00"
-                  value={numStr(maps[field.key][unit.id] ?? 0)}
-                  onChange={(event) => setPrice(field.key, unit, event.target.value)}
+              {showLeft ? (
+                <Field label="Left">
+                  <TextInput
+                    inputMode="decimal"
+                    maxLength={FIELD_LIMITS.qty}
+                    placeholder="0"
+                    value={qtyValue("left", unit)}
+                    onFocus={() => {
+                      setQtyEdit({ id: unit.id, field: "left" });
+                      setQtyDraft(displayQty(qtyInUnit(units, stockSymbol, unit, left)));
+                    }}
+                    onBlur={() => setQtyEdit(null)}
+                    onChange={(event) => setQty("left", unit, event.target.value)}
+                  />
+                </Field>
+              ) : null}
+              <Field label="Damaged">
+                <TextInput
+                  inputMode="decimal"
+                  maxLength={FIELD_LIMITS.qty}
+                  placeholder="0"
+                  value={qtyValue("damaged", unit)}
+                  onFocus={() => {
+                    setQtyEdit({ id: unit.id, field: "damaged" });
+                    setQtyDraft(displayQty(qtyInUnit(units, stockSymbol, unit, damaged)));
+                  }}
+                  onBlur={() => setQtyEdit(null)}
+                  onChange={(event) => setQty("damaged", unit, event.target.value)}
                 />
               </Field>
-            ))}
-          </div>
+            </div>
+          ) : null}
+          {showPricing ? (
+            <div className="product-small-prices grid grid-cols-2 gap-2">
+              {UNIT_PRICE_FIELDS.map((field) => (
+                <Field
+                  key={field.key}
+                  label={field.label}
+                  className={cn(
+                    "product-price-field",
+                    field.key === "price" ? "is-retail" : `is-${field.key}`,
+                  )}
+                >
+                  <MoneyInput
+                    placeholder="0.00"
+                    value={numStr(unit[field.key])}
+                    onChange={(event) =>
+                      onUnitPrice?.(unit.id, field.key, numVal(event.target.value))
+                    }
+                  />
+                </Field>
+              ))}
+            </div>
+          ) : null}
         </div>
       ))}
     </div>

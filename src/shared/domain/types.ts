@@ -79,6 +79,8 @@ export interface StaffUser {
   email: string;
   role: UserRole;
   branchId: string;
+  cityId?: string;
+  cityName?: string;
   phone: string;
   totalPaid: number;
   isActive: boolean;
@@ -137,11 +139,18 @@ export interface ProductUnitRow {
   isDefault: boolean;
 }
 
+export interface LotBranchAllocation {
+  branchId: string;
+  quantity: number;
+}
+
 export interface ProductLotRow {
   id: string;
   productId: string;
   supplierId: string;
   lotNumber: string;
+  branchId?: string;
+  branchAllocations?: LotBranchAllocation[];
   purchasePrice: number;
   minimumPrice: number;
   wholesalePrice: number;
@@ -152,6 +161,8 @@ export interface ProductLotRow {
   receivedAt: string;
   expiryDate: string | null;
   createdBy: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface BranchLotRow {
@@ -176,16 +187,26 @@ export interface StockMovementRow {
   createdAt: string;
 }
 
+export interface StockTransferItemRow {
+  productId: string;
+  productLotId: string;
+  quantity: number;
+  sentQuantity: number;
+  receivedQuantity: number;
+}
+
 export interface StockTransferRow {
   id: string;
+  transferNumber: string;
   fromBranchId: string;
   toBranchId: string;
   status: TransferStatus;
   notes: string;
   createdBy: string;
   createdAt: string;
+  sentAt: string | null;
   completedAt: string | null;
-  items: { productId: string; productLotId: string; quantity: number }[];
+  items: StockTransferItemRow[];
 }
 
 export interface ProductComponentRow {
@@ -201,6 +222,8 @@ export interface SupplierRow {
   name: string;
   phone: string;
   email: string;
+  cityId?: string;
+  cityName?: string;
   address: string;
   notes: string;
   currentBalance: number;
@@ -271,6 +294,8 @@ export interface DomainCustomer {
   id: string;
   name: string;
   phone: string;
+  cityId?: string;
+  cityName?: string;
   address: string;
   currentBalance: number;
   notes: string;

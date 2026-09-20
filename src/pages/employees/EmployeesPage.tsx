@@ -164,6 +164,7 @@ const blankEmployee = (branches: Branch[]): StaffUser => ({
   phone: "",
   role: "CASHIER",
   branchId: branches[0]?.id ?? "",
+  cityId: "",
   totalPaid: 0,
   isActive: true,
 });
@@ -517,7 +518,8 @@ export function EmployeesPage() {
         phone,
         role: values.role,
         defaultBranchId: values.branchId,
-        isActive: values.isActive,
+        cityId: values.cityId || undefined,
+        isActive: isNew ? true : values.isActive,
       };
       if (isNew) {
         await createUser({
@@ -735,8 +737,8 @@ export function EmployeesPage() {
                     {show("phone") ? <Th>Phone</Th> : null}
                     {show("role") ? <Th>Employee role</Th> : null}
                     {show("branch") ? <Th>Branch</Th> : null}
+                    {show("city") ? <Th>City</Th> : null}
                     {show("paid") ? <Th>Total paid</Th> : null}
-                    {show("status") ? <Th>Status</Th> : null}
                     <Th />
                   </tr>
                 </THead>
@@ -768,14 +770,8 @@ export function EmployeesPage() {
                             </Td>
                           ) : null}
                           {show("branch") ? <Td>{branchName(row.branchId)}</Td> : null}
+                          {show("city") ? <Td>{row.cityName || "—"}</Td> : null}
                           {show("paid") ? <Td numeric>{money(row.totalPaid)}</Td> : null}
-                          {show("status") ? (
-                            <Td>
-                              <Badge tone={row.isActive ? "ok" : "danger"}>
-                                {row.isActive ? STAFF_STATUS_ACTIVE : STAFF_STATUS_INACTIVE}
-                              </Badge>
-                            </Td>
-                          ) : null}
                           <Td>
                             <div onClick={(event) => event.stopPropagation()}>
                               {canManage ? (
@@ -1054,7 +1050,13 @@ export function EmployeesPage() {
         }
       >
         {edit ? (
-          <EmployeeForm key={edit.id} employee={edit} branches={branches} onValid={saveEmployee} />
+          <EmployeeForm
+            key={edit.id}
+            employee={edit}
+            branches={branches}
+            isNew={isNew}
+            onValid={saveEmployee}
+          />
         ) : null}
       </Drawer>
 

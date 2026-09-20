@@ -18,11 +18,22 @@ pub struct LotListQuery {
 }
 
 #[derive(Clone, Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchAllocationInput {
+    pub branch_id: String,
+    #[validate(custom(function = "positive_decimal"))]
+    pub quantity: rust_decimal::Decimal,
+}
+
+#[derive(Clone, Debug, Deserialize, Validate)]
 #[validate(schema(function = "validate_receive_lot"))]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiveLotRequest {
     pub product_id: String,
     pub branch_id: Option<String>,
+    #[validate(nested)]
+    #[serde(default)]
+    pub branch_allocations: Vec<BranchAllocationInput>,
     pub supplier_id: Option<String>,
     #[validate(custom(function = "positive_decimal"))]
     pub quantity: Decimal,
@@ -50,6 +61,27 @@ pub struct BranchLotResponse {
     pub reserved_base_quantity: f64,
     pub damaged_base_quantity: f64,
     pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateLotRequest {
+    pub supplier_id: Option<String>,
+    #[validate(custom(function = "non_negative_optional_decimal"))]
+    pub remaining_quantity: Option<Decimal>,
+    #[validate(custom(function = "non_negative_optional_decimal"))]
+    pub damaged_quantity: Option<Decimal>,
+    #[validate(custom(function = "non_negative_optional_decimal"))]
+    pub cost: Option<Decimal>,
+    #[validate(custom(function = "non_negative_optional_decimal"))]
+    pub min: Option<Decimal>,
+    #[validate(custom(function = "non_negative_optional_decimal"))]
+    pub wholesale: Option<Decimal>,
+    #[validate(custom(function = "non_negative_optional_decimal"))]
+    pub retail: Option<Decimal>,
+    #[validate(nested)]
+    #[serde(default)]
+    pub branch_allocations: Vec<BranchAllocationInput>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -166,6 +198,17 @@ fn validate_receive_lot(value: &ReceiveLotRequest) -> Result<(), ValidationError
             .is_none()
     {
         return Err(ValidationError::new("supplier_required"));
+    }
+    if !value.branch_allocations.is_empty() {
+        let total = value
+            .branch_allocations
+            .iter()
+            .fold(rust_decimal::Decimal::ZERO, |sum, row| sum + row.quantity);
+        if total != value.quantity {
+            return Err(ValidationError::new(
+                "branch_allocations_must_equal_quantity",
+            ));
+        }
     }
     Ok(())
 }

@@ -39,6 +39,8 @@ export interface UserResponse {
   email?: string | null;
   role: string;
   defaultBranchId?: string | null;
+  cityId?: string | null;
+  cityName?: string | null;
   isActive: boolean;
   lastLoginAt?: string | null;
   totalPaid: number;
@@ -60,6 +62,7 @@ export interface UserRequestPayload {
   email: string;
   role: string;
   defaultBranchId: string;
+  cityId?: string;
   isActive: boolean;
   permissions?: UserPermissionPayload[];
 }
@@ -92,9 +95,37 @@ export function mapBranchSetting(row: BranchResponse): BranchSetting | null {
   return {
     id: row.settings.id,
     branchId: row.settings.branchId,
-    branchLotEnabled: true,
+    branchLotEnabled: row.settings.fifoEnabled,
     allowNegativeStock: row.settings.allowNegativeStock,
   };
+}
+
+export interface BranchRequestPayload {
+  name: string;
+  code?: string;
+  type: string;
+  phone?: string;
+  address?: string;
+  isMain?: boolean;
+  isActive?: boolean;
+  settings?: {
+    allowNegativeStock?: boolean;
+    fifoEnabled?: boolean;
+  };
+}
+
+export function createBranch(payload: BranchRequestPayload) {
+  return apiRequest<BranchResponse>(API_ROUTES.branches, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateBranch(id: string, payload: BranchRequestPayload) {
+  return apiRequest<BranchResponse>(API_ROUTES.branchById(id), {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function mapUser(row: UserResponse): StaffUser {
@@ -105,6 +136,8 @@ export function mapUser(row: UserResponse): StaffUser {
     email: row.email ?? "",
     role: (row.role as UserRole) || "CASHIER",
     branchId: row.defaultBranchId ?? "",
+    cityId: row.cityId ?? "",
+    cityName: row.cityName ?? "",
     phone: row.phone ?? "",
     totalPaid: row.totalPaid ?? 0,
     isActive: row.isActive,

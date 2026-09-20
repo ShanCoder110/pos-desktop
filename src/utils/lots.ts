@@ -1,4 +1,5 @@
 import type { Lot, Product, StockPick } from "@/shared/types";
+import { productTotalStock } from "@/utils/productStock";
 
 export type ConsumeResult = {
   price: number;
@@ -7,9 +8,9 @@ export type ConsumeResult = {
   used: { lot: Lot; qty: number }[];
 };
 
-/** On-hand from the live product row (FIFO is applied server-side on sale). */
+/** Sellable pool across all branches (server allocates from this branch, then main, then others). */
 export function remainingStock(product: Product) {
-  return product.stock;
+  return productTotalStock(product);
 }
 
 export function consumeLots(

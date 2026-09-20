@@ -40,11 +40,18 @@ export function posStockLabel(product: Product, branchId?: string) {
   const branch = productBranchStock(product, branchId);
   const unit = unitLabel(product.unit);
   if (!branchId || branch === total) return `${formatStockQty(total)} ${unit}`;
-  return `${formatStockQty(branch)} here · ${formatStockQty(total)} total ${unit}`;
+  return `Here ${formatStockQty(branch)} ${unit} · Total ${formatStockQty(total)} ${unit}`;
 }
 
-export function productSellableQty(product: Product, branchId?: string) {
-  const branch = productBranchStock(product, branchId);
+/** Compact POS qty: this branch · shop total. No lot numbers. */
+export function posStockCompact(product: Product, branchId?: string) {
   const total = productTotalStock(product);
-  return branch > 0 ? branch : total;
+  const branch = productBranchStock(product, branchId);
+  if (!branchId || branch === total) return formatStockQty(total);
+  return `${formatStockQty(branch)} · ${formatStockQty(total)}`;
+}
+
+export function productSellableQty(product: Product, _branchId?: string) {
+  // Sales can auto-pull stock from other branches (main first) when this branch runs short.
+  return productTotalStock(product);
 }

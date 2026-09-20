@@ -7,7 +7,9 @@ description: >-
   backend work (handlers, repositories, migrations, pagination/filtering). Always
   consult this before writing code — it defines the operating protocol (impact
   search before edits), folder structure, toasts, field-sync, and living docs
-  (docs/STATUS.md, BACKEND.md, FRONTEND.md, FLOWS.md, CHANGELOG.md).
+  (docs/FLOWS.md, STATUS.md, BACKEND.md, FRONTEND.md, CHANGELOG.md,
+  docs/system-audit-and-data-model.md, ENG_AUDIT.md). Update those files in
+  the same task whenever behavior, APIs, or stock/FIFO rules change.
 ---
 
 # Tauri App Standards
@@ -92,6 +94,17 @@ Biggest failure mode: a field/behavior is updated in one file and missed in the 
 
 If a field/model appears in more than one file, update **all** of them unless the user says otherwise.
 
+### 1a. Model-first; business logic on the backend
+
+Before adding or renaming a field, filter, KPI, or computed column:
+
+1. **Read the model first** — start with `models.md`, then `docs/system-audit-and-data-model.md`, then the matching migration SQL, `entities/`, and `dto/` for that table. Do not invent a frontend-only field name or shape that is not in the canonical model.
+2. **Backend owns business rules** — filtering, sorting, aggregates, profit/margin/sales totals, health/reorder rules, and permission gates belong in `handlers/` → `services/` → `repositories/` (SQL/SeaORM), exposed as query params or response fields on the API. The React page renders results; it does not re-implement shop rules by filtering full lists in memory.
+3. **Frontend is display + input** — format money/dates in `src/utils/`, validate forms in `src/validations/`, map API DTOs in `src/services/`. If a table needs a new business metric (e.g. profit, margin, stock health), add it to the backend response or a dedicated endpoint first, then show it in the UI.
+4. **When changing a field** — update migration (if schema), entity, DTO, repository SELECT/INSERT, service, handler, `src/services/*`, generated types (`npm run types:generate`), constants/copy, and every table/form/filter that shows the field. Grep the old name after editing.
+
+Legacy pages may still client-filter small hub lists; **new work** must not add more client-side business logic — extend the API instead.
+
 Treat the request as the **concept**, not the one file named. “Add discount on product” means create, edit, display, price, export, and POS if price is shown there.
 
 If a similar field already exists (e.g. money on invoices → `MoneyInput` + scale-2 in the service), **match that convention**. Do not invent a parallel pattern.
@@ -123,7 +136,7 @@ Do not report complete until these were actually checked:
 - [ ] Every form, table, detail, filter, export, POS/receipt surface that showed the old data now handles the new data
 - [ ] Soft-delete + Trash, immutable ledger, FIFO lots, session-stamped actor — followed, not shortcut
 - [ ] Visual change: dark-mode hover/focus still readable (`var(--ink)` on `var(--paper)`)
-- [ ] Living docs updated (protocol below)
+- [ ] Living docs updated (protocol below) — FLOWS + STATUS + CHANGELOG always; BACKEND/FRONTEND if API/UI changed; system-audit + ENG_AUDIT if model/FIFO/stock/ledger changed
 
 If a box is unchecked, the task is not done — say so.
 
@@ -133,7 +146,7 @@ If a box is unchecked, the task is not done — say so.
 2. **Impact list actually touched** (proves the search happened)
 3. **Assumptions** and any related-but-unrequested surface (updated vs left)
 4. **Verification checklist** — explicit yes/no per box
-5. **Docs** — which of BACKEND / FRONTEND / FLOWS / STATUS / CHANGELOG were updated
+5. **Docs** — name each file updated: `FLOWS.md`, `STATUS.md`, `CHANGELOG.md`, `BACKEND.md`, `FRONTEND.md`, `system-audit-and-data-model.md`, `ENG_AUDIT.md`. If a file was skipped, say why.
 
 If uncertain (stock/ledger transaction, migration on existing DB), say so and say how to verify. Never claim tests ran if they didn't. Prefer smaller diffs; pause between unrelated modules.
 
@@ -173,7 +186,7 @@ Rules:
 - **No hardcoded colors.** Every color must come from the global theme (`src/shared/constants/theme.ts` and `src/index.css`): Tailwind `text-ink`, `bg-paper`, `border-line`, `text-muted`, `text-danger`, `bg-accent`, or `var(--ink)` / `var(--line)` — never a raw hex/rgb value inline.
 - **No magic strings/numbers.** Anything reused (status values, roles, route paths, page sizes) belongs in `src/shared/constants/`, imported from there — not retyped inline. Page size: `DEFAULT_PAGE_SIZE` / `MAX_PAGE_SIZE` from `src/shared/constants/config.ts`.
 - **API calls only in `src/services/`.** Components/hooks call functions from `src/services/*`, never `fetch`/`invoke` directly inline in a component. Shared client: `apiRequest` in `src/services/api.ts`. Route paths: `src/shared/constants/api.ts`.
-- **Business/formatting logic in `src/utils/`**, not duplicated inside components.
+- **Display/formatting helpers in `src/utils/`** (money, dates, labels) — not shop business rules. Profit, filters, aggregates, and eligibility belong on the backend (see §1a).
 - **Reusable stateful logic goes in `src/hooks/`** (e.g. list + pagination), not copy-pasted across pages.
 - **Placeholders** on inputs (e.g. "Enter name"). Copy lives in `src/shared/constants/*`.
 - **Toasts and errors** follow **Toast and error handling** below. Never invent a second toast system.
@@ -285,7 +298,7 @@ When a field is added, renamed, or removed on the frontend (a form field, a tabl
 
 Never leave a field alive in the DB/backend after it's been removed from the UI, and never add a frontend field that has nowhere to persist on the backend.
 
-Domain notes for this shop POS: local SQLite = one shop; walk-in customers do not get a balance/ledger; FIFO via lots; actor stamped from session, never from JSON `createdBy`. Living index: `docs/STATUS.md`, `docs/BACKEND.md`, `docs/FRONTEND.md`. `src-tauri/BACKEND.md` is a pointer only. Ledger lines are immutable; soft delete is `deleted_at` + Trash (`suppliers` / `customers` / `users` today). Add/edit in Drawers; row actions in 3-dots `Menu`; dark-mode hover must stay readable (`var(--ink)` on `var(--paper)`).
+Domain notes for this shop POS: local SQLite = one shop; walk-in customers do not get a balance/ledger; FIFO via lots; actor stamped from session, never from JSON `createdBy`. Living index: `docs/FLOWS.md`, `docs/STATUS.md`, `docs/BACKEND.md`, `docs/FRONTEND.md`, `docs/CHANGELOG.md`; model/FIFO notes in `docs/system-audit-and-data-model.md` and `ENG_AUDIT.md`. `src-tauri/BACKEND.md` is a pointer only. Ledger lines are immutable; soft delete is `deleted_at` + Trash (`suppliers` / `customers` / `users` today). Add/edit in Drawers; row actions in 3-dots `Menu`; dark-mode hover must stay readable (`var(--ink)` on `var(--paper)`).
 
 ## 4. Frontend validation (`src/validations/`)
 
@@ -314,7 +327,7 @@ After implementing any feature, explicitly verify (state this out loud / walk th
 - [ ] UI changes verified in the browser (or Vite at `:1420` with API on `:38472`) — not screenshot-only
 - [ ] Did not restyle `PosPage` / `LotForm` / `ProductForm` catalog chrome unless the user asked
 - [ ] Re-grepped the old field/name across the repo; no leftovers
-- [ ] `docs/BACKEND.md` / `docs/FRONTEND.md` / `docs/FLOWS.md` / `docs/STATUS.md` / `docs/CHANGELOG.md` updated for this task
+- [ ] `docs/FLOWS.md` + `docs/STATUS.md` + `docs/CHANGELOG.md` updated; `docs/BACKEND.md` / `docs/FRONTEND.md` if the API or UI map changed; `docs/system-audit-and-data-model.md` + `ENG_AUDIT.md` if stock/FIFO/lots/branches/model rules changed
 - [ ] If a new env var was introduced: `.env.example` updated in the **same** task (and this skill’s Environment section if the convention changed)
 
 ## Environment & Secrets (standing)
@@ -411,25 +424,44 @@ If you implemented or fixed UI/API behavior, **prove it in the running app** bef
 - [x] Duplicate drawer/form/table per entity instead of one generic/configurable component
 - [x] Duplicate title text (outer shell + inner content repeating it)
 - [x] Page lists empty until hard refresh / abort logs / surprise logout → don’t abort cached session; verify first navigation
+- [x] Shipped a flow (stock, FIFO, branch, POS) without updating `docs/FLOWS.md` + STATUS/CHANGELOG (and audit files when the model changed)
 - [ ] *(add the next flagged mistake here in the same task that fixes it)*
 
 When a future prompt flags a new class of mistake: (a) fix the instance, (b) **append it here in the same task**.
 
 ## Project documentation protocol
 
-Follow **Agent operating protocol** (impact search, verification, task report) on every change. Living index: `docs/STATUS.md`, `docs/BACKEND.md`, `docs/FRONTEND.md`, `docs/FLOWS.md`, `docs/CHANGELOG.md`. This skill stays the convention source; those files stay the **inventory**. This app uses **Axum REST** (`handlers/` + `src/services`), **not** `#[tauri::command]` / `invoke`, and **SeaORM SQL** against **SQLite**, not sqlx.
+**Mandatory.** Code and docs ship in the **same task**. Do not mark a feature done if FLOWS/STATUS/CHANGELOG still describe the old behavior.
+
+This skill is the convention source. These files are the **inventory** — keep them true to the code (if they disagree, **code wins**, then fix the docs in the same task).
+
+| File | What it is | Update when |
+|---|---|---|
+| `docs/FLOWS.md` | Page → `src/services` → handler → tables (“what happens when…”) | Any user flow, API write path, or FIFO/stock/branch rule |
+| `docs/STATUS.md` | One-glance module status | Status/blocker/flow counts change |
+| `docs/BACKEND.md` | HTTP inventory + module rules | New/changed route, DTO, table, consume rule |
+| `docs/FRONTEND.md` | Pages, services, UI conventions | New/changed page, service wrapper, POS/form behavior |
+| `docs/CHANGELOG.md` | Dated log of what landed | Every completed task (date, what, files) |
+| `docs/system-audit-and-data-model.md` | Canonical model + living implementation notes | Schema, lots/FIFO, branch stock, or a finding that is now implemented |
+| `ENG_AUDIT.md` | Engineering gaps (FIFO tests, twins, ts-rs, …) | Close or add a gap you touched |
+
+This app uses **Axum REST** (`handlers/` + `src/services`), **not** `#[tauri::command]` / `invoke`, and **SeaORM SQL** against **SQLite**, not sqlx.
 
 ### Before starting ANY task
-1. Read `docs/STATUS.md`, then the relevant module in `docs/BACKEND.md` / `docs/FRONTEND.md`, then the relevant flow(s) in `docs/FLOWS.md`.
-2. Don't reimplement anything ✅ Done; don't assume anything 🔴 Missing exists.
-3. If docs contradict the code, the code wins — fix the docs in the same task.
+1. Read `docs/STATUS.md`, then the relevant module in `docs/BACKEND.md` / `docs/FRONTEND.md`, then the matching flow(s) in `docs/FLOWS.md`.
+2. For stock/lots/FIFO/branches, also read the living note at the top of `docs/system-audit-and-data-model.md` and the FIFO section in `ENG_AUDIT.md`.
+3. Don't reimplement anything ✅ Done; don't assume anything 🔴 Missing exists.
+4. If docs contradict the code, the code wins — fix the docs in the same task.
 
 ### After completing ANY task
-1. Update affected sections in BACKEND.md / FRONTEND.md: new HTTP routes (and handlers) added to both the module table and the master inventory, status flags, TODOs. Same for frontend `API_ROUTES` + `src/services` wrappers.
-2. Update or add the relevant entry in `docs/FLOWS.md` — a task isn't done until the flow it touches is re-verified end to end.
-3. Update STATUS.md.
-4. Append to `docs/CHANGELOG.md`: date, what changed, files touched.
-A task isn't complete until docs reflect it — this applies to Axum routes, SeaORM migrations, and frontend service wrappers equally.
+1. **`docs/FLOWS.md`** — add or rewrite the flow you touched (steps + status ✅/🟡/🔴/🐛). A task is not done until that flow matches the running code.
+2. **`docs/BACKEND.md` / `docs/FRONTEND.md`** — new HTTP routes (and handlers) in the module **and** master inventory; same for `API_ROUTES` + `src/services` wrappers; status flags and TODOs.
+3. **`docs/STATUS.md`** — module row (backend/frontend/flows/blockers).
+4. **`docs/CHANGELOG.md`** — append: date, what changed, files touched.
+5. **`docs/system-audit-and-data-model.md`** — if you changed lots, FIFO, branch qty, product stock, or a finding in the executive audit is now implemented, update the **Living implementation note** (do not leave the mock-era audit as if it were current).
+6. **`ENG_AUDIT.md`** — mark the gap ✅/🟡/🔴 for what you shipped or still owe (e.g. FIFO tests).
+
+Skip a file only when it is clearly unrelated (e.g. a CSS token change need not rewrite FIFO). Still append CHANGELOG. Never skip FLOWS when a user-facing or API path changed.
 
 ### Cross-check (REST equivalent of invoke mismatch)
 - Handler registered in `server.rs` but nothing in `src/services` calls it → flag 🔴 unused (not always a bug).

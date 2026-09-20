@@ -98,6 +98,7 @@ impl AuthService {
                 email.as_deref(),
                 "OWNER",
                 Some(branch_id),
+                None,
                 true,
                 now,
             )
@@ -113,6 +114,7 @@ impl AuthService {
                 email.as_deref(),
                 "OWNER",
                 Some(branch_id),
+                None,
                 true,
                 now,
             )

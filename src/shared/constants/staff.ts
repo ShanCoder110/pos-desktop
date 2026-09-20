@@ -36,8 +36,8 @@ export const EMPLOYEE_TABLE_COLUMNS: ColumnOption[] = [
   { id: "phone", label: "Phone" },
   { id: "role", label: "Employee role" },
   { id: "branch", label: "Branch" },
+  { id: "city", label: "City" },
   { id: "paid", label: "Total paid" },
-  { id: "status", label: "Status" },
 ];
 
 export const USER_TABLE_COLUMNS: ColumnOption[] = [
@@ -46,7 +46,7 @@ export const USER_TABLE_COLUMNS: ColumnOption[] = [
   { id: "phone", label: "Phone" },
   { id: "role", label: "User role" },
   { id: "branch", label: "Branch" },
-  { id: "status", label: "Status" },
+  { id: "city", label: "City" },
 ];
 
 export const STAFF_LEDGER_COLUMNS: ColumnOption[] = [

@@ -182,7 +182,7 @@ impl TransferRepository {
             let qty = quantity(item.requested_base_quantity);
             let branch_lot = BranchLotQty::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT bl.id, bl.remaining_base_quantity AS remaining, pl.purchase_price_per_base AS unit_cost FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE bl.branch_id = ? AND bl.product_lot_id = ? LIMIT 1",
+                "SELECT bl.id, bl.remaining_base_quantity AS remaining, CAST(pl.purchase_price_per_base AS REAL) AS unit_cost FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE bl.branch_id = ? AND bl.product_lot_id = ? LIMIT 1",
                 [header.from_branch_id.into(), item.product_lot_id.into()],
             ))
             .one(transaction)

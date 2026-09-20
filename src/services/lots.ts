@@ -30,9 +30,15 @@ export interface LotResponse {
   updatedAt: string;
 }
 
+export interface LotBranchAllocationPayload {
+  branchId: string;
+  quantity: number;
+}
+
 export interface ReceiveLotPayload {
   productId: string;
   branchId?: string;
+  branchAllocations?: LotBranchAllocationPayload[];
   supplierId?: string | null;
   quantity: number;
   cost: number;
@@ -52,6 +58,17 @@ export interface LotListParams {
   sourceType?: string;
 }
 
+export interface UpdateLotPayload {
+  supplierId?: string;
+  remainingQuantity?: number;
+  damagedQuantity?: number;
+  cost?: number;
+  min?: number;
+  wholesale?: number;
+  retail?: number;
+  branchAllocations?: LotBranchAllocationPayload[];
+}
+
 export function mapLotResponse(lot: LotResponse): ProductLotRow {
   const purchase = lot.purchasePricePerBase ?? 0;
   return {
@@ -60,23 +77,28 @@ export function mapLotResponse(lot: LotResponse): ProductLotRow {
     supplierId: lot.supplierId ?? "",
     lotNumber: lot.lotNumber,
     purchasePrice: purchase,
-    minimumPrice: purchase,
-    wholesalePrice: purchase,
-    retailPrice: purchase,
+    minimumPrice: 0,
+    wholesalePrice: 0,
+    retailPrice: 0,
     originalQuantity: lot.originalBaseQuantity,
     remainingQuantity: lot.remainingBaseQuantity,
     damagedQuantity: lot.damagedBaseQuantity,
     receivedAt: lot.receivedDate,
     expiryDate: lot.expiryDate ?? null,
     createdBy: "",
+    branchAllocations: lot.branchLots?.map((row) => ({
+      branchId: row.branchId,
+      quantity: row.remainingBaseQuantity,
+    })),
+    createdAt: lot.createdAt,
+    updatedAt: lot.updatedAt,
   };
 }
 
 export function listLots(params: LotListParams = {}, signal?: AbortSignal) {
-  return apiRequest<PaginatedResponse<LotResponse>>(
-    `${API_ROUTES.lots}${queryString(params)}`,
-    { signal },
-  );
+  return apiRequest<PaginatedResponse<LotResponse>>(`${API_ROUTES.lots}${queryString(params)}`, {
+    signal,
+  });
 }
 
 export async function listAllLots(signal?: AbortSignal): Promise<ProductLotRow[]> {
@@ -101,9 +123,20 @@ export function receiveLot(payload: ReceiveLotPayload) {
   }).then(mapLotResponse);
 }
 
+export function updateLot(id: string, payload: UpdateLotPayload) {
+  return apiRequest<LotResponse>(API_ROUTES.lotById(id), {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  }).then(mapLotResponse);
+}
+
 /** Build receive payload from a ProductLotRow filled by LotForm. */
 export function receivePayloadFromLot(lot: ProductLotRow): ReceiveLotPayload {
-  return {
+  const allocations = (lot.branchAllocations ?? [])
+    .filter((row) => row.quantity > 0)
+    .map((row) => ({ branchId: row.branchId, quantity: row.quantity }));
+
+  const payload: ReceiveLotPayload = {
     productId: lot.productId,
     supplierId: lot.supplierId || null,
     quantity: lot.originalQuantity,
@@ -115,4 +148,14 @@ export function receivePayloadFromLot(lot: ProductLotRow): ReceiveLotPayload {
     wholesale: lot.wholesalePrice,
     retail: lot.retailPrice,
   };
+
+  if (allocations.length > 1) {
+    payload.branchAllocations = allocations;
+  } else if (allocations.length === 1) {
+    payload.branchId = allocations[0].branchId;
+  } else if (lot.branchId) {
+    payload.branchId = lot.branchId;
+  }
+
+  return payload;
 }

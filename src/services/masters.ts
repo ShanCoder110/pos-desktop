@@ -14,6 +14,8 @@ export interface MasterRecord {
   precision?: number;
   balance?: number;
   isWalkIn?: boolean;
+  cityId?: string | null;
+  cityName?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -29,9 +31,10 @@ export interface MasterPayload {
   precision?: number;
   isWalkIn?: boolean;
   previousBalance?: number;
+  cityId?: string;
 }
 
-export type MasterResource = "categories" | "units" | "suppliers" | "customers";
+export type MasterResource = "categories" | "cities" | "units" | "suppliers" | "customers";
 
 export type MasterListParams = {
   page?: number;

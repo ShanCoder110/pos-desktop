@@ -26,22 +26,47 @@ export interface TransferResponse {
   receivedAt?: string | null;
 }
 
+function mapTransferStatus(status: string): TransferStatus {
+  if (status === "RECEIVED" || status === "COMPLETED") return "COMPLETED";
+  if (status === "CANCELLED") return "CANCELLED";
+  return "PENDING";
+}
+
 export function mapTransfer(row: TransferResponse): StockTransferRow {
   return {
     id: row.id,
+    transferNumber: row.transferNumber,
     fromBranchId: row.fromBranchId,
     toBranchId: row.toBranchId,
-    status: (row.status as TransferStatus) || "PENDING",
+    status: mapTransferStatus(row.status),
     notes: row.notes ?? "",
     createdBy: "",
     createdAt: row.createdAt,
+    sentAt: row.sentAt ?? null,
     completedAt: row.receivedAt ?? null,
     items: (row.items ?? []).map((item) => ({
       productId: item.productId,
       productLotId: item.productLotId,
       quantity: item.requestedBaseQuantity,
+      sentQuantity: item.sentBaseQuantity,
+      receivedQuantity: item.receivedBaseQuantity,
     })),
   };
+}
+
+export function getTransfer(id: string, signal?: AbortSignal) {
+  return apiRequest<TransferResponse>(API_ROUTES.transferById(id), { signal }).then(mapTransfer);
+}
+
+export function movedTransferQty(
+  item: StockTransferRow["items"][number],
+  status: StockTransferRow["status"],
+) {
+  if (status === "COMPLETED") {
+    return item.receivedQuantity > 0 ? item.receivedQuantity : item.sentQuantity || item.quantity;
+  }
+  if (status === "CANCELLED") return 0;
+  return item.sentQuantity > 0 ? item.sentQuantity : item.quantity;
 }
 
 export function listTransfers(

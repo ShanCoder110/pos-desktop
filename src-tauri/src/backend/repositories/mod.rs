@@ -13,6 +13,7 @@ mod sales;
 mod sequences;
 mod staff;
 mod stock;
+mod stock_allocation;
 mod transfers;
 mod trash;
 
@@ -31,5 +32,6 @@ pub use sales::*;
 pub use sequences::*;
 pub use staff::*;
 pub use stock::*;
+pub use stock_allocation::*;
 pub use transfers::*;
 pub use trash::*;

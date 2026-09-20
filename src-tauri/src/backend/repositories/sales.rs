@@ -6,13 +6,12 @@ use uuid::Uuid;
 
 use crate::backend::{
     constants::{
-        ERROR_BELOW_MINIMUM, ERROR_HOLD_NOT_FOUND, ERROR_INSUFFICIENT_STOCK,
-        ERROR_INVOICE_ALREADY_VOIDED, ERROR_INVOICE_NOT_FOUND, ERROR_WALK_IN_CREDIT,
-        INVOICE_STATUS_CANCELLED, INVOICE_STATUS_COMPLETED, LEDGER_ADJUSTMENT, LEDGER_SALE,
-        MONEY_TYPE_SALE, MONEY_TYPE_VOID, PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT,
-        PAYMENT_STATUS_COMPLETED, PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID,
-        PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_UNPAID, PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE,
-        STOCK_MOVEMENT_SALE,
+        ERROR_BELOW_MINIMUM, ERROR_HOLD_NOT_FOUND, ERROR_INVOICE_ALREADY_VOIDED,
+        ERROR_INVOICE_NOT_FOUND, ERROR_WALK_IN_CREDIT, INVOICE_STATUS_CANCELLED,
+        INVOICE_STATUS_COMPLETED, LEDGER_ADJUSTMENT, LEDGER_SALE, MONEY_TYPE_SALE, MONEY_TYPE_VOID,
+        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED,
+        PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID, PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_UNPAID,
+        PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE, STOCK_MOVEMENT_SALE,
     },
     context::RequestContext,
     dto::{
@@ -20,6 +19,7 @@ use crate::backend::{
         InvoicePaymentResponse, InvoiceResponse, PageQuery, VoidRequest,
     },
     errors::AppError,
+    repositories::stock_allocation::{allocate_fifo_with_branch_fallback, StockAllocationOptions},
     util::{money_value, now_utc, parse_optional_uuid, parse_uuid, quantity, trimmed},
 };
 
@@ -45,14 +45,6 @@ struct ProductUnitRow {
 #[derive(Debug, FromQueryResult)]
 struct CustomerFlag {
     is_walk_in: i64,
-}
-
-#[derive(Debug, FromQueryResult)]
-struct FifoLotRow {
-    branch_lot_id: Uuid,
-    product_lot_id: Uuid,
-    remaining: Decimal,
-    unit_cost: Decimal,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -306,17 +298,22 @@ impl SalesRepository {
 
         for prepared in prepared_items {
             let item_id = Uuid::new_v4();
-            let fifo = allocate_fifo(
+            let fifo = allocate_fifo_with_branch_fallback(
                 transaction,
                 context,
-                invoice_id,
-                prepared.product_id,
-                prepared.base_quantity,
-                &prepared.unit_name,
-                prepared.displayed,
+                StockAllocationOptions {
+                    selling_branch_id: context.branch_id,
+                    reference_id: invoice_id,
+                    product_id: prepared.product_id,
+                    needed: prepared.base_quantity,
+                    unit_name: &prepared.unit_name,
+                    displayed: prepared.displayed,
+                    movement_type: STOCK_MOVEMENT_SALE,
+                    reference_type: REFERENCE_INVOICE,
+                },
             )
             .await?;
-            let fifo_cost = money_value(fifo);
+            let fifo_cost = money_value(fifo.fifo_cost);
             let gross_profit = money_value(prepared.line_total - fifo_cost);
             transaction
                 .execute_raw(Statement::from_sql_and_values(
@@ -527,7 +524,7 @@ impl SalesRepository {
         let now = now_utc();
         let consumptions = ConsumptionRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT branch_id, product_id, product_lot_id, base_quantity, unit_cost FROM lot_consumptions WHERE reference_type = ? AND reference_id = ?",
+            "SELECT branch_id, product_id, product_lot_id, base_quantity, CAST(unit_cost AS REAL) AS unit_cost FROM lot_consumptions WHERE reference_type = ? AND reference_id = ?",
             [REFERENCE_INVOICE.into(), invoice_id.to_string().into()],
         ))
         .all(transaction)
@@ -865,112 +862,6 @@ struct PreparedItem {
     discount: Decimal,
     tax: Decimal,
     line_total: Decimal,
-}
-
-async fn allocate_fifo(
-    transaction: &DatabaseTransaction,
-    context: &RequestContext,
-    invoice_id: Uuid,
-    product_id: Uuid,
-    mut needed: Decimal,
-    unit_name: &str,
-    displayed: Decimal,
-) -> Result<Decimal, AppError> {
-    let lots = FifoLotRow::find_by_statement(Statement::from_sql_and_values(
-        DbBackend::Sqlite,
-        "SELECT bl.id AS branch_lot_id, bl.product_lot_id, bl.remaining_base_quantity AS remaining, pl.purchase_price_per_base AS unit_cost FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE bl.branch_id = ? AND pl.product_id = ? AND bl.remaining_base_quantity > 0 AND pl.deleted_at IS NULL ORDER BY pl.received_date ASC, pl.created_at ASC",
-        [context.branch_id.into(), product_id.into()],
-    ))
-    .all(transaction)
-    .await?;
-
-    let now = now_utc();
-    let mut fifo_cost = Decimal::ZERO;
-    let available: Decimal = lots.iter().map(|lot| lot.remaining).sum();
-    if available < needed {
-        return Err(AppError::Conflict(ERROR_INSUFFICIENT_STOCK.into()));
-    }
-
-    let mut first_movement = true;
-    for lot in lots {
-        if needed <= Decimal::ZERO {
-            break;
-        }
-        let take = needed.min(lot.remaining);
-        if take <= Decimal::ZERO {
-            continue;
-        }
-        let movement_id = Uuid::new_v4();
-        let line_cost = money_value(lot.unit_cost * take);
-        fifo_cost += line_cost;
-        let displayed_qty = if first_movement {
-            displayed
-        } else {
-            Decimal::ZERO
-        };
-        first_movement = false;
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "UPDATE branch_lots SET remaining_base_quantity = remaining_base_quantity - ?, updated_at = ? WHERE id = ?",
-                [take.into(), now.into(), lot.branch_lot_id.into()],
-            ))
-            .await?;
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "UPDATE product_lots SET remaining_base_quantity = remaining_base_quantity - ?, version = version + 1, updated_at = ? WHERE id = ?",
-                [take.into(), now.into(), lot.product_lot_id.into()],
-            ))
-            .await?;
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "INSERT INTO stock_movements (id, branch_id, product_id, product_lot_id, type, displayed_quantity, displayed_unit_name, base_quantity_delta, unit_cost, total_cost, reference_type, reference_id, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    movement_id.into(),
-                    context.branch_id.into(),
-                    product_id.into(),
-                    lot.product_lot_id.into(),
-                    STOCK_MOVEMENT_SALE.into(),
-                    displayed_qty.into(),
-                    unit_name.into(),
-                    (-take).into(),
-                    lot.unit_cost.into(),
-                    line_cost.into(),
-                    REFERENCE_INVOICE.into(),
-                    invoice_id.into(),
-                    now.into(),
-                    context.user_id.into(),
-                    now.into(),
-                ],
-            ))
-            .await?;
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "INSERT INTO lot_consumptions (id, branch_id, product_id, product_lot_id, stock_movement_id, reference_type, reference_id, base_quantity, unit_cost, total_cost, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    Uuid::new_v4().into(),
-                    context.branch_id.into(),
-                    product_id.into(),
-                    lot.product_lot_id.into(),
-                    movement_id.into(),
-                    REFERENCE_INVOICE.into(),
-                    invoice_id.into(),
-                    take.into(),
-                    lot.unit_cost.into(),
-                    line_cost.into(),
-                    now.into(),
-                ],
-            ))
-            .await?;
-        needed -= take;
-    }
-    if needed > Decimal::ZERO {
-        return Err(AppError::Conflict(ERROR_INSUFFICIENT_STOCK.into()));
-    }
-    Ok(fifo_cost)
 }
 
 fn invoice_conditions(

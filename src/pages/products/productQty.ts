@@ -7,10 +7,17 @@ export function roundMoney(n: number) {
 }
 
 export function formatStockQty(n: number) {
-    if (!Number.isFinite(n)) return "0";
-    if (Number.isInteger(n)) return String(n);
-    const t = Math.round(n * 100) / 100;
-    return String(t);
+  if (!Number.isFinite(n)) return "0";
+  const rounded = Math.round(n * 100) / 100;
+  if (Math.abs(rounded - Math.round(rounded)) < 1e-6) return String(Math.round(rounded));
+  return rounded.toFixed(2).replace(/\.?0+$/, "");
+}
+
+/** Signed stock change for branch rebalance previews (+1 / −1). */
+export function signedStockQty(n: number) {
+  if (!Number.isFinite(n) || Math.abs(n) < 1e-6) return "";
+  const abs = formatStockQty(Math.abs(n));
+  return n > 0 ? `+${abs}` : `−${abs}`;
 }
 
 export function unitLabel(symbol: string) {
@@ -29,7 +36,10 @@ export function extraKind(symbol?: string): "bigger" | "smaller" {
   return isBiggerSymbol(symbol) ? "bigger" : "smaller";
 }
 
-function withManual(row: ProductSellUnit, next: { cost: number; min: number; wholesale: number; price: number }): ProductSellUnit {
+function withManual(
+  row: ProductSellUnit,
+  next: { cost: number; min: number; wholesale: number; price: number },
+): ProductSellUnit {
   const manual = row.priceManual ?? {};
   return {
     ...row,
@@ -40,7 +50,11 @@ function withManual(row: ProductSellUnit, next: { cost: number; min: number; who
   };
 }
 
-export function deriveFromSource(source: ProductSellUnit, contains: number, mode: "multiply" | "divide") {
+export function deriveFromSource(
+  source: ProductSellUnit,
+  contains: number,
+  mode: "multiply" | "divide",
+) {
   if (!contains) return emptyPrices();
   const n = mode === "multiply" ? contains : 1 / contains;
   return {
@@ -52,22 +66,71 @@ export function deriveFromSource(source: ProductSellUnit, contains: number, mode
 }
 
 export function baseUnit(units: ProductSellUnit[]) {
-  return units.find((u) => u.kind === "base") ?? units.find((u) => u.contains <= 1 && !isBiggerSymbol(u.symbol)) ?? units[0];
+  return (
+    units.find((u) => u.kind === "base") ??
+    units.find((u) => u.contains <= 1 && !isBiggerSymbol(u.symbol)) ??
+    units[0]
+  );
+}
+
+/** Stock / POS unit symbols that are sold by length (meter, gaz, foot). */
+export function isLinearStockUnit(symbol?: string) {
+  const unit = symbol?.trim().toLowerCase();
+  return unit === "m" || unit === "gaz" || unit === "ft";
+}
+
+/** Cost and retail for margin — always the product base unit, never a smaller sell unit. */
+export function productBasePricing(
+  product: Pick<Product, "cost" | "retail" | "unit" | "sellUnits">,
+) {
+  const units = product.sellUnits?.length ? qtyUnits(product.sellUnits) : [];
+  if (units.length) {
+    const base =
+      units.find((u) => u.kind === "base") ??
+      units.find((u) => u.symbol === product.unit) ??
+      baseUnit(units);
+    return { cost: base.cost, retail: base.price };
+  }
+  return { cost: product.cost, retail: product.retail };
+}
+
+export function productUnitProfit(
+  product: Pick<Product, "cost" | "retail" | "unit" | "sellUnits">,
+) {
+  const { cost, retail } = productBasePricing(product);
+  return retail - cost;
+}
+
+export function productMarginPct(product: Pick<Product, "cost" | "retail" | "unit" | "sellUnits">) {
+  const { cost, retail } = productBasePricing(product);
+  if (cost <= 0) return 0;
+  return ((retail - cost) / cost) * 100;
 }
 
 export function biggerUnit(units: ProductSellUnit[]) {
-  return units.find((u) => u.kind === "bigger") ?? units.find((u) => isBiggerSymbol(u.symbol) && u.kind !== "base");
+  return (
+    units.find((u) => u.kind === "bigger") ??
+    units.find((u) => isBiggerSymbol(u.symbol) && u.kind !== "base")
+  );
 }
 
 export function extraUnits(units: ProductSellUnit[]) {
-  return units.filter((u) => u.kind === "bigger" || u.kind === "smaller");
+  return units.filter((u) => {
+    const kind = unitKind(u);
+    return kind === "bigger" || kind === "smaller";
+  });
 }
 
 export function unitKind(unit: ProductSellUnit): "base" | "bigger" | "smaller" {
-  if (unit.kind === "pack") return "bigger";
-  if (unit.kind === "small") return "smaller";
-  if (unit.kind === "bigger" || unit.kind === "smaller") return unit.kind;
-  if (isBiggerSymbol(unit.symbol)) return "bigger";
+  if (unit.kind === "base") return "base";
+  if (unit.kind === "pack" || isBiggerSymbol(unit.symbol)) return "bigger";
+  if (unit.kind === "small" || unit.kind === "smaller") return "smaller";
+  if (unit.kind === "bigger") {
+    if (isBiggerSymbol(unit.symbol)) return "bigger";
+    if (unit.contains > 1) return "smaller";
+    return "base";
+  }
+  if (unit.contains > 1) return "smaller";
   return "base";
 }
 
@@ -119,8 +182,12 @@ export function qtyUnits(units: ProductSellUnit[]) {
   return [...bigger, ...base, ...smaller];
 }
 
-function roundQty(n: number) {
+export function roundStockQty(n: number) {
   return Math.round(n * 10000) / 10000;
+}
+
+function roundQty(n: number) {
+  return roundStockQty(n);
 }
 
 export function toBaseQty(units: ProductSellUnit[], unit: ProductSellUnit, qty: number) {
@@ -143,8 +210,14 @@ export function unitInStock(units: ProductSellUnit[], stockSymbol: string, unit:
   return perStock ? perUnit / perStock : perUnit;
 }
 
-export function partsToStock(units: ProductSellUnit[], stockSymbol: string, parts: Record<string, number>) {
-  return roundQty(units.reduce((sum, u) => sum + (parts[u.id] || 0) * unitInStock(units, stockSymbol, u), 0));
+export function partsToStock(
+  units: ProductSellUnit[],
+  stockSymbol: string,
+  parts: Record<string, number>,
+) {
+  return roundQty(
+    units.reduce((sum, u) => sum + (parts[u.id] || 0) * unitInStock(units, stockSymbol, u), 0),
+  );
 }
 
 export function splitStockQty(units: ProductSellUnit[], stockSymbol: string, stockQty: number) {
@@ -183,13 +256,50 @@ export function formatMixedQty(product: Product, stockQty: number) {
   return bits.join(" + ") || `0 ${unitLabel(product.unit)}`;
 }
 
-export function stockFromUnitQty(units: ProductSellUnit[], stockSymbol: string, unit: ProductSellUnit, qty: number) {
+export function stockFromUnitQty(
+  units: ProductSellUnit[],
+  stockSymbol: string,
+  unit: ProductSellUnit,
+  qty: number,
+) {
   return roundQty(qty * unitInStock(units, stockSymbol, unit));
 }
 
-export function qtyInUnit(units: ProductSellUnit[], stockSymbol: string, unit: ProductSellUnit, stockQty: number) {
+/** Stock qty from a typed display amount — keeps extra precision for sub-unit round-trips. */
+export function stockFromDisplayQty(
+  units: ProductSellUnit[],
+  stockSymbol: string,
+  unit: ProductSellUnit,
+  displayQty: number,
+) {
+  if (!displayQty) return 0;
+  const stock = displayQty * unitInStock(units, stockSymbol, unit);
+  return Math.round(stock * 1_000_000) / 1_000_000;
+}
+
+export function qtyInUnit(
+  units: ProductSellUnit[],
+  stockSymbol: string,
+  unit: ProductSellUnit,
+  stockQty: number,
+) {
   const per = unitInStock(units, stockSymbol, unit);
   return per ? stockQty / per : stockQty;
+}
+
+/** Display qty for inputs — snaps near-whole numbers (e.g. 2.997 → 3 Gaz). */
+export function displayQtyFromStock(
+  units: ProductSellUnit[],
+  stockSymbol: string,
+  unit: ProductSellUnit,
+  stockQty: number,
+) {
+  if (!stockQty) return 0;
+  const raw = qtyInUnit(units, stockSymbol, unit, stockQty);
+  const rounded = roundStockQty(raw);
+  const nearest = Math.round(rounded);
+  if (Math.abs(rounded - nearest) < 0.051) return nearest;
+  return rounded;
 }
 
 export function formatLinkedQty(product: Product, stockQty: number) {
@@ -203,21 +313,54 @@ export function formatLinkedQty(product: Product, stockQty: number) {
   return bits.join(" = ") || `0 ${unitLabel(product.unit)}`;
 }
 
-export function formatLinkedPrice(units: ProductSellUnit[], stockSymbol: string, stockPrice: number) {
+export function formatLinkedPrice(
+  units: ProductSellUnit[],
+  stockSymbol: string,
+  stockPrice: number,
+) {
   const ordered = qtyUnits(units);
   const list = ordered.length ? ordered : units;
   return list
-    .map((u) => `${money(priceFromStock(units, stockSymbol, stockPrice, u))}/${u.name || unitLabel(u.symbol || stockSymbol)}`)
+    .map(
+      (u) =>
+        `${money(priceFromStock(units, stockSymbol, stockPrice, u))}/${u.name || unitLabel(u.symbol || stockSymbol)}`,
+    )
     .join(" = ");
 }
 
-export function pricePerStock(units: ProductSellUnit[], stockSymbol: string, price: number, unit: ProductSellUnit) {
+export function pricePerStock(
+  units: ProductSellUnit[],
+  stockSymbol: string,
+  price: number,
+  unit: ProductSellUnit,
+) {
   const per = unitInStock(units, stockSymbol, unit);
   return per ? roundMoney(price / per) : roundMoney(price);
 }
 
-export function priceFromStock(units: ProductSellUnit[], stockSymbol: string, stockPrice: number, unit: ProductSellUnit) {
+export function priceFromStock(
+  units: ProductSellUnit[],
+  stockSymbol: string,
+  stockPrice: number,
+  unit: ProductSellUnit,
+) {
   return roundMoney(stockPrice * unitInStock(units, stockSymbol, unit));
+}
+
+/**
+ * Lot FIFO cost is stored per stock unit (Roll). If the saved number is clearly
+ * a smaller-unit price (Gaz), convert with the same ratio as qty (1 Roll = 90 Gaz).
+ */
+export function lotCostInStockUnit(product: Product, storedCost: number) {
+  if (!(storedCost > 0)) return storedCost;
+  const stockQtyOne = qtyBreakdown(product, 1).filter((row) => row.qty > 0);
+  const smaller = stockQtyOne.find((row) => row.qty > 1.01);
+  const factor = smaller?.qty ?? 0;
+  if (factor <= 1.01) return storedCost;
+  const stockSell = Math.max(product.min ?? 0, product.retail ?? 0);
+  if (stockSell <= 0) return storedCost;
+  if (storedCost >= stockSell * 0.4) return storedCost;
+  return roundMoney(storedCost * factor);
 }
 
 export function pricesFromStockPrice(
@@ -257,14 +400,48 @@ export function stockPriceFromMap(
   prices: Record<string, number>,
 ) {
   const stock = units.find((unit) => unit.symbol === stockSymbol) ?? baseUnit(units);
-  return stock ? prices[stock.id] ?? 0 : 0;
+  return stock ? (prices[stock.id] ?? 0) : 0;
 }
 
-export function applyDerivedPrices(units: ProductSellUnit[], row: ProductSellUnit): ProductSellUnit {
+export type UnitPriceKey = "cost" | "min" | "wholesale" | "price";
+
+export function proportionalPriceParentName(
+  units: ProductSellUnit[],
+  unit: ProductSellUnit,
+): string {
+  if (unit.kind === "bigger") {
+    const baseU = baseUnit(units);
+    return baseU?.name || unitLabel(baseU?.symbol ?? "") || "product unit";
+  }
+  const parent = biggerUnit(units) ?? baseUnit(units);
+  return parent?.name || unitLabel(parent?.symbol ?? "") || "product unit";
+}
+
+/** Minimum allowed price for a derived unit (same math as auto-fill). */
+export function proportionalUnitPrice(
+  units: ProductSellUnit[],
+  unit: ProductSellUnit,
+  key: UnitPriceKey,
+): number | null {
+  if (unit.kind === "base" || !unit.contains) return null;
+  const baseU = baseUnit(units);
+  if (!baseU) return null;
+  const derived =
+    unit.kind === "bigger"
+      ? deriveFromSource(baseU, unit.contains, "multiply")
+      : deriveFromSource(biggerUnit(units) ?? baseU, unit.contains, "divide");
+  return derived[key];
+}
+
+export function applyDerivedPrices(
+  units: ProductSellUnit[],
+  row: ProductSellUnit,
+): ProductSellUnit {
   if (row.kind === "base") return row;
   const base = baseUnit(units);
   if (!base) return row;
-  if (row.kind === "bigger") return withManual(row, deriveFromSource(base, row.contains, "multiply"));
+  if (row.kind === "bigger")
+    return withManual(row, deriveFromSource(base, row.contains, "multiply"));
   const pack = biggerUnit(units);
   const source = pack ?? base;
   return withManual(row, deriveFromSource(source, row.contains, "divide"));
@@ -275,7 +452,11 @@ export function deriveAll(units: ProductSellUnit[]) {
   return withBigger.map((u) => applyDerivedPrices(withBigger, u));
 }
 
-export function containsLabel(base: ProductSellUnit | undefined, pack: ProductSellUnit | undefined, row: ProductSellUnit) {
+export function containsLabel(
+  base: ProductSellUnit | undefined,
+  pack: ProductSellUnit | undefined,
+  row: ProductSellUnit,
+) {
   const extraName = row.name || unitLabel(row.symbol || "") || "unit";
   if (row.kind === "bigger") {
     const baseName = base?.name || unitLabel(base?.symbol || "") || "unit";
@@ -286,7 +467,10 @@ export function containsLabel(base: ProductSellUnit | undefined, pack: ProductSe
   return `${extraName} in 1 ${parentName}`;
 }
 
-export function qtyBreakdown(product: Product, stockQty: number): { id: string; name: string; qty: number }[] {
+export function qtyBreakdown(
+  product: Product,
+  stockQty: number,
+): { id: string; name: string; qty: number }[] {
   const units = productSellUnits(product);
   const list = qtyUnits(units);
   const rows = (list.length ? list : units).map((u) => ({
@@ -301,7 +485,10 @@ export function stockBreakdown(product: Product) {
   return qtyBreakdown(product, product.stock);
 }
 
-export function priceBreakdown(product: Product, stockPrice: number): { id: string; name: string; value: number }[] {
+export function priceBreakdown(
+  product: Product,
+  stockPrice: number,
+): { id: string; name: string; value: number }[] {
   const units = productSellUnits(product);
   const list = qtyUnits(units);
   const rows = (list.length ? list : units).map((u) => ({
@@ -309,5 +496,7 @@ export function priceBreakdown(product: Product, stockPrice: number): { id: stri
     name: u.name || unitLabel(u.symbol || product.unit),
     value: priceFromStock(units, product.unit, stockPrice, u),
   }));
-  return rows.length ? rows : [{ id: product.id, name: unitLabel(product.unit), value: roundMoney(stockPrice) }];
+  return rows.length
+    ? rows
+    : [{ id: product.id, name: unitLabel(product.unit), value: roundMoney(stockPrice) }];
 }
