@@ -18,6 +18,8 @@ pub struct UserAuthRow {
     pub email: Option<String>,
     pub role: String,
     pub default_branch_id: Option<Uuid>,
+    pub city_id: Option<Uuid>,
+    pub city_name: Option<String>,
     pub is_active: bool,
     pub last_login_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -101,9 +103,11 @@ impl AuthRepository {
         Ok(
             UserAuthRow::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT id, name, username, password_hash, phone, email, role, default_branch_id,
-                    is_active, last_login_at, created_at, updated_at
-             FROM users WHERE username = ? LIMIT 1",
+                "SELECT u.id, u.name, u.username, u.password_hash, u.phone, u.email, u.role, u.default_branch_id,
+                    u.city_id, ci.name AS city_name, u.is_active, u.last_login_at, u.created_at, u.updated_at
+             FROM users u
+             LEFT JOIN cities ci ON ci.id = u.city_id AND ci.deleted_at IS NULL
+             WHERE u.username = ? LIMIT 1",
                 [username.into()],
             ))
             .one(database)
@@ -118,9 +122,11 @@ impl AuthRepository {
         Ok(
             UserAuthRow::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT id, name, username, password_hash, phone, email, role, default_branch_id,
-                    is_active, last_login_at, created_at, updated_at
-             FROM users WHERE email IS NOT NULL AND LOWER(email) = LOWER(?) LIMIT 1",
+                "SELECT u.id, u.name, u.username, u.password_hash, u.phone, u.email, u.role, u.default_branch_id,
+                    u.city_id, ci.name AS city_name, u.is_active, u.last_login_at, u.created_at, u.updated_at
+             FROM users u
+             LEFT JOIN cities ci ON ci.id = u.city_id AND ci.deleted_at IS NULL
+             WHERE u.email IS NOT NULL AND LOWER(u.email) = LOWER(?) LIMIT 1",
                 [email.into()],
             ))
             .one(database)
@@ -434,9 +440,11 @@ impl AuthRepository {
     ) -> Result<Option<UserResponse>, AppError> {
         let row = UserAuthRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, name, username, password_hash, phone, email, role, default_branch_id,
-                    is_active, last_login_at, created_at, updated_at
-             FROM users WHERE id = ? LIMIT 1",
+            "SELECT u.id, u.name, u.username, u.password_hash, u.phone, u.email, u.role, u.default_branch_id,
+                    u.city_id, ci.name AS city_name, u.is_active, u.last_login_at, u.created_at, u.updated_at
+             FROM users u
+             LEFT JOIN cities ci ON ci.id = u.city_id AND ci.deleted_at IS NULL
+             WHERE u.id = ? LIMIT 1",
             [user_id.into()],
         ))
         .one(database)
@@ -520,6 +528,8 @@ pub fn user_response_from_auth(
         email: row.email,
         role: row.role,
         default_branch_id: row.default_branch_id.map(|value| value.to_string()),
+        city_id: row.city_id.map(|value| value.to_string()),
+        city_name: row.city_name,
         is_active: row.is_active,
         last_login_at: row.last_login_at.map(|value| value.to_rfc3339()),
         permissions,

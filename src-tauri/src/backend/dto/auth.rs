@@ -127,6 +127,8 @@ pub struct UserRequest {
     #[validate(length(min = 1, max = 32))]
     pub role: String,
     pub default_branch_id: Option<String>,
+    #[serde(default)]
+    pub city_id: Option<String>,
     #[serde(default = "default_true")]
     pub is_active: bool,
     #[serde(default)]
@@ -162,6 +164,8 @@ pub struct UserResponse {
     pub email: Option<String>,
     pub role: String,
     pub default_branch_id: Option<String>,
+    pub city_id: Option<String>,
+    pub city_name: Option<String>,
     pub is_active: bool,
     pub last_login_at: Option<String>,
     pub permissions: Vec<UserPermissionResponse>,
@@ -175,8 +179,9 @@ pub struct UserResponse {
 pub struct BranchRequest {
     #[validate(length(min = 1, max = 120))]
     pub name: String,
-    #[validate(length(min = 1, max = 32))]
-    pub code: String,
+    #[validate(length(max = 32))]
+    #[serde(default)]
+    pub code: Option<String>,
     #[serde(rename = "type")]
     #[validate(length(min = 1, max = 32))]
     pub branch_type: String,
@@ -348,4 +353,17 @@ pub struct CashSessionResponse {
 
 const fn default_true() -> bool {
     true
+}
+
+#[cfg(test)]
+mod branch_request_tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_create_payload_without_code() {
+        let json = r#"{"name":"Downtown Store","type":"STORE","isActive":true,"settings":{"fifoEnabled":true,"allowNegativeStock":false}}"#;
+        let request: BranchRequest = serde_json::from_str(json).expect("deserialize");
+        assert!(request.code.is_none());
+        request.validate().expect("validate");
+    }
 }
