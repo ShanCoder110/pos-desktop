@@ -6551,6 +6551,85 @@ html[data-theme="dark"] .entity-detail-action.is-danger:hover {
   margin-top: 4px;
 }
 
+.transfer-table-branch {
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.transfer-table-product {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  max-width: 220px;
+}
+
+.transfer-table-product-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-table-product-moved {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.transfer-table-product-moved b,
+.transfer-table-product-moved .product-detail-qty-block {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.transfer-table-qty {
+  display: grid;
+  gap: 4px;
+  min-width: 120px;
+}
+
+.transfer-table-qty-line {
+  display: grid;
+  gap: 1px;
+  justify-items: end;
+  text-align: right;
+}
+
+.transfer-table-qty-line em {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-style: normal;
+}
+
+.transfer-table-qty-line b,
+.transfer-table-qty-line .product-detail-qty-block {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.transfer-table-qty-line .product-detail-qty-sub {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.transfer-table-when {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--sub);
+  white-space: nowrap;
+}
+
 .lot-form-pane,
 .lot-form-pane.drawer-form {
   display: flex;

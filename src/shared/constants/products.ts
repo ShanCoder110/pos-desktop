@@ -266,9 +266,22 @@ export const TRANSFER_COPY = {
 export const TRANSFER_TABLE_COLUMNS = [
   { id: "from", label: "From", locked: true },
   { id: "to", label: "To" },
+  { id: "product", label: "Product" },
+  { id: "fromStock", label: "From stock" },
+  { id: "toStock", label: "To stock" },
   { id: "status", label: "Status" },
-  { id: "items", label: "Items" },
   { id: "created", label: "Created" },
   { id: "completed", label: "Completed" },
-  { id: "by", label: "By" },
+  { id: "items", label: "Lines" },
+];
+
+export const DEFAULT_TRANSFER_COLUMNS = [
+  "from",
+  "to",
+  "product",
+  "fromStock",
+  "toStock",
+  "status",
+  "created",
+  "completed",
 ];

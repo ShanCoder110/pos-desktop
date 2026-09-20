@@ -52,6 +52,20 @@ export function formatDetailDate(iso?: string) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
+/** Table cells — date and short local time (no raw ISO). */
+export function formatTableDateTime(iso?: string | null) {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const day = date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  const time = date.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit" });
+  return `${day}, ${time}`;
+}
+
 export function shortError(error: unknown, fallback: string) {
   return mapApiError(error, fallback);
 }
