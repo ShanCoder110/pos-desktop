@@ -7,6 +7,7 @@ import {
   Checkbox,
   Drawer,
   EmptyRow,
+  HubExportMenu,
   HubChart,
   PAGE_SIZE_ALL,
   Pagination,
@@ -36,6 +37,7 @@ import { getTransfer, listAllTransfers } from "@/services/transfers";
 import { listAllBranches, type BranchResponse } from "@/services/org";
 import {
   TransferFromStockCell,
+  TransferMovedCell,
   TransferProductCell,
   TransferToStockCell,
 } from "@/pages/transfers/TransferTableCells";
@@ -140,15 +142,6 @@ export function TransfersPage() {
       .catch(() => undefined);
   }
 
-  useLayoutEffect(() => {
-    setActions(
-      <Button variant="primary" icon={<Plus size={14} />} onClick={openCreate}>
-        Add transfer
-      </Button>,
-    );
-    return () => setActions(null);
-  }, [setActions]);
-
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const status = chips.find((c) => c.field === "status")?.value?.toUpperCase();
@@ -167,6 +160,31 @@ export function TransfersPage() {
       return true;
     });
   }, [transfers, q, chips, sectionKpi, dateRange, branchNames]);
+
+  useLayoutEffect(() => {
+    setActions(
+      <>
+        <HubExportMenu
+          filename="transfers"
+          sheetName="Transfers"
+          rows={rows}
+          columns={[
+            { label: "From", value: (row) => branchNames[row.fromBranchId] ?? row.fromBranchId },
+            { label: "To", value: (row) => branchNames[row.toBranchId] ?? row.toBranchId },
+            { label: "Product", value: (row) => transferProductLabel(row, products) },
+            { label: "Moved", value: (row) => transferTotalMoved(row) },
+            { label: "Status", value: (row) => statusLabel(mapStatus(row.status)) },
+            { label: "Created", value: (row) => formatTableDateTime(row.createdAt) },
+            { label: "Completed", value: (row) => formatTableDateTime(row.completedAt) },
+          ]}
+        />
+        <Button variant="primary" icon={<Plus size={14} />} onClick={openCreate}>
+          Add transfer
+        </Button>
+      </>,
+    );
+    return () => setActions(null);
+  }, [branchNames, openCreate, products, rows, setActions]);
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(rows.length / pageSize));
   const shown =
@@ -262,6 +280,7 @@ export function TransfersPage() {
             {show("from") ? <Th>From</Th> : null}
             {show("to") ? <Th>To</Th> : null}
             {show("product") ? <Th>Product</Th> : null}
+            {show("moved") ? <Th>{TRANSFER_COPY.detailMovedQty}</Th> : null}
             {show("fromStock") ? <Th>From stock</Th> : null}
             {show("toStock") ? <Th>To stock</Th> : null}
             {show("status") ? <Th>Status</Th> : null}
@@ -291,16 +310,18 @@ export function TransfersPage() {
                     : undefined;
 
                 return (
-                  <tr key={row.id}>
+                  <tr key={row.id} className="cursor-pointer" onClick={() => openTransfer(row)}>
                     <Td className="ui-check-col">
-                      <Checkbox
-                        checked={selected.includes(row.id)}
-                        onChange={(e) => {
-                          setSelected((s) =>
-                            e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
-                          );
-                        }}
-                      />
+                      <div onClick={(event) => event.stopPropagation()}>
+                        <Checkbox
+                          checked={selected.includes(row.id)}
+                          onChange={(e) => {
+                            setSelected((s) =>
+                              e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
+                            );
+                          }}
+                        />
+                      </div>
                     </Td>
                     {show("from") ? (
                       <Td>
@@ -318,11 +339,12 @@ export function TransfersPage() {
                     ) : null}
                     {show("product") ? (
                       <Td>
-                        <TransferProductCell
-                          label={transferProductLabel(row, products)}
-                          movedQty={movedQty}
-                          product={singleProduct}
-                        />
+                        <TransferProductCell label={transferProductLabel(row, products)} />
+                      </Td>
+                    ) : null}
+                    {show("moved") ? (
+                      <Td numeric>
+                        <TransferMovedCell movedQty={movedQty} product={singleProduct} />
                       </Td>
                     ) : null}
                     {show("fromStock") ? (
@@ -352,14 +374,16 @@ export function TransfersPage() {
                     ) : null}
                     {show("items") ? <Td numeric>{row.items.length}</Td> : null}
                     <Td className="ui-actions-col">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => openTransfer(row)}
-                        aria-label="View transfer details"
-                      >
-                        <Eye size={15} />
-                      </Button>
+                      <div onClick={(event) => event.stopPropagation()}>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => openTransfer(row)}
+                          aria-label="View transfer details"
+                        >
+                          <Eye size={15} />
+                        </Button>
+                      </div>
                     </Td>
                   </tr>
                 );

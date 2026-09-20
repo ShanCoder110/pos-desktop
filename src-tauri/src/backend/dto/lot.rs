@@ -48,6 +48,13 @@ pub struct ReceiveLotRequest {
     pub wholesale: Option<Decimal>,
     #[validate(custom(function = "non_negative_optional_decimal"))]
     pub retail: Option<Decimal>,
+    #[validate(custom(function = "non_negative_decimal"))]
+    #[serde(default)]
+    pub damaged_quantity: Decimal,
+    #[validate(custom(function = "non_negative_decimal"))]
+    #[serde(default)]
+    pub paid_now: Decimal,
+    pub purchase_order_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -100,6 +107,9 @@ pub struct LotResponse {
     pub received_date: String,
     pub expiry_date: Option<String>,
     pub branch_lots: Vec<BranchLotResponse>,
+    pub purchase_order_id: Option<String>,
+    pub purchase_order_number: Option<String>,
+    pub purchase_order_status: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -209,6 +219,9 @@ fn validate_receive_lot(value: &ReceiveLotRequest) -> Result<(), ValidationError
                 "branch_allocations_must_equal_quantity",
             ));
         }
+    }
+    if value.damaged_quantity > value.quantity {
+        return Err(ValidationError::new("damaged_exceeds_quantity"));
     }
     Ok(())
 }

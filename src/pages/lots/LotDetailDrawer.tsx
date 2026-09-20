@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Clock, Layers, Package, Pencil, Receipt, ShoppingCart } from "lucide-react";
-import { DetailToolbar, DetailToolbarButton, Drawer } from "@/components/common";
+import { Button, DetailToolbar, DetailToolbarButton, Drawer } from "@/components/common";
 import { LotBranchStockSection } from "@/pages/lots/LotBranchStock";
 import { DetailQtyDisplay } from "@/pages/products/DetailQtyDisplay";
 import { ensureSession } from "@/services/auth";
@@ -13,6 +13,7 @@ import {
   unitLabel,
 } from "@/pages/products/productQty";
 import { LOT_COPY, PRODUCT_COPY } from "@/shared/constants/products";
+import { REORDER_COPY } from "@/shared/constants/reorders";
 import type { ProductLotRow } from "@/shared/domain/types";
 import type { Product } from "@/shared/types";
 import { listAllBranches, type BranchResponse } from "@/services/org";
@@ -31,6 +32,7 @@ export function LotDetailDrawer({
   onClose,
   onEdit,
   onReorder,
+  onUnlink,
 }: {
   lot: ProductLotRow | null;
   product?: Product;
@@ -38,6 +40,7 @@ export function LotDetailDrawer({
   onClose: () => void;
   onEdit: (row: ProductLotRow) => void;
   onReorder: (productId: string) => void;
+  onUnlink?: (lot: ProductLotRow) => void;
 }) {
   const [branches, setBranches] = useState<BranchResponse[]>([]);
   const [sessionBranchId, setSessionBranchId] = useState("");
@@ -117,6 +120,19 @@ export function LotDetailDrawer({
             </p>
           </div>
         </header>
+        {lot.purchaseOrderNumber ? (
+          <div className="mb-3 flex items-center justify-between rounded-[10px] border border-line px-3 py-2 text-[12px]">
+            <span>
+              Linked to reorder {lot.purchaseOrderNumber}
+              {lot.purchaseOrderStatus ? ` · ${lot.purchaseOrderStatus}` : ""}
+            </span>
+            {onUnlink ? (
+              <Button size="sm" onClick={() => onUnlink(lot)}>
+                {REORDER_COPY.unlinkAction}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="product-detail-stats is-quad">
           <article className={cn("product-detail-stat", empty ? "is-danger" : "is-ok")}>

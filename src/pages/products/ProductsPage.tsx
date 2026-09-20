@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { useLotDrawer } from "@/pages/lots/useLotDrawer";
+import { QuickReorderPopover } from "@/components/reorders/QuickReorderPopover";
 import {
+  AlertTriangle,
   ChevronDown,
   FileSpreadsheet,
   FileText,
@@ -10,6 +12,7 @@ import {
   Plus,
   Printer,
   Receipt,
+  ShoppingCart,
   Tags,
   Trash2,
   X,
@@ -65,6 +68,7 @@ import {
   REORDER_PRODUCT_COLUMNS,
   type ProductInsightMetric,
 } from "@/shared/constants/products";
+import { REORDER_COPY } from "@/shared/constants/reorders";
 import { useSettings } from "@/shared/settings";
 import type { Product } from "@/shared/types";
 import type { InvoiceRow, ProductLotRow } from "@/shared/domain/types";
@@ -247,15 +251,19 @@ function PricingBreakdownTrigger({
   );
 }
 
+function isLowStock(row: Product) {
+  return row.stock <= (row.minimumStock ?? 20);
+}
+
 function stockTone(row: Product): "ok" | "warn" | "danger" {
   if (row.stock <= 0) return "danger";
-  if (row.stock < (row.minimumStock ?? 20)) return "warn";
+  if (isLowStock(row)) return "warn";
   return "ok";
 }
 
 function stockLabel(row: Product) {
   if (row.stock <= 0) return "Out of stock";
-  if (row.stock < (row.minimumStock ?? 20)) return "Low stock";
+  if (isLowStock(row)) return "Low stock";
   return "In stock";
 }
 
@@ -361,6 +369,8 @@ export function ProductsPage() {
   const [detail, setDetail] = useState<Product | null>(null);
   const [remove, setRemove] = useState<Product | null>(null);
   const [blocked, setBlocked] = useState(false);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [reorderId, setReorderId] = useState<string | null>(null);
   const debouncedGlobalQuery = useDebounce(q.trim(), 320);
 
   useEffect(() => {
@@ -586,21 +596,70 @@ export function ProductsPage() {
   }
 
   useEffect(() => {
+    function typing(target: EventTarget | null) {
+      const el = target as HTMLElement | null;
+      return Boolean(el?.closest("input, textarea, select, [contenteditable='true']"));
+    }
     function onKey(e: KeyboardEvent) {
       if (edit || detail || lotEdit || remove || blocked) return;
       if (e.key === "F2") {
         e.preventDefault();
         e.stopPropagation();
         openNew();
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        if (document.querySelector(".ui-combo-menu")) return;
+        if (typing(e.target) && !reorderId) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!shown.length) return;
+        const index = shown.findIndex((row) => row.id === focusedId);
+        const delta = e.key === "ArrowDown" ? 1 : -1;
+        let next = index < 0 ? (delta > 0 ? 0 : shown.length - 1) : index + delta;
+        if (tab === "low" || reorderId) {
+          next = ((next % shown.length) + shown.length) % shown.length;
+        } else {
+          next = Math.max(0, Math.min(shown.length - 1, next));
+        }
+        const nextId = shown[next]?.id ?? null;
+        setFocusedId(nextId);
+        if (reorderId && nextId) setReorderId(nextId);
+        return;
+      }
+      if (typing(e.target)) return;
+      if (reorderId) return;
+      if ((e.key === "r" || e.key === "R" || e.key === "Enter") && focusedId) {
+        e.preventDefault();
+        setReorderId(focusedId);
       }
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [edit, lotEdit, remove, blocked]);
+  }, [blocked, detail, edit, focusedId, lotEdit, remove, reorderId, shown, tab]);
+
+  useEffect(() => {
+    if (!shown.length) {
+      setFocusedId(null);
+      return;
+    }
+    setFocusedId((current) => {
+      if (current && shown.some((row) => row.id === current)) return current;
+      return shown[0]?.id ?? null;
+    });
+  }, [shown]);
+
+  useEffect(() => {
+    if (!focusedId) return;
+    document
+      .querySelector(`[data-product-row="${focusedId}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [focusedId]);
 
   useLayoutEffect(() => {
     setActions(
       <>
+        <span className="text-[11px] text-muted">{REORDER_COPY.shortcutHint}</span>
         <ExportMenu rows={filtered} shopName={settings.shopName} />
         <Button variant="primary" icon={<Plus size={14} />} onClick={openNew}>
           Add Product
@@ -921,8 +980,12 @@ export function ProductsPage() {
               return (
                 <tr
                   key={row.id}
-                  className={`is-${tone} cursor-pointer`}
-                  onClick={() => setDetail(row)}
+                  data-product-row={row.id}
+                  className={`is-${tone} cursor-pointer ${focusedId === row.id ? "bg-[var(--soft)]" : ""}`}
+                  onClick={() => {
+                    setFocusedId(row.id);
+                    setDetail(row);
+                  }}
                 >
                   <Td className="ui-check-col">
                     <div onClick={(event) => event.stopPropagation()}>
@@ -1054,35 +1117,67 @@ export function ProductsPage() {
                   ) : null}
                   {show("status") ? (
                     <Td>
-                      <Badge tone={tone}>{stockLabel(row)}</Badge>
+                      <span className="inline-flex items-center gap-1">
+                        {isLowStock(row) ? (
+                          <Tooltip content={REORDER_COPY.warningTitle}>
+                            <AlertTriangle
+                              size={13}
+                              className="shrink-0 text-[var(--warn)]"
+                              aria-label={REORDER_COPY.warningTitle}
+                            />
+                          </Tooltip>
+                        ) : null}
+                        <Badge tone={tone}>{stockLabel(row)}</Badge>
+                      </span>
                     </Td>
                   ) : null}
                   <Td>
-                    <div onClick={(event) => event.stopPropagation()}>
-                      {tab === "low" ? (
-                        <Button size="sm" variant="primary" onClick={() => openAddLot(row.id)}>
+                    <div
+                      className="relative flex items-center justify-end"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {reorderId === row.id ? (
+                        <QuickReorderPopover
+                          key={row.id}
+                          product={row}
+                          lots={lots}
+                          suppliers={suppliers}
+                          onClose={() => setReorderId(null)}
+                          onCreated={() => {
+                            const index = shown.findIndex((item) => item.id === row.id);
+                            setReorderId(null);
+                            void refreshHub();
+                            if (tab === "low" && index >= 0) {
+                              const next = shown[index + 1] ?? shown[index];
+                              setFocusedId(next?.id ?? null);
+                            }
+                          }}
+                        />
+                      ) : null}
+                      <Menu>
+                        <MenuItem icon={<Layers size={14} />} onClick={() => openAddLot(row.id)}>
                           Add lot
-                        </Button>
-                      ) : (
-                        <Menu>
-                          <MenuItem icon={<Layers size={14} />} onClick={() => openAddLot(row.id)}>
-                            Add lot
-                          </MenuItem>
-                          <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
-                            Edit
-                          </MenuItem>
-                          <MenuItem
-                            danger
-                            icon={<Trash2 size={14} />}
-                            onClick={() => {
-                              if (row.stock > 0 || row.claims > 0) setBlocked(true);
-                              else setRemove(row);
-                            }}
-                          >
-                            Delete
-                          </MenuItem>
-                        </Menu>
-                      )}
+                        </MenuItem>
+                        <MenuItem
+                          icon={<ShoppingCart size={14} />}
+                          onClick={() => setReorderId(row.id)}
+                        >
+                          {REORDER_COPY.createAction}
+                        </MenuItem>
+                        <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
+                          Edit
+                        </MenuItem>
+                        <MenuItem
+                          danger
+                          icon={<Trash2 size={14} />}
+                          onClick={() => {
+                            if (row.stock > 0 || row.claims > 0) setBlocked(true);
+                            else setRemove(row);
+                          }}
+                        >
+                          Delete
+                        </MenuItem>
+                      </Menu>
                     </div>
                   </Td>
                 </tr>
@@ -1110,6 +1205,11 @@ export function ProductsPage() {
         onAddLot={(productId) => {
           setDetail(null);
           openAddLot(productId);
+        }}
+        onReorder={(productId) => {
+          setDetail(null);
+          setFocusedId(productId);
+          setReorderId(productId);
         }}
       />
 

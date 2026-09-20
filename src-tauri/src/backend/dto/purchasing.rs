@@ -27,6 +27,10 @@ pub struct PurchaseOrderListQuery {
     #[serde(alias = "branch_id")]
     pub branch_id: Option<String>,
     pub status: Option<String>,
+    #[serde(alias = "product_id")]
+    pub product_id: Option<String>,
+    pub occurred_from: Option<String>,
+    pub occurred_to: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Validate)]
@@ -57,6 +61,12 @@ pub struct PurchaseOrderItemInput {
     #[validate(custom(function = "non_negative_decimal"))]
     pub unit_cost: Decimal,
     pub notes: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct UnlinkLotRequest {
+    pub lot_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Validate)]

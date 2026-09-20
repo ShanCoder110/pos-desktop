@@ -11,7 +11,7 @@ use crate::backend::{
     dto::{
         CreatePurchaseOrderRequest, Paginated, PaginationMeta, PurchaseOrderListQuery,
         PurchaseOrderResponse, ReceivePurchaseOrderRequest, SupplierLedgerEntryResponse,
-        SupplierLedgerListQuery, SupplierPaymentRequest, SupplierPaymentResponse,
+        SupplierLedgerListQuery, SupplierPaymentRequest, SupplierPaymentResponse, UnlinkLotRequest,
     },
     errors::AppError,
     repositories::{PurchasingRepository, SequenceRepository},
@@ -92,6 +92,28 @@ impl PurchasingService {
             SequenceRepository::next(&transaction, SEQUENCE_KIND_RECEIPT, DEFAULT_RECEIPT_PREFIX)
                 .await?;
         PurchasingRepository::receive(&transaction, context, id, &request, receipt_number).await?;
+        transaction.commit().await?;
+        Self::get(database, id).await
+    }
+
+    pub async fn cancel(
+        database: &DatabaseConnection,
+        id: Uuid,
+    ) -> Result<PurchaseOrderResponse, AppError> {
+        let transaction = database.begin().await?;
+        PurchasingRepository::cancel(&transaction, id).await?;
+        transaction.commit().await?;
+        Self::get(database, id).await
+    }
+
+    pub async fn unlink_lot(
+        database: &DatabaseConnection,
+        id: Uuid,
+        request: UnlinkLotRequest,
+    ) -> Result<PurchaseOrderResponse, AppError> {
+        request.validate()?;
+        let transaction = database.begin().await?;
+        PurchasingRepository::unlink_lot(&transaction, id, &request.lot_id).await?;
         transaction.commit().await?;
         Self::get(database, id).await
     }

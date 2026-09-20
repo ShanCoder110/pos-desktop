@@ -6,9 +6,11 @@ use uuid::Uuid;
 
 use crate::backend::{
     constants::{
-        DEFAULT_LOT_PREFIX, ERROR_PO_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND, ERROR_SUPPLIER_NOT_FOUND,
-        LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LEDGER_PURCHASE, LOT_SOURCE_PURCHASE,
-        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, REFERENCE_GOODS_RECEIPT, SEQUENCE_KIND_LOT,
+        DEFAULT_LOT_PREFIX, DEFAULT_RECEIPT_PREFIX, ERROR_LOT_NOT_FOUND, ERROR_PO_CANNOT_CANCEL,
+        ERROR_PO_NOT_FOUND, ERROR_PO_NOT_OPEN, ERROR_PO_PRODUCT_MISMATCH, ERROR_PO_UNLINK,
+        ERROR_PRODUCT_NOT_FOUND, ERROR_SUPPLIER_NOT_FOUND, LEDGER_PAYMENT_MADE,
+        LEDGER_PAYMENT_RECEIVED, LEDGER_PURCHASE, LOT_SOURCE_PURCHASE, PAYMENT_DIRECTION_IN,
+        PAYMENT_DIRECTION_OUT, REFERENCE_GOODS_RECEIPT, SEQUENCE_KIND_LOT, SEQUENCE_KIND_RECEIPT,
         STOCK_MOVEMENT_PURCHASE,
     },
     context::RequestContext,
@@ -108,6 +110,39 @@ struct LedgerRow {
     notes: Option<String>,
     occurred_at: chrono::DateTime<chrono::Utc>,
     created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug)]
+pub struct LotPoMatch {
+    pub purchase_order_id: Uuid,
+    pub order_number: String,
+    pub status: String,
+    pub goods_receipt_id: Uuid,
+}
+
+#[derive(Debug, FromQueryResult)]
+#[allow(dead_code)]
+struct OpenPoItemRow {
+    item_id: Uuid,
+    purchase_order_id: Uuid,
+    order_number: String,
+    status: String,
+    supplier_id: Uuid,
+    branch_id: Uuid,
+    product_id: Uuid,
+    unit_id: Uuid,
+    ordered_base_quantity: Decimal,
+    received_base_quantity: Decimal,
+}
+
+#[derive(Debug, FromQueryResult)]
+#[allow(dead_code)]
+struct LinkedLotRow {
+    id: Uuid,
+    original_base_quantity: Decimal,
+    goods_receipt_item_id: Option<Uuid>,
+    purchase_order_item_id: Option<Uuid>,
+    credited_base_quantity: Decimal,
 }
 
 pub struct PurchasingRepository;
@@ -212,7 +247,7 @@ impl PurchasingRepository {
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "INSERT INTO purchase_orders (id, branch_id, supplier_id, order_number, status, order_date, expected_date, subtotal, discount, tax, total, notes, created_by, approved_by, ordered_at, completed_at, cancelled_at, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 1, NULL, ?, ?, ?)",
+                "INSERT INTO purchase_orders (id, branch_id, supplier_id, order_number, status, order_date, expected_date, subtotal, discount, tax, total, notes, created_by, approved_by, ordered_at, completed_at, cancelled_at, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, 1, NULL, ?, ?, ?)",
                 [
                     po_id.into(),
                     context.branch_id.into(),
@@ -226,6 +261,7 @@ impl PurchasingRepository {
                     total.into(),
                     trimmed(&request.notes).into(),
                     context.user_id.into(),
+                    now.into(),
                     context.device_id.into(),
                     now.into(),
                     now.into(),
@@ -260,9 +296,9 @@ impl PurchasingRepository {
 
     pub async fn mark_ordered(transaction: &DatabaseTransaction, id: Uuid) -> Result<(), AppError> {
         let header = load_header(transaction, id).await?;
-        if header.status != "DRAFT" {
+        if header.status != "PENDING" && header.status != "DRAFT" {
             return Err(AppError::Conflict(format!(
-                "Purchase order must be DRAFT to order (current: {}).",
+                "Purchase order must be PENDING to order (current: {}).",
                 header.status
             )));
         }
@@ -270,7 +306,7 @@ impl PurchasingRepository {
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "UPDATE purchase_orders SET status = 'ORDERED', ordered_at = ?, version = version + 1, updated_at = ? WHERE id = ?",
+                "UPDATE purchase_orders SET status = 'PENDING', ordered_at = COALESCE(ordered_at, ?), version = version + 1, updated_at = ? WHERE id = ?",
                 [now.into(), now.into(), id.into()],
             ))
             .await?;
@@ -285,9 +321,9 @@ impl PurchasingRepository {
         receipt_number: String,
     ) -> Result<Uuid, AppError> {
         let header = load_header(transaction, po_id).await?;
-        if !matches!(header.status.as_str(), "ORDERED" | "PARTIAL") {
+        if !matches!(header.status.as_str(), "PENDING" | "PARTIALLY_RECEIVED") {
             return Err(AppError::Conflict(format!(
-                "Purchase order must be ORDERED or PARTIAL to receive (current: {}).",
+                "Purchase order must be PENDING or PARTIALLY_RECEIVED to receive (current: {}).",
                 header.status
             )));
         }
@@ -553,9 +589,9 @@ impl PurchasingRepository {
         .unwrap_or(0);
         let (status, completed_at): (&str, Option<chrono::DateTime<chrono::Utc>>) =
             if remaining == 0 {
-                ("COMPLETED", Some(now))
+                ("RECEIVED", Some(now))
             } else {
-                ("PARTIAL", None)
+                ("PARTIALLY_RECEIVED", None)
             };
         transaction
             .execute_raw(Statement::from_sql_and_values(
@@ -566,6 +602,231 @@ impl PurchasingRepository {
             .await?;
 
         Ok(receipt_id)
+    }
+
+    pub async fn cancel(transaction: &DatabaseTransaction, id: Uuid) -> Result<(), AppError> {
+        let header = load_header(transaction, id).await?;
+        let received = CountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM purchase_order_items WHERE purchase_order_id = ? AND received_base_quantity > 0",
+            [id.into()],
+        ))
+        .one(transaction)
+        .await?
+        .map(|row| row.count)
+        .unwrap_or(0);
+        if header.status != "PENDING" || received > 0 {
+            return Err(AppError::Conflict(ERROR_PO_CANNOT_CANCEL.into()));
+        }
+        let now = now_utc();
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE purchase_orders SET status = 'CANCELLED', cancelled_at = ?, version = version + 1, updated_at = ? WHERE id = ?",
+                [now.into(), now.into(), id.into()],
+            ))
+            .await?;
+        Ok(())
+    }
+
+    pub async fn apply_lot_to_open_po(
+        transaction: &DatabaseTransaction,
+        context: &RequestContext,
+        lot_id: Uuid,
+        product_id: Uuid,
+        supplier_id: Uuid,
+        original_qty: Decimal,
+        cost: Decimal,
+        received_date: chrono::NaiveDate,
+        pinned_po_id: Option<Uuid>,
+    ) -> Result<Option<LotPoMatch>, AppError> {
+        let item =
+            match find_open_po_item(transaction, product_id, supplier_id, pinned_po_id).await? {
+                Some(item) => item,
+                None => {
+                    if pinned_po_id.is_some() {
+                        return Err(AppError::Conflict(ERROR_PO_NOT_OPEN.into()));
+                    }
+                    return Ok(None);
+                }
+            };
+        if item.supplier_id != supplier_id || item.product_id != product_id {
+            return Err(AppError::Validation(ERROR_PO_PRODUCT_MISMATCH.into()));
+        }
+        let remaining = quantity(item.ordered_base_quantity - item.received_base_quantity);
+        if remaining <= Decimal::ZERO && pinned_po_id.is_some() {
+            return Err(AppError::Conflict(ERROR_PO_NOT_OPEN.into()));
+        }
+        if remaining <= Decimal::ZERO {
+            return Ok(None);
+        }
+        let applied = if original_qty < remaining {
+            original_qty
+        } else {
+            remaining
+        };
+        let now = now_utc();
+        let receipt_id = Uuid::new_v4();
+        let gri_id = Uuid::new_v4();
+        let receipt_number =
+            SequenceRepository::next(transaction, SEQUENCE_KIND_RECEIPT, DEFAULT_RECEIPT_PREFIX)
+                .await?;
+        let line_total = money_value(cost * original_qty);
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "INSERT INTO goods_receipts (id, purchase_order_id, supplier_id, branch_id, receipt_number, supplier_invoice_number, received_date, status, subtotal, discount, tax, total, notes, received_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, 'COMPLETED', ?, 0, 0, ?, ?, ?, ?, ?)",
+                [
+                    receipt_id.into(),
+                    item.purchase_order_id.into(),
+                    supplier_id.into(),
+                    item.branch_id.into(),
+                    receipt_number.into(),
+                    received_date.into(),
+                    line_total.into(),
+                    line_total.into(),
+                    format!("Lot receive {lot_id}").into(),
+                    context.user_id.into(),
+                    now.into(),
+                    now.into(),
+                ],
+            ))
+            .await?;
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "INSERT INTO goods_receipt_items (id, goods_receipt_id, purchase_order_item_id, product_id, unit_id, quantity, base_quantity, purchase_price_per_base, minimum_price, wholesale_price, retail_price, expiry_date, lot_id, line_total, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, ?, ?)",
+                [
+                    gri_id.into(),
+                    receipt_id.into(),
+                    item.item_id.into(),
+                    product_id.into(),
+                    item.unit_id.into(),
+                    original_qty.into(),
+                    applied.into(),
+                    cost.into(),
+                    lot_id.into(),
+                    line_total.into(),
+                    now.into(),
+                ],
+            ))
+            .await?;
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE product_lots SET goods_receipt_item_id = ?, updated_at = ? WHERE id = ?",
+                [gri_id.into(), now.into(), lot_id.into()],
+            ))
+            .await?;
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE purchase_order_items SET received_base_quantity = received_base_quantity + ?, updated_at = ? WHERE id = ?",
+                [applied.into(), now.into(), item.item_id.into()],
+            ))
+            .await?;
+        let leftover = CountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM purchase_order_items WHERE purchase_order_id = ? AND received_base_quantity < ordered_base_quantity",
+            [item.purchase_order_id.into()],
+        ))
+        .one(transaction)
+        .await?
+        .map(|row| row.count)
+        .unwrap_or(0);
+        let (status, completed_at): (&str, Option<chrono::DateTime<chrono::Utc>>) = if leftover == 0
+        {
+            ("RECEIVED", Some(now))
+        } else {
+            ("PARTIALLY_RECEIVED", None)
+        };
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE purchase_orders SET status = ?, completed_at = COALESCE(?, completed_at), version = version + 1, updated_at = ? WHERE id = ?",
+                [
+                    status.into(),
+                    completed_at.into(),
+                    now.into(),
+                    item.purchase_order_id.into(),
+                ],
+            ))
+            .await?;
+        Ok(Some(LotPoMatch {
+            purchase_order_id: item.purchase_order_id,
+            order_number: item.order_number,
+            status: status.to_owned(),
+            goods_receipt_id: receipt_id,
+        }))
+    }
+
+    pub async fn unlink_lot(
+        transaction: &DatabaseTransaction,
+        po_id: Uuid,
+        lot_id_raw: &str,
+    ) -> Result<(), AppError> {
+        let _ = load_header(transaction, po_id).await?;
+        let lot_id = parse_uuid(lot_id_raw, "lotId")?;
+        let link = LinkedLotRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT pl.id, pl.original_base_quantity, pl.goods_receipt_item_id, gri.purchase_order_item_id, COALESCE(gri.base_quantity, 0) AS credited_base_quantity FROM product_lots pl LEFT JOIN goods_receipt_items gri ON gri.id = pl.goods_receipt_item_id WHERE pl.id = ? AND pl.deleted_at IS NULL LIMIT 1",
+            [lot_id.into()],
+        ))
+        .one(transaction)
+        .await?
+        .ok_or(AppError::NotFound(ERROR_LOT_NOT_FOUND))?;
+        let po_item_id = link
+            .purchase_order_item_id
+            .ok_or(AppError::Conflict(ERROR_PO_UNLINK.into()))?;
+        let item_po = CountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM purchase_order_items WHERE id = ? AND purchase_order_id = ?",
+            [po_item_id.into(), po_id.into()],
+        ))
+        .one(transaction)
+        .await?
+        .map(|row| row.count)
+        .unwrap_or(0);
+        if item_po == 0 {
+            return Err(AppError::Conflict(ERROR_PO_UNLINK.into()));
+        }
+        let now = now_utc();
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE purchase_order_items SET received_base_quantity = MAX(0, received_base_quantity - ?), updated_at = ? WHERE id = ?",
+                [link.credited_base_quantity.into(), now.into(), po_item_id.into()],
+            ))
+            .await?;
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE product_lots SET goods_receipt_item_id = NULL, updated_at = ? WHERE id = ?",
+                [now.into(), lot_id.into()],
+            ))
+            .await?;
+        let leftover = CountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM purchase_order_items WHERE purchase_order_id = ? AND received_base_quantity > 0",
+            [po_id.into()],
+        ))
+        .one(transaction)
+        .await?
+        .map(|row| row.count)
+        .unwrap_or(0);
+        let status = if leftover == 0 {
+            "PENDING"
+        } else {
+            "PARTIALLY_RECEIVED"
+        };
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE purchase_orders SET status = ?, completed_at = NULL, version = version + 1, updated_at = ? WHERE id = ?",
+                [status.into(), now.into(), po_id.into()],
+            ))
+            .await?;
+        Ok(())
     }
 
     pub async fn supplier_ledger(
@@ -859,6 +1120,31 @@ fn po_conditions(
         parts.push("po.status = ?".to_owned());
         values.push(status.trim().to_uppercase().into());
     }
+    if let Some(product_id) = &query.product_id {
+        parts.push(
+            "EXISTS (SELECT 1 FROM purchase_order_items poi WHERE poi.purchase_order_id = po.id AND poi.product_id = ?)"
+                .to_owned(),
+        );
+        values.push(parse_uuid(product_id, "productId")?.into());
+    }
+    if let Some(from) = query
+        .occurred_from
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        parts.push("date(po.order_date) >= date(?)".to_owned());
+        values.push(from.into());
+    }
+    if let Some(to) = query
+        .occurred_to
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        parts.push("date(po.order_date) <= date(?)".to_owned());
+        values.push(to.into());
+    }
     if let Some(search) = &query.page.search {
         parts.push("lower(po.order_number) LIKE ?".to_owned());
         values.push(format!("%{}%", search.to_lowercase()).into());
@@ -912,6 +1198,33 @@ async fn hydrate_po(
     })
 }
 
+async fn find_open_po_item(
+    database: &impl ConnectionTrait,
+    product_id: Uuid,
+    supplier_id: Uuid,
+    pinned_po_id: Option<Uuid>,
+) -> Result<Option<OpenPoItemRow>, AppError> {
+    let sql = if pinned_po_id.is_some() {
+        "SELECT poi.id AS item_id, po.id AS purchase_order_id, po.order_number, po.status, po.supplier_id, po.branch_id, poi.product_id, poi.unit_id, poi.ordered_base_quantity, poi.received_base_quantity FROM purchase_order_items poi JOIN purchase_orders po ON po.id = poi.purchase_order_id WHERE po.id = ? AND poi.product_id = ? AND po.supplier_id = ? AND po.status IN ('PENDING','PARTIALLY_RECEIVED') AND po.deleted_at IS NULL ORDER BY poi.created_at ASC LIMIT 1"
+    } else {
+        "SELECT poi.id AS item_id, po.id AS purchase_order_id, po.order_number, po.status, po.supplier_id, po.branch_id, poi.product_id, poi.unit_id, poi.ordered_base_quantity, poi.received_base_quantity FROM purchase_order_items poi JOIN purchase_orders po ON po.id = poi.purchase_order_id WHERE poi.product_id = ? AND po.supplier_id = ? AND po.status IN ('PENDING','PARTIALLY_RECEIVED') AND po.deleted_at IS NULL ORDER BY po.order_date ASC, po.created_at ASC, poi.created_at ASC LIMIT 1"
+    };
+    let values: Vec<sea_orm::Value> = if let Some(po_id) = pinned_po_id {
+        vec![po_id.into(), product_id.into(), supplier_id.into()]
+    } else {
+        vec![product_id.into(), supplier_id.into()]
+    };
+    Ok(
+        OpenPoItemRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            sql,
+            values,
+        ))
+        .one(database)
+        .await?,
+    )
+}
+
 async fn load_header(database: &impl ConnectionTrait, id: Uuid) -> Result<PoHeader, AppError> {
     PoHeader::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
@@ -928,10 +1241,35 @@ async fn load_unit(
     product_id: Uuid,
     unit_id: Uuid,
 ) -> Result<UnitRow, AppError> {
+    const UNIT_SELECT: &str =
+        "SELECT display_name, conversion_to_base, minimum_price, wholesale_price, retail_price FROM product_units WHERE product_id = ? AND deleted_at IS NULL";
+
+    if let Some(row) = UnitRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        &format!("{UNIT_SELECT} AND id = ? LIMIT 1"),
+        [product_id.into(), unit_id.into()],
+    ))
+    .one(database)
+    .await?
+    {
+        return Ok(row);
+    }
+
+    if let Some(row) = UnitRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        &format!("{UNIT_SELECT} AND unit_id = ? LIMIT 1"),
+        [product_id.into(), unit_id.into()],
+    ))
+    .one(database)
+    .await?
+    {
+        return Ok(row);
+    }
+
     UnitRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        "SELECT display_name, conversion_to_base, minimum_price, wholesale_price, retail_price FROM product_units WHERE id = ? AND product_id = ? AND deleted_at IS NULL LIMIT 1",
-        [unit_id.into(), product_id.into()],
+        &format!("{UNIT_SELECT} AND is_base = 1 LIMIT 1"),
+        [product_id.into()],
     ))
     .one(database)
     .await?

@@ -10,11 +10,24 @@ function stockLabel(row: Product) {
 }
 
 function cells(row: Product) {
-  return [row.name, row.sku, row.category, row.cost, row.retail, row.stock, row.unit, stockLabel(row)] as const;
+  return [
+    row.name,
+    row.sku,
+    row.category,
+    row.cost,
+    row.retail,
+    row.stock,
+    row.unit,
+    stockLabel(row),
+  ] as const;
 }
 
 function stamp() {
-  return new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  return new Date().toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function download(filename: string, blob: Blob) {
@@ -44,6 +57,59 @@ function html(value: string | number) {
   return xml(value).replace(/'/g, "&#39;");
 }
 
+export type TableExportColumn<T> = {
+  label: string;
+  value: (row: T) => string | number;
+};
+
+function tableRowValues<T>(row: T, columns: TableExportColumn<T>[]) {
+  return columns.map((column) => column.value(row));
+}
+
+export function exportTableCsv<T>(
+  columns: TableExportColumn<T>[],
+  rows: T[],
+  filename = "export.csv",
+) {
+  const header = columns.map((column) => column.label).join(",");
+  const body = rows.map((row) => tableRowValues(row, columns).map(csvCell).join(",")).join("\n");
+  download(filename, new Blob([`\uFEFF${header}\n${body}`], { type: "text/csv;charset=utf-8" }));
+}
+
+export function exportTableExcel<T>(
+  columns: TableExportColumn<T>[],
+  rows: T[],
+  sheetName: string,
+  filename = "export.xls",
+) {
+  const header = columns
+    .map((column) => `<Cell><Data ss:Type="String">${xml(column.label)}</Data></Cell>`)
+    .join("");
+  const body = rows
+    .map((row) => {
+      const values = tableRowValues(row, columns);
+      const tds = values
+        .map((value) => {
+          const type = typeof value === "number" ? "Number" : "String";
+          return `<Cell><Data ss:Type="${type}">${xml(value)}</Data></Cell>`;
+        })
+        .join("");
+      return `<Row>${tds}</Row>`;
+    })
+    .join("");
+  const sheet = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  <Worksheet ss:Name="${xml(sheetName)}">
+    <Table>
+      <Row>${header}</Row>
+      ${body}
+    </Table>
+  </Worksheet>
+</Workbook>`;
+  download(filename, new Blob([sheet], { type: "application/vnd.ms-excel" }));
+}
+
 export function exportProductsCsv(rows: Product[], filename = "products.csv") {
   const header = COLS.join(",");
   const body = rows.map((row) => cells(row).map(csvCell).join(",")).join("\n");
@@ -51,7 +117,9 @@ export function exportProductsCsv(rows: Product[], filename = "products.csv") {
 }
 
 export function exportProductsExcel(rows: Product[], filename = "products.xls") {
-  const header = COLS.map((col) => `<Cell><Data ss:Type="String">${xml(col)}</Data></Cell>`).join("");
+  const header = COLS.map((col) => `<Cell><Data ss:Type="String">${xml(col)}</Data></Cell>`).join(
+    "",
+  );
   const body = rows
     .map((row) => {
       const values = cells(row);
@@ -159,14 +227,24 @@ export type ShopReportPdf = {
   shopName: string;
   rangeLabel: string;
   kpis: { label: string; value: string }[];
-  invoices: { number: string; when: string; status: string; total: string; paid: string; credit: string }[];
+  invoices: {
+    number: string;
+    when: string;
+    status: string;
+    total: string;
+    paid: string;
+    credit: string;
+  }[];
   products: { name: string; qty: string; revenue: string }[];
   expenses: { when: string; description: string; amount: string }[];
 };
 
 export function exportReportPdf(report: ShopReportPdf) {
   const kpi = report.kpis
-    .map((item) => `<div class="kpi"><span>${html(item.label)}</span><strong>${html(item.value)}</strong></div>`)
+    .map(
+      (item) =>
+        `<div class="kpi"><span>${html(item.label)}</span><strong>${html(item.value)}</strong></div>`,
+    )
     .join("");
   const invoices = report.invoices.length
     ? report.invoices
@@ -178,12 +256,18 @@ export function exportReportPdf(report: ShopReportPdf) {
     : `<tr><td colspan="5">No invoices in this range.</td></tr>`;
   const products = report.products.length
     ? report.products
-        .map((row) => `<tr><td>${html(row.name)}</td><td class="num">${html(row.qty)}</td><td class="num">${html(row.revenue)}</td></tr>`)
+        .map(
+          (row) =>
+            `<tr><td>${html(row.name)}</td><td class="num">${html(row.qty)}</td><td class="num">${html(row.revenue)}</td></tr>`,
+        )
         .join("")
     : `<tr><td colspan="3">No product sales in this range.</td></tr>`;
   const expenses = report.expenses.length
     ? report.expenses
-        .map((row) => `<tr><td>${html(row.when)}</td><td>${html(row.description)}</td><td class="num">${html(row.amount)}</td></tr>`)
+        .map(
+          (row) =>
+            `<tr><td>${html(row.when)}</td><td>${html(row.description)}</td><td class="num">${html(row.amount)}</td></tr>`,
+        )
         .join("")
     : `<tr><td colspan="3">No expenses in this range.</td></tr>`;
 

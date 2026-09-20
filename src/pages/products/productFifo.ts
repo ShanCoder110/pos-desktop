@@ -1,6 +1,10 @@
 import type { ProductLotRow } from "@/shared/domain/types";
 import type { Product } from "@/shared/types";
-import { lotCostInStockUnit } from "@/pages/products/productQty";
+import {
+  lotCostInStockUnit,
+  productSellUnits,
+  resolveStockUnitCost,
+} from "@/pages/products/productQty";
 
 export function fifoLots(lots: ProductLotRow[]) {
   return lots
@@ -22,7 +26,8 @@ export function fifoLotForProduct(lots: ProductLotRow[], productId: string) {
 /** FIFO cost per stock unit — open lot first, otherwise catalog cost. */
 export function fifoCostForProduct(product: Product, lots: ProductLotRow[]) {
   const lot = fifoLotForProduct(lots, product.id);
-  return lot ? lotCostInStockUnit(product, lot.purchasePrice) : product.cost;
+  const raw = lot ? lotCostInStockUnit(product, lot.purchasePrice) : product.cost;
+  return resolveStockUnitCost(productSellUnits(product), product.unit, raw);
 }
 
 /** Remaining stock value at FIFO lot purchase cost (matches Lots → Value left). */

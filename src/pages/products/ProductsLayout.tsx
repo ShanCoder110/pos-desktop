@@ -20,6 +20,7 @@ import {
   Package,
   Ruler,
   ShieldCheck,
+  ShoppingCart,
   Tags,
   Trash2,
   Wallet,
@@ -43,12 +44,14 @@ import { PRODUCT_COPY } from "@/shared/constants/products";
 import { ensureSession } from "@/services/auth";
 import { listAllProducts } from "@/services/products";
 import { listAllLots } from "@/services/lots";
+import { listAllPurchaseOrders } from "@/services/purchasing";
 import { listAllTransfers } from "@/services/transfers";
 import { listMasterRecords } from "@/services/masters";
 import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { Outlet } from "react-router-dom";
 
-export type HubSection = "catalog" | "lots" | "units" | "categories" | "transfers" | "low";
+export type HubSection =
+  "catalog" | "lots" | "units" | "categories" | "transfers" | "reorders" | "low";
 
 export function matchesHealth(row: Product, kpi: ProductHealth) {
   if (kpi === "healthy") return row.stock >= (row.minimumStock ?? 20);
@@ -63,6 +66,7 @@ export function hubSection(tab: string): HubSection {
     tab === "units" ||
     tab === "categories" ||
     tab === "transfers" ||
+    tab === "reorders" ||
     tab === "low"
   )
     return tab;
@@ -82,8 +86,15 @@ type HubCtx = {
   setProducts: Dispatch<SetStateAction<Product[]>>;
   categories: { id: string; name: string }[];
   units: { id: string; name: string; symbol: string }[];
-  suppliers: { id: string; name: string; isActive: boolean }[];
+  suppliers: {
+    id: string;
+    name: string;
+    isActive: boolean;
+    cityId?: string | null;
+    cityName?: string | null;
+  }[];
   transfers: { id: string; status: string; items: unknown[] }[];
+  purchaseOrders: { id: string; status: string; total: number }[];
   loading: { hub: boolean; products: boolean; lots: boolean };
   refreshHub: (signal?: AbortSignal) => Promise<void>;
   refreshLots: (signal?: AbortSignal) => Promise<void>;
@@ -105,6 +116,7 @@ const ProductsHubContext = createContext<HubCtx>({
   units: [],
   suppliers: [],
   transfers: [],
+  purchaseOrders: [],
   loading: { hub: true, products: false, lots: false },
   refreshHub: async () => undefined,
   refreshLots: async () => undefined,
@@ -414,6 +426,71 @@ function CategoriesKpis() {
   );
 }
 
+function ReordersKpis() {
+  const { sectionKpi, setSectionKpi, purchaseOrders } = useProductsHub();
+  const pending = purchaseOrders.filter((row) => row.status === "PENDING").length;
+  const partial = purchaseOrders.filter((row) => row.status === "PARTIALLY_RECEIVED").length;
+  const received = purchaseOrders.filter((row) => row.status === "RECEIVED").length;
+  const cancelled = purchaseOrders.filter((row) => row.status === "CANCELLED").length;
+  const openValue = purchaseOrders
+    .filter((row) => row.status === "PENDING" || row.status === "PARTIALLY_RECEIVED")
+    .reduce((sum, row) => sum + row.total, 0);
+
+  function toggle(id: string) {
+    setSectionKpi(sectionKpi === id ? null : id);
+  }
+
+  return (
+    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
+      <KpiCard
+        label="Pending"
+        value={pending}
+        hint="Awaiting receive"
+        tone="warn"
+        icon={<Clock size={16} />}
+        active={sectionKpi === "PENDING"}
+        onClick={() => toggle("PENDING")}
+      />
+      <KpiCard
+        label="Partial"
+        value={partial}
+        hint="Part received"
+        tone="info"
+        icon={<Package size={16} />}
+        active={sectionKpi === "PARTIALLY_RECEIVED"}
+        onClick={() => toggle("PARTIALLY_RECEIVED")}
+      />
+      <KpiCard
+        label="Received"
+        value={received}
+        hint="Fully received"
+        tone="ok"
+        icon={<CheckCircle2 size={16} />}
+        active={sectionKpi === "RECEIVED"}
+        onClick={() => toggle("RECEIVED")}
+      />
+      <KpiCard
+        label="Cancelled"
+        value={cancelled}
+        hint="No longer active"
+        tone="danger"
+        icon={<XCircle size={16} />}
+        active={sectionKpi === "CANCELLED"}
+        onClick={() => toggle("CANCELLED")}
+      />
+      <KpiCard
+        label="Open value"
+        value={money(openValue)}
+        hint="Pending + partial"
+        tone="phantom"
+        icon={<ShoppingCart size={16} />}
+        active={sectionKpi === null}
+        onClick={() => setSectionKpi(null)}
+      />
+    </div>
+  );
+}
+
 function LowStockKpis() {
   const { sectionKpi, setSectionKpi, products } = useProductsHub();
   const below = products.filter((r) => r.stock > 0 && r.stock < (r.minimumStock ?? 20)).length;
@@ -490,6 +567,7 @@ function ProductHubKpis() {
   if (section === "units") return <UnitsKpis />;
   if (section === "categories") return <CategoriesKpis />;
   if (section === "transfers") return <TransfersKpis />;
+  if (section === "reorders") return <ReordersKpis />;
   if (section === "low") return <LowStockKpis />;
   return <CatalogKpis />;
 }
@@ -508,6 +586,9 @@ export function ProductsLayout() {
   const [transfers, setTransfers] = useState<{ id: string; status: string; items: unknown[] }[]>(
     [],
   );
+  const [purchaseOrders, setPurchaseOrders] = useState<
+    { id: string; status: string; total: number }[]
+  >([]);
   const [loading, setLoading] = useState({ hub: true, products: false, lots: false });
 
   const refreshProducts = useCallback(async (signal?: AbortSignal) => {
@@ -541,7 +622,7 @@ export function ProductsLayout() {
       try {
         await ensureSession();
         if (guard && !guard.isActive()) return;
-        const [productRows, lotRows, categoryRows, unitRows, supplierRows, transferRows] =
+        const [productRows, lotRows, categoryRows, unitRows, supplierRows, transferRows, poRows] =
           await Promise.all([
             listAllProducts(signal),
             listAllLots(signal),
@@ -554,9 +635,16 @@ export function ProductsLayout() {
               (r) => r.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" })),
             ),
             listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, signal).then((r) =>
-              r.data.map(({ id, name, isActive }) => ({ id, name, isActive })),
+              r.data.map(({ id, name, isActive, cityId, cityName }) => ({
+                id,
+                name,
+                isActive,
+                cityId,
+                cityName,
+              })),
             ),
             listAllTransfers(signal),
+            listAllPurchaseOrders({}, signal),
           ]);
         if (guard && !guard.isActive()) return;
         setProducts(productRows);
@@ -565,6 +653,9 @@ export function ProductsLayout() {
         setUnits(unitRows);
         setSuppliers(supplierRows);
         setTransfers(transferRows.map((t) => ({ id: t.id, status: t.status, items: t.items })));
+        setPurchaseOrders(
+          poRows.map((row) => ({ id: row.id, status: row.status, total: row.total })),
+        );
       } catch (error) {
         if (isAbortError(error)) return;
         if (guard && !guard.isActive()) return;
@@ -594,6 +685,7 @@ export function ProductsLayout() {
       units,
       suppliers,
       transfers,
+      purchaseOrders,
       loading,
       refreshHub: (signal?: AbortSignal) => refreshHub(signal).then(() => undefined),
       refreshLots: (signal?: AbortSignal) => refreshLots(signal).then(() => undefined),
@@ -609,6 +701,7 @@ export function ProductsLayout() {
       units,
       suppliers,
       transfers,
+      purchaseOrders,
       loading,
       refreshHub,
       refreshLots,

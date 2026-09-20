@@ -4,6 +4,7 @@ import { ProductsPage } from "@/pages/products/ProductsPage";
 import { LotsPage } from "@/pages/lots/LotsPage";
 import { UnitsPage } from "@/pages/units/UnitsPage";
 import { TransfersPage } from "@/pages/transfers/TransfersPage";
+import { ReordersPage } from "@/pages/reorders/ReordersPage";
 
 export function ProductHubBody() {
   const { section } = useProductsHub();
@@ -11,5 +12,6 @@ export function ProductHubBody() {
   if (section === "units") return <UnitsPage />;
   if (section === "categories") return <CategoriesPage />;
   if (section === "transfers") return <TransfersPage />;
+  if (section === "reorders") return <ReordersPage />;
   return <ProductsPage />;
 }

@@ -8,6 +8,7 @@ import {
   ConfirmDialog,
   Drawer,
   EmptyRow,
+  HubExportMenu,
   HubChart,
   Field,
   Menu,
@@ -101,19 +102,6 @@ export function UnitsPage() {
     return () => controller.abort();
   }, []);
 
-  useLayoutEffect(() => {
-    setActions(
-      <Button
-        variant="primary"
-        icon={<Plus size={14} />}
-        onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}
-      >
-        Add unit
-      </Button>,
-    );
-    return () => setActions(null);
-  }, [setActions]);
-
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const nameChip = chips.find((c) => c.field === "name")?.value.toLowerCase();
@@ -126,6 +114,30 @@ export function UnitsPage() {
       return true;
     });
   }, [rows, q, chips, sectionKpi]);
+
+  useLayoutEffect(() => {
+    setActions(
+      <>
+        <HubExportMenu
+          filename="units"
+          sheetName="Units"
+          rows={filtered}
+          columns={[
+            { label: "Name", value: (row) => row.name },
+            { label: "Symbol", value: (row) => row.symbol },
+          ]}
+        />
+        <Button
+          variant="primary"
+          icon={<Plus size={14} />}
+          onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}
+        >
+          Add unit
+        </Button>
+      </>,
+    );
+    return () => setActions(null);
+  }, [filtered, setActions]);
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
   const shown =

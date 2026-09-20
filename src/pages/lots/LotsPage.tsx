@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { Pencil, Plus, TrendingUp, Trash2, X } from "lucide-react";
+import { Pencil, Plus, ShoppingCart, TrendingUp, Trash2, X } from "lucide-react";
+import { QuickReorderPopover } from "@/components/reorders/QuickReorderPopover";
+import { REORDER_COPY } from "@/shared/constants/reorders";
 import {
   BulkAction,
   BulkActions,
@@ -7,6 +9,7 @@ import {
   Checkbox,
   ConfirmDialog,
   EmptyRow,
+  HubExportMenu,
   HubChart,
   Menu,
   MenuItem,
@@ -28,12 +31,18 @@ import { LotDetailDrawer } from "@/pages/lots/LotDetailDrawer";
 import { useLotDrawer } from "@/pages/lots/useLotDrawer";
 import { syncProductStock } from "@/pages/products/productLots";
 import { DetailQtyDisplay } from "@/pages/products/DetailQtyDisplay";
-import { ProductCostDisplay } from "@/pages/products/ProductCostDisplay";
+import { CostBreakdownTooltip } from "@/pages/products/ProductPricingTooltip";
+import {
+  hubCityOptions,
+  hubSupplierOptions,
+  supplierCityName,
+  supplierLabel as hubSupplierLabel,
+} from "@/pages/products/hubSupplierFilters";
 import { lotCostInStockUnit } from "@/pages/products/productQty";
 import type { Product } from "@/shared/types";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
-import { LOT_COPY, LOT_TABLE_COLUMNS } from "@/shared/constants/products";
+import { LOT_COPY, LOT_FILTER_FIELDS, LOT_TABLE_COLUMNS } from "@/shared/constants/products";
 import type { ProductLotRow } from "@/shared/domain/types";
 import { money } from "@/utils/format";
 
@@ -67,6 +76,16 @@ function signedMoney(value: number) {
   return `${value > 0 ? "+" : "−"}${money(Math.abs(value))}`;
 }
 
+function minAmount(raw: string) {
+  const value = Number(String(raw).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function lotValueLeft(product: Product | undefined, lot: ProductLotRow) {
+  const unitCost = product ? lotCostInStockUnit(product, lot.purchasePrice) : lot.purchasePrice;
+  return lot.remainingQuantity * unitCost;
+}
+
 export function LotsPage() {
   const {
     setActions,
@@ -77,8 +96,9 @@ export function LotsPage() {
     setProducts,
     refreshLots,
     loading: hubLoading,
+    suppliers,
   } = useProductsHub();
-  const { edit, nested, supplierRows, openCreate, openEdit, lotDrawer } = useLotDrawer();
+  const { edit, nested, supplierRows, openCreate, openEdit, unlinkLot, lotDrawer } = useLotDrawer();
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
@@ -89,6 +109,7 @@ export function LotsPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [detail, setDetail] = useState<ProductLotRow | null>(null);
   const [remove, setRemove] = useState<ProductLotRow | null>(null);
+  const [reorderLotId, setReorderLotId] = useState<string | null>(null);
   const [chartProductId, setChartProductId] = useState("");
   const [chartLotId, setChartLotId] = useState("");
 
@@ -109,7 +130,11 @@ export function LotsPage() {
   }
 
   function supplierLabel(id: string) {
-    return supplierRows.find((supplier) => supplier.id === id)?.name ?? id;
+    return hubSupplierLabel(id, suppliers, supplierRows);
+  }
+
+  function cityLabel(id: string) {
+    return supplierCityName(id, suppliers, supplierRows);
   }
 
   function writeLots(nextLots: ProductLotRow[], productIds: string[]) {
@@ -136,16 +161,6 @@ export function LotsPage() {
     setPage(1);
   }, [sectionKpi]);
 
-  useLayoutEffect(() => {
-    setActions(
-      <Button variant="primary" icon={<Plus size={14} />} onClick={() => openCreate()}>
-        Add lot
-        <kbd className="ui-kbd">F2</kbd>
-      </Button>,
-    );
-    return () => setActions(null);
-  }, [openCreate, setActions]);
-
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (edit || detail || remove || nested || event.key !== "F2") return;
@@ -157,33 +172,97 @@ export function LotsPage() {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [detail, edit, nested, openCreate, remove]);
 
+  const supplierOptions = useMemo(
+    () => hubSupplierOptions(suppliers, supplierRows),
+    [suppliers, supplierRows],
+  );
+  const cityOptions = useMemo(
+    () => hubCityOptions(suppliers, supplierRows),
+    [suppliers, supplierRows],
+  );
   const productFilterOptions = useMemo(
     () => [...products].map((product) => product.name).sort((a, b) => a.localeCompare(b)),
     [products],
+  );
+  const filterFields = useMemo(
+    () =>
+      LOT_FILTER_FIELDS.map((field) => {
+        if (field.id === "product") return { ...field, options: productFilterOptions };
+        if (field.id === "supplier") return { ...field, options: supplierOptions };
+        if (field.id === "city") return { ...field, options: cityOptions };
+        return field;
+      }),
+    [cityOptions, productFilterOptions, supplierOptions],
   );
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const status = chips.find((c) => c.field === "status")?.value;
     const productFilter = chips.find((c) => c.field === "product")?.value;
+    const supplierFilter = chips.find((c) => c.field === "supplier")?.value;
+    const cityFilter = chips.find((c) => c.field === "city")?.value;
+    const minValueLeft = chips.find((c) => c.field === "valueLeft")?.value;
     const productId = productFilter
       ? products.find((product) => product.name === productFilter)?.id
       : undefined;
     return rows.filter((r) => {
       if (!dateInRange(r.receivedAt, dateRange)) return false;
       if (productId && r.productId !== productId) return false;
+      if (supplierFilter && supplierLabel(r.supplierId) !== supplierFilter) return false;
+      if (cityFilter && cityLabel(r.supplierId) !== cityFilter) return false;
       if (needle) {
         const text =
-          `${r.lotNumber} ${productLabel(r.productId)} ${supplierLabel(r.supplierId)}`.toLowerCase();
+          `${r.lotNumber} ${productLabel(r.productId)} ${supplierLabel(r.supplierId)} ${cityLabel(r.supplierId)}`.toLowerCase();
         if (!text.includes(needle)) return false;
       }
       if (sectionKpi === "open") return r.remainingQuantity > 0;
       if (sectionKpi === "empty") return r.remainingQuantity <= 0;
       if (status === "Remaining") return r.remainingQuantity > 0;
       if (status === "Empty") return r.remainingQuantity <= 0;
+      if (minValueLeft) {
+        const value = lotValueLeft(productOf(r.productId), r);
+        if (value < minAmount(minValueLeft)) return false;
+      }
       return true;
     });
-  }, [rows, q, chips, sectionKpi, products, supplierRows, dateRange]);
+  }, [rows, q, chips, sectionKpi, products, suppliers, supplierRows, dateRange]);
+
+  const filteredValueTotal = useMemo(
+    () => filtered.reduce((sum, lot) => sum + lotValueLeft(productOf(lot.productId), lot), 0),
+    [filtered, products],
+  );
+
+  useLayoutEffect(() => {
+    setActions(
+      <>
+        <HubExportMenu
+          filename="lots"
+          sheetName="Lots"
+          rows={filtered}
+          columns={[
+            { label: "Lot", value: (row) => row.lotNumber },
+            { label: "Product", value: (row) => productLabel(row.productId) },
+            { label: "Supplier", value: (row) => supplierLabel(row.supplierId) },
+            { label: "City", value: (row) => cityLabel(row.supplierId) || "—" },
+            { label: "Cost", value: (row) => row.purchasePrice },
+            {
+              label: LOT_COPY.valueLeftColumn,
+              value: (row) => lotValueLeft(productOf(row.productId), row),
+            },
+            { label: "Original", value: (row) => row.originalQuantity },
+            { label: "Remaining", value: (row) => row.remainingQuantity },
+            { label: "Damaged", value: (row) => row.damagedQuantity },
+            { label: "Received", value: (row) => row.receivedAt },
+          ]}
+        />
+        <Button variant="primary" icon={<Plus size={14} />} onClick={() => openCreate()}>
+          Add lot
+          <kbd className="ui-kbd">F2</kbd>
+        </Button>
+      </>,
+    );
+    return () => setActions(null);
+  }, [filtered, openCreate, setActions]);
 
   const chartHistory = useMemo(() => {
     const lots = filtered
@@ -251,25 +330,13 @@ export function LotsPage() {
               setChips([]);
               setPage(1);
             }}
-            filterFields={[
-              {
-                id: "product",
-                label: LOT_COPY.filterProduct,
-                options: productFilterOptions,
-                searchable: true,
-              },
-              {
-                id: "status",
-                label: LOT_COPY.filterStatus,
-                options: ["Remaining", "Empty"],
-              },
-            ]}
+            filterFields={filterFields}
             search={q}
             onSearch={(v) => {
               setQ(v);
               setPage(1);
             }}
-            searchPlaceholder="Search lots"
+            searchPlaceholder="Search lot, product, supplier, city"
             view={view}
             onView={setView}
             dateRange={dateRange}
@@ -430,17 +497,27 @@ export function LotsPage() {
           ) : undefined
         }
         footer={
-          <Pagination
-            page={Math.min(page, pages)}
-            pages={pages}
-            total={filtered.length}
-            pageSize={pageSize}
-            onPageSize={(n) => {
-              setPageSize(n);
-              setPage(1);
-            }}
-            onChange={setPage}
-          />
+          <div className="flex min-w-0 flex-col">
+            <div className="flex flex-wrap items-center justify-end gap-3 border-t border-line px-3 py-2 text-[12px] text-muted">
+              <span>
+                {LOT_COPY.filteredValueTotal}:{" "}
+                <strong className="font-semibold text-ink tabular-nums">
+                  {money(filteredValueTotal)}
+                </strong>
+              </span>
+            </div>
+            <Pagination
+              page={Math.min(page, pages)}
+              pages={pages}
+              total={filtered.length}
+              pageSize={pageSize}
+              onPageSize={(n) => {
+                setPageSize(n);
+                setPage(1);
+              }}
+              onChange={setPage}
+            />
+          </div>
         }
       >
         <THead>
@@ -458,7 +535,9 @@ export function LotsPage() {
             <Th>Lot</Th>
             {show("product") ? <Th>Product</Th> : null}
             {show("supplier") ? <Th>Supplier</Th> : null}
+            {show("city") ? <Th>{LOT_COPY.filterCity}</Th> : null}
             {show("cost") ? <Th>Cost</Th> : null}
+            {show("value") ? <Th>{LOT_COPY.valueLeftColumn}</Th> : null}
             {show("original") ? <Th>Original</Th> : null}
             {show("left") ? <Th>Left</Th> : null}
             {show("damaged") ? <Th>Damaged</Th> : null}
@@ -490,19 +569,19 @@ export function LotsPage() {
                   <Td>{row.lotNumber}</Td>
                   {show("product") ? <Td>{productLabel(row.productId)}</Td> : null}
                   {show("supplier") ? <Td>{supplierLabel(row.supplierId)}</Td> : null}
+                  {show("city") ? <Td>{cityLabel(row.supplierId) || "—"}</Td> : null}
                   {show("cost") ? (
                     <Td numeric>
                       {(() => {
                         const product = productOf(row.productId);
                         if (!product) return money(row.purchasePrice);
-                        return (
-                          <ProductCostDisplay
-                            product={product}
-                            stockCost={lotCostInStockUnit(product, row.purchasePrice)}
-                          />
-                        );
+                        const stockCost = lotCostInStockUnit(product, row.purchasePrice);
+                        return <CostBreakdownTooltip product={product} stockCost={stockCost} />;
                       })()}
                     </Td>
+                  ) : null}
+                  {show("value") ? (
+                    <Td numeric>{money(lotValueLeft(productOf(row.productId), row))}</Td>
                   ) : null}
                   {show("original") ? (
                     <Td numeric>
@@ -524,8 +603,26 @@ export function LotsPage() {
                     </Td>
                   ) : null}
                   <Td>
-                    <div onClick={(event) => event.stopPropagation()}>
+                    <div
+                      className="relative flex items-center justify-end"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {reorderLotId === row.id && productOf(row.productId) ? (
+                        <QuickReorderPopover
+                          product={productOf(row.productId)!}
+                          lots={rows}
+                          suppliers={suppliers.length ? suppliers : supplierRows}
+                          onClose={() => setReorderLotId(null)}
+                          onCreated={() => setReorderLotId(null)}
+                        />
+                      ) : null}
                       <Menu>
+                        <MenuItem
+                          icon={<ShoppingCart size={14} />}
+                          onClick={() => setReorderLotId(row.id)}
+                        >
+                          {REORDER_COPY.createAction}
+                        </MenuItem>
                         <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
                           Edit
                         </MenuItem>
@@ -552,7 +649,25 @@ export function LotsPage() {
           setDetail(null);
           openEdit(row);
         }}
-        onReorder={(productId) => openCreate(productId)}
+        onReorder={(productId) => {
+          setDetail(null);
+          const lot = rows.find((row) => row.productId === productId);
+          setReorderLotId(lot?.id ?? null);
+        }}
+        onUnlink={(lot) => {
+          void unlinkLot(lot).then(() =>
+            setDetail((current) =>
+              current?.id === lot.id
+                ? {
+                    ...current,
+                    purchaseOrderId: null,
+                    purchaseOrderNumber: null,
+                    purchaseOrderStatus: null,
+                  }
+                : current,
+            ),
+          );
+        }}
       />
 
       <ConfirmDialog

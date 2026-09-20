@@ -163,6 +163,10 @@ export interface ProductLotRow {
   createdBy: string;
   createdAt?: string;
   updatedAt?: string;
+  purchaseOrderId?: string | null;
+  purchaseOrderNumber?: string | null;
+  purchaseOrderStatus?: string | null;
+  paidNow?: number;
 }
 
 export interface BranchLotRow {

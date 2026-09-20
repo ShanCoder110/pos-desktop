@@ -57,6 +57,8 @@ export const API_ROUTES = {
   purchaseOrderById: (id: string) => `/purchase-orders/${encodeURIComponent(id)}`,
   purchaseOrderOrder: (id: string) => `/purchase-orders/${encodeURIComponent(id)}/order`,
   purchaseOrderReceive: (id: string) => `/purchase-orders/${encodeURIComponent(id)}/receive`,
+  purchaseOrderCancel: (id: string) => `/purchase-orders/${encodeURIComponent(id)}/cancel`,
+  purchaseOrderUnlinkLot: (id: string) => `/purchase-orders/${encodeURIComponent(id)}/unlink-lot`,
   salesComplete: "/sales/complete",
   salesHolds: "/sales/holds",
   salesHoldById: (id: string) => `/sales/holds/${encodeURIComponent(id)}`,

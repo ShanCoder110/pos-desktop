@@ -1,0 +1,1 @@
+-- Irreversible metadata repair; down is a no-op.
