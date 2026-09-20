@@ -348,6 +348,36 @@ export function priceFromStock(
 }
 
 /**
+ * Pick the stock-unit cost from priced sell units. When the user types cost in
+ * Gaz (56) but Roll still shows 5000, prefer the smaller-unit entry so 1 Roll
+ * saves as 5040 — not 5000 with Gaz derived as 55.56.
+ */
+export function resolveStockUnitCost(
+  units: ProductSellUnit[],
+  stockSymbol: string,
+  fallback = 0,
+): number {
+  const ordered = qtyUnits(units);
+  const stock = units.find((unit) => unit.symbol === stockSymbol) ?? baseUnit(units);
+  if (!stock) return fallback;
+
+  const manual = ordered.filter((unit) => unit.priceManual?.cost && unit.cost > 0);
+  if (manual.length) {
+    const source = manual.find((unit) => unit.symbol !== stockSymbol) ?? manual[manual.length - 1];
+    return pricePerStock(units, stockSymbol, source.cost, source);
+  }
+
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    const unit = ordered[index];
+    if (unit.symbol === stockSymbol || unit.cost <= 0) continue;
+    const implied = pricePerStock(units, stockSymbol, unit.cost, unit);
+    if (Math.abs(implied - stock.cost) > 0.015) return implied;
+  }
+
+  return stock.cost > 0 ? stock.cost : fallback;
+}
+
+/**
  * Lot FIFO cost is stored per stock unit (Roll). If the saved number is clearly
  * a smaller-unit price (Gaz), convert with the same ratio as qty (1 Roll = 90 Gaz).
  */
@@ -491,10 +521,11 @@ export function priceBreakdown(
 ): { id: string; name: string; value: number }[] {
   const units = productSellUnits(product);
   const list = qtyUnits(units);
+  const resolvedStock = resolveStockUnitCost(units, product.unit, stockPrice);
   const rows = (list.length ? list : units).map((u) => ({
     id: u.id,
     name: u.name || unitLabel(u.symbol || product.unit),
-    value: priceFromStock(units, product.unit, stockPrice, u),
+    value: priceFromStock(units, product.unit, resolvedStock, u),
   }));
   return rows.length
     ? rows

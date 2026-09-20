@@ -50,6 +50,8 @@ impl LotService {
         if let Some(retail) = request.retail.as_mut() {
             *retail = money_value(*retail);
         }
+        request.damaged_quantity = quantity(request.damaged_quantity);
+        request.paid_now = money_value(request.paid_now);
         request.validate()?;
         let allocations = if !request.branch_allocations.is_empty() {
             request
@@ -72,14 +74,9 @@ impl LotService {
         let transaction = database.begin().await?;
         let lot_number =
             SequenceRepository::next(&transaction, SEQUENCE_KIND_LOT, DEFAULT_LOT_PREFIX).await?;
-        let lot_id = LotRepository::receive(
-            &transaction,
-            &request,
-            allocations,
-            context.user_id,
-            lot_number,
-        )
-        .await?;
+        let lot_id =
+            LotRepository::receive(&transaction, context, &request, allocations, lot_number)
+                .await?;
         transaction.commit().await?;
         Self::get(database, lot_id).await
     }

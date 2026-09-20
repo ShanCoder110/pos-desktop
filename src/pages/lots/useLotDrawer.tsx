@@ -26,6 +26,8 @@ import type { ProductLotRow, SupplierRow } from "@/shared/domain/types";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { ensureSession } from "@/services/auth";
 import { receiveLot, receivePayloadFromLot } from "@/services/lots";
+import { linkedPoToast, REORDER_COPY } from "@/shared/constants/reorders";
+import { unlinkPurchaseOrderLot } from "@/services/purchasing";
 import { createMasterRecord, listMasterRecords } from "@/services/masters";
 import { updateLot } from "@/services/lots";
 import { createProduct, updateProduct } from "@/services/products";
@@ -147,8 +149,27 @@ export function useLotDrawer() {
     };
   }
 
-  function openCreate(productId?: string) {
-    setEdit(productId ? newLotForProduct(productId) : newLot(lots));
+  function openCreate(
+    productId?: string,
+    prefill?: {
+      productId?: string;
+      supplierId?: string;
+      quantity?: number;
+      cost?: number;
+      purchaseOrderId?: string;
+    },
+  ) {
+    const targetId = prefill?.productId ?? productId;
+    const base = targetId ? newLotForProduct(targetId) : newLot(lots);
+    setEdit({
+      ...base,
+      supplierId: prefill?.supplierId ?? base.supplierId,
+      originalQuantity: prefill?.quantity ?? base.originalQuantity,
+      remainingQuantity: prefill?.quantity ?? base.remainingQuantity,
+      purchasePrice: prefill?.cost ?? base.purchasePrice,
+      purchaseOrderId: prefill?.purchaseOrderId,
+      paidNow: 0,
+    });
   }
 
   function openEdit(lot: ProductLotRow) {
@@ -335,13 +356,18 @@ export function useLotDrawer() {
             );
           }
         }
-        await receiveLot(receivePayloadFromLot({ ...lot, supplierId }));
+        const created = await receiveLot(receivePayloadFromLot({ ...lot, supplierId }));
         if (sellUnits?.length) {
           await persistSellUnits(lot.productId, sellUnits);
         }
         await Promise.all([refreshLots(), refreshProducts()]);
-        toaster.success("Lot added");
+        toaster.success(
+          created.purchaseOrderNumber
+            ? linkedPoToast(created.purchaseOrderNumber, created.purchaseOrderStatus)
+            : "Lot added",
+        );
         closeLotDrawer();
+        void refreshHub();
       } catch (error) {
         toaster.error(error instanceof Error ? error.message : "Could not receive lot");
       } finally {
@@ -500,6 +526,17 @@ export function useLotDrawer() {
     </>
   );
 
+  async function unlinkLot(lot: ProductLotRow) {
+    if (!lot.purchaseOrderId) return;
+    try {
+      await unlinkPurchaseOrderLot(lot.purchaseOrderId, lot.id);
+      await refreshLots();
+      toaster.success(REORDER_COPY.unlinked);
+    } catch (error) {
+      toaster.error(shortError(error, REORDER_COPY.unlinkFailed));
+    }
+  }
+
   return {
     edit,
     nested,
@@ -507,6 +544,7 @@ export function useLotDrawer() {
     openCreate,
     openEdit,
     closeLotDrawer,
+    unlinkLot,
     lotDrawer,
   };
 }

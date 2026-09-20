@@ -30,6 +30,7 @@ export { FormSection } from "@/components/common/FormSection";
 export { FilterChips, FilterPicker } from "@/components/common/FilterPicker";
 export { KpiCard } from "@/components/common/KpiCard";
 export { EmptyState } from "@/components/common/EmptyState";
+export { HubExportMenu } from "@/components/common/HubExportMenu";
 export { HubChart, HubChartGrid } from "@/components/common/HubChart";
 export type { HubChartPoint } from "@/components/common/HubChart";
 export { Menu, MenuItem } from "@/components/common/Menu";

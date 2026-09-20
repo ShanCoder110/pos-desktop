@@ -28,6 +28,9 @@ export interface LotResponse {
   }[];
   createdAt: string;
   updatedAt: string;
+  purchaseOrderId?: string | null;
+  purchaseOrderNumber?: string | null;
+  purchaseOrderStatus?: string | null;
 }
 
 export interface LotBranchAllocationPayload {
@@ -48,6 +51,9 @@ export interface ReceiveLotPayload {
   min?: number;
   wholesale?: number;
   retail?: number;
+  damagedQuantity?: number;
+  paidNow?: number;
+  purchaseOrderId?: string;
 }
 
 export interface LotListParams {
@@ -92,6 +98,9 @@ export function mapLotResponse(lot: LotResponse): ProductLotRow {
     })),
     createdAt: lot.createdAt,
     updatedAt: lot.updatedAt,
+    purchaseOrderId: lot.purchaseOrderId,
+    purchaseOrderNumber: lot.purchaseOrderNumber,
+    purchaseOrderStatus: lot.purchaseOrderStatus,
   };
 }
 
@@ -147,6 +156,9 @@ export function receivePayloadFromLot(lot: ProductLotRow): ReceiveLotPayload {
     min: lot.minimumPrice,
     wholesale: lot.wholesalePrice,
     retail: lot.retailPrice,
+    damagedQuantity: lot.damagedQuantity,
+    paidNow: lot.paidNow ?? 0,
+    purchaseOrderId: lot.purchaseOrderId || undefined,
   };
 
   if (allocations.length > 1) {

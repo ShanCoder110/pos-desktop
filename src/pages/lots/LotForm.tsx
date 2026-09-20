@@ -23,6 +23,7 @@ import {
   lotCostInStockUnit,
   priceFromStock,
   pricePerStock,
+  resolveStockUnitCost,
   productSellUnits,
   roundStockQty,
   unitLabel,
@@ -99,8 +100,9 @@ type UnitPriceKey = "cost" | "min" | "wholesale" | "price";
 function lotPricesFromUnits(units: ProductSellUnit[], stockSymbol: string) {
   const stock = units.find((unit) => unit.symbol === stockSymbol) ?? baseUnit(units);
   if (!stock) return {};
+  const purchasePrice = resolveStockUnitCost(units, stockSymbol, stock.cost);
   return {
-    purchasePrice: stock.cost,
+    purchasePrice,
     minimumPrice: stock.min,
     wholesalePrice: stock.wholesale,
     retailPrice: stock.price,
@@ -369,11 +371,18 @@ export function LotForm({
     const source = units.find((unit) => unit.id === unitId);
     if (!source) return;
     const stockPrice = pricePerStock(units, stockSymbol, value, source);
-    const next = units.map((unit) => ({
+    let next = units.map((unit) => ({
       ...unit,
       [key]: priceFromStock(units, stockSymbol, stockPrice, unit),
       priceManual: unit.id === unitId ? { ...unit.priceManual, [key]: true } : unit.priceManual,
     }));
+    if (key === "cost") {
+      const resolved = resolveStockUnitCost(next, stockSymbol, stockPrice);
+      next = next.map((unit) => ({
+        ...unit,
+        cost: priceFromStock(units, stockSymbol, resolved, unit),
+      }));
+    }
     setPricedUnits(next);
     patch(lotPricesFromUnits(next, stockSymbol));
   }
@@ -782,6 +791,38 @@ export function LotForm({
       </div>
 
       <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-line bg-paper px-4 py-2.5">
+        {isNew && lot.supplierId ? (
+          <div className="mr-auto grid grid-cols-3 gap-2 text-[12px]">
+            <Field label="Total">
+              <MoneyInput
+                value={String(Math.round(lot.originalQuantity * lot.purchasePrice * 100) / 100)}
+                disabled
+              />
+            </Field>
+            <Field label="Paid now">
+              <MoneyInput
+                value={lot.paidNow ? String(lot.paidNow) : ""}
+                onChange={(event) => {
+                  const total = lot.originalQuantity * lot.purchasePrice;
+                  const paid = Math.max(0, Number(event.target.value) || 0);
+                  patch({ paidNow: Math.min(total, paid) });
+                }}
+              />
+            </Field>
+            <Field label="Remainder">
+              <MoneyInput
+                value={String(
+                  Math.max(0, lot.originalQuantity * lot.purchasePrice - (lot.paidNow ?? 0)),
+                )}
+                onChange={(event) => {
+                  const total = lot.originalQuantity * lot.purchasePrice;
+                  const remainder = Math.max(0, Number(event.target.value) || 0);
+                  patch({ paidNow: Math.max(0, total - remainder) });
+                }}
+              />
+            </Field>
+          </div>
+        ) : null}
         <Button onClick={onClose}>Cancel</Button>
         <Button
           className="lot-save"

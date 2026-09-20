@@ -8,6 +8,7 @@ import {
   ConfirmDialog,
   Drawer,
   EmptyRow,
+  HubExportMenu,
   HubChart,
   Field,
   Menu,
@@ -98,15 +99,6 @@ export function CategoriesPage() {
     setPage(1);
   }, [sectionKpi]);
 
-  useLayoutEffect(() => {
-    setActions(
-      <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEdit({ ...blank })}>
-        Add category
-      </Button>,
-    );
-    return () => setActions(null);
-  }, [setActions]);
-
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const nameChip = chips.find((c) => c.field === "name")?.value.toLowerCase();
@@ -119,6 +111,26 @@ export function CategoriesPage() {
       return true;
     });
   }, [rows, q, chips, sectionKpi, products]);
+
+  useLayoutEffect(() => {
+    setActions(
+      <>
+        <HubExportMenu
+          filename="categories"
+          sheetName="Categories"
+          rows={filtered}
+          columns={[
+            { label: "Name", value: (row) => row.name },
+            { label: "Products", value: (row) => categoryProductCount(row, products) },
+          ]}
+        />
+        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEdit({ ...blank })}>
+          Add category
+        </Button>
+      </>,
+    );
+    return () => setActions(null);
+  }, [filtered, products, setActions]);
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
   const shown =

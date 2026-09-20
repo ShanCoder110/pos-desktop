@@ -107,7 +107,7 @@ export default function App() {
                 />
                 <Route
                   path={routes.reorder}
-                  element={<Navigate to={productsHref("lots")} replace />}
+                  element={<Navigate to={productsHref("reorders")} replace />}
                 />
                 <Route path={routes.suppliers} element={<SuppliersPage />} />
                 <Route path={routes.trash} element={<TrashPage />} />

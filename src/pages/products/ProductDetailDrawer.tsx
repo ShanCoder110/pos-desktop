@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { Clock, Factory, Layers, Package, Pencil, Receipt, Store, Tags } from "lucide-react";
+import {
+  Clock,
+  Factory,
+  Layers,
+  Package,
+  Pencil,
+  Receipt,
+  ShoppingCart,
+  Store,
+  Tags,
+} from "lucide-react";
 import { DetailToolbar, DetailToolbarButton, Drawer } from "@/components/common";
 import { DetailQtyDisplay } from "@/pages/products/DetailQtyDisplay";
 import { ProductUnitPricingList } from "@/pages/products/ProductUnitPricingCard";
@@ -13,6 +23,7 @@ import {
   unitLabel,
 } from "@/pages/products/productQty";
 import { PRODUCT_COPY } from "@/shared/constants/products";
+import { REORDER_COPY } from "@/shared/constants/reorders";
 import type { ProductLotRow } from "@/shared/domain/types";
 import type { Product } from "@/shared/types";
 import { ensureSession } from "@/services/auth";
@@ -136,6 +147,7 @@ export function ProductDetailDrawer({
   onClose,
   onEdit,
   onAddLot,
+  onReorder,
 }: {
   product: Product | null;
   lots: ProductLotRow[];
@@ -147,6 +159,7 @@ export function ProductDetailDrawer({
   onClose: () => void;
   onEdit: (row: Product) => void;
   onAddLot: (productId: string) => void;
+  onReorder: (productId: string) => void;
 }) {
   const [hereBranchId, setHereBranchId] = useState("");
 
@@ -192,7 +205,7 @@ export function ProductDetailDrawer({
       onClose={onClose}
     >
       <div className="product-detail">
-        <DetailToolbar>
+        <DetailToolbar className="is-triple">
           <DetailToolbarButton
             variant="edit"
             icon={<Pencil size={15} />}
@@ -205,6 +218,16 @@ export function ProductDetailDrawer({
           </DetailToolbarButton>
           <DetailToolbarButton
             variant="accent"
+            icon={<ShoppingCart size={15} />}
+            onClick={() => {
+              onClose();
+              onReorder(product.id);
+            }}
+          >
+            {REORDER_COPY.createAction}
+          </DetailToolbarButton>
+          <DetailToolbarButton
+            variant="edit"
             icon={<Layers size={15} />}
             onClick={() => {
               onClose();

@@ -11,6 +11,8 @@ mod m20260918_000008_staff_partner_users;
 mod m20260919_000009_auth_refresh_setup;
 mod m20260920_000010_soft_delete_filter_indexes;
 mod m20260921_000011_cities;
+mod m20260921_000012_purchase_order_statuses;
+mod m20260921_000013_purchase_order_fk_repair;
 
 pub struct Migrator;
 
@@ -29,6 +31,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260919_000009_auth_refresh_setup::Migration),
             Box::new(m20260920_000010_soft_delete_filter_indexes::Migration),
             Box::new(m20260921_000011_cities::Migration),
+            Box::new(m20260921_000012_purchase_order_statuses::Migration),
+            Box::new(m20260921_000013_purchase_order_fk_repair::Migration),
         ]
     }
 }

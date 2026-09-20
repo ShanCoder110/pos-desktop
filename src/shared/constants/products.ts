@@ -9,7 +9,8 @@ export const PRODUCT_SECTION_TABS = [
   { id: "units", label: "Units" },
   { id: "categories", label: "Categories" },
   { id: "transfers", label: "Transfers" },
-  { id: "low", label: "Reorder" },
+  { id: "reorders", label: "Reorders" },
+  { id: "low", label: "Low stock" },
 ] as const;
 
 export type ProductSectionTab = (typeof PRODUCT_SECTION_TABS)[number]["id"];
@@ -91,6 +92,7 @@ export const CATEGORY_COPY = {
 } as const;
 
 export const PRODUCT_COPY = {
+  exportAction: "Export",
   pricingHint: "Hover for cost, minimum, and wholesale",
   unitProfit: "Unit profit",
   salesProfit: "Sales profit",
@@ -195,13 +197,47 @@ export const LOT_COPY = {
   branchOverAllocated: "Branch quantities cannot exceed lot quantity",
   filterProduct: "Product",
   filterStatus: "Status",
+  filterSupplier: "Supplier",
+  filterCity: "City",
+  valueLeftColumn: "Value left",
+  filteredValueTotal: "Total value left",
 } as const;
+
+export const LOT_FILTER_FIELDS: {
+  id: string;
+  label: string;
+  options?: string[];
+  searchable?: boolean;
+  placeholder?: string;
+  numeric?: boolean;
+}[] = [
+  {
+    id: "product",
+    label: LOT_COPY.filterProduct,
+    searchable: true,
+  },
+  {
+    id: "status",
+    label: LOT_COPY.filterStatus,
+    options: ["Remaining", "Empty"],
+  },
+  { id: "supplier", label: LOT_COPY.filterSupplier, searchable: true },
+  { id: "city", label: LOT_COPY.filterCity, searchable: true },
+  {
+    id: "valueLeft",
+    label: LOT_COPY.valueLeftColumn,
+    placeholder: "Minimum value left",
+    numeric: true,
+  },
+];
 
 export const LOT_TABLE_COLUMNS = [
   { id: "lot", label: "Lot", locked: true },
   { id: "product", label: "Product" },
   { id: "supplier", label: "Supplier" },
+  { id: "city", label: "City" },
   { id: "cost", label: "Cost" },
+  { id: "value", label: "Value left" },
   { id: "original", label: "Original" },
   { id: "left", label: "Left" },
   { id: "damaged", label: "Damaged" },
@@ -267,6 +303,7 @@ export const TRANSFER_TABLE_COLUMNS = [
   { id: "from", label: "From", locked: true },
   { id: "to", label: "To" },
   { id: "product", label: "Product" },
+  { id: "moved", label: "Moved" },
   { id: "fromStock", label: "From stock" },
   { id: "toStock", label: "To stock" },
   { id: "status", label: "Status" },
@@ -279,6 +316,7 @@ export const DEFAULT_TRANSFER_COLUMNS = [
   "from",
   "to",
   "product",
+  "moved",
   "fromStock",
   "toStock",
   "status",

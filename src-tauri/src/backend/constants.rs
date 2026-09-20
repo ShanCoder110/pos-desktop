@@ -57,6 +57,8 @@ pub const PURCHASE_ORDERS_ROUTE: &str = "/purchase-orders";
 pub const PURCHASE_ORDER_BY_ID_ROUTE: &str = "/purchase-orders/{id}";
 pub const PURCHASE_ORDER_ORDER_ROUTE: &str = "/purchase-orders/{id}/order";
 pub const PURCHASE_ORDER_RECEIVE_ROUTE: &str = "/purchase-orders/{id}/receive";
+pub const PURCHASE_ORDER_CANCEL_ROUTE: &str = "/purchase-orders/{id}/cancel";
+pub const PURCHASE_ORDER_UNLINK_LOT_ROUTE: &str = "/purchase-orders/{id}/unlink-lot";
 
 pub const SALES_COMPLETE_ROUTE: &str = "/sales/complete";
 pub const SALES_HOLDS_ROUTE: &str = "/sales/holds";
@@ -194,6 +196,11 @@ pub const ERROR_DEVICE_NOT_FOUND: &str = "Device not found.";
 pub const ERROR_SESSION_NOT_FOUND: &str = "Cash session not found.";
 pub const ERROR_HOLD_NOT_FOUND: &str = "Held sale not found.";
 pub const ERROR_PO_NOT_FOUND: &str = "Purchase order not found.";
+pub const ERROR_PO_CANNOT_CANCEL: &str =
+    "Only a pending reorder with nothing received can be cancelled.";
+pub const ERROR_PO_NOT_OPEN: &str = "This reorder is not open for receiving.";
+pub const ERROR_PO_PRODUCT_MISMATCH: &str = "This reorder does not match the product and supplier.";
+pub const ERROR_PO_UNLINK: &str = "This lot is not linked to that reorder.";
 pub const ERROR_TRANSFER_NOT_FOUND: &str = "Transfer not found.";
 pub const ERROR_RETURN_NOT_FOUND: &str = "Return not found.";
 pub const ERROR_CLAIM_NOT_FOUND: &str = "Claim not found.";

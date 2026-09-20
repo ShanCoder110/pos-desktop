@@ -15,10 +15,10 @@ use crate::backend::{
     context::RequestContext,
     dto::{
         BranchAllocationInput, BranchLotResponse, CreateTransferRequest, LotListQuery, LotResponse,
-        ReceiveLotRequest, TransferItemInput, UpdateLotRequest,
+        ReceiveLotRequest, SupplierPaymentRequest, TransferItemInput, UpdateLotRequest,
     },
     errors::AppError,
-    repositories::{SequenceRepository, TransferRepository},
+    repositories::{PurchasingRepository, SequenceRepository, TransferRepository},
     util::{money_value, now_utc, parse_date, parse_optional_uuid, parse_uuid, quantity, trimmed},
 };
 
@@ -36,6 +36,9 @@ struct LotRow {
     purchase_price_per_base: Decimal,
     received_date: chrono::NaiveDate,
     expiry_date: Option<chrono::NaiveDate>,
+    purchase_order_id: Option<Uuid>,
+    purchase_order_number: Option<String>,
+    purchase_order_status: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -106,7 +109,7 @@ impl LotRepository {
         };
         let direction = query.page.sort_direction.unwrap_or_default().sql();
         let sql = format!(
-            "SELECT pl.id, pl.product_id, p.name AS product_name, pl.supplier_id, pl.lot_number, pl.source_type, pl.original_base_quantity, pl.remaining_base_quantity, pl.damaged_base_quantity, CAST(pl.purchase_price_per_base AS REAL) AS purchase_price_per_base, pl.received_date, pl.expiry_date, pl.created_at, pl.updated_at FROM product_lots pl JOIN products p ON p.id = pl.product_id WHERE {conditions} ORDER BY {sort} {direction}, pl.id ASC LIMIT ? OFFSET ?"
+            "SELECT pl.id, pl.product_id, p.name AS product_name, pl.supplier_id, pl.lot_number, pl.source_type, pl.original_base_quantity, pl.remaining_base_quantity, pl.damaged_base_quantity, CAST(pl.purchase_price_per_base AS REAL) AS purchase_price_per_base, pl.received_date, pl.expiry_date, po.id AS purchase_order_id, po.order_number AS purchase_order_number, po.status AS purchase_order_status, pl.created_at, pl.updated_at FROM product_lots pl JOIN products p ON p.id = pl.product_id LEFT JOIN goods_receipt_items gri ON gri.id = pl.goods_receipt_item_id LEFT JOIN purchase_order_items poi ON poi.id = gri.purchase_order_item_id LEFT JOIN purchase_orders po ON po.id = poi.purchase_order_id WHERE {conditions} ORDER BY {sort} {direction}, pl.id ASC LIMIT ? OFFSET ?"
         );
         let mut page_values = values;
         page_values.push((query.page.per_page as i64).into());
@@ -128,7 +131,7 @@ impl LotRepository {
         let query = LotListQuery::default();
         let (conditions, values) = build_conditions(&query, Some(id))?;
         let sql = format!(
-            "SELECT pl.id, pl.product_id, p.name AS product_name, pl.supplier_id, pl.lot_number, pl.source_type, pl.original_base_quantity, pl.remaining_base_quantity, pl.damaged_base_quantity, CAST(pl.purchase_price_per_base AS REAL) AS purchase_price_per_base, pl.received_date, pl.expiry_date, pl.created_at, pl.updated_at FROM product_lots pl JOIN products p ON p.id = pl.product_id WHERE {conditions} LIMIT 1"
+            "SELECT pl.id, pl.product_id, p.name AS product_name, pl.supplier_id, pl.lot_number, pl.source_type, pl.original_base_quantity, pl.remaining_base_quantity, pl.damaged_base_quantity, CAST(pl.purchase_price_per_base AS REAL) AS purchase_price_per_base, pl.received_date, pl.expiry_date, po.id AS purchase_order_id, po.order_number AS purchase_order_number, po.status AS purchase_order_status, pl.created_at, pl.updated_at FROM product_lots pl JOIN products p ON p.id = pl.product_id LEFT JOIN goods_receipt_items gri ON gri.id = pl.goods_receipt_item_id LEFT JOIN purchase_order_items poi ON poi.id = gri.purchase_order_item_id LEFT JOIN purchase_orders po ON po.id = poi.purchase_order_id WHERE {conditions} LIMIT 1"
         );
         let rows = LotRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
@@ -215,9 +218,9 @@ impl LotRepository {
 
     pub async fn receive(
         transaction: &DatabaseTransaction,
+        context: &RequestContext,
         request: &ReceiveLotRequest,
         allocations: Vec<(Uuid, rust_decimal::Decimal)>,
-        user_id: Uuid,
         lot_number: String,
     ) -> Result<Uuid, AppError> {
         let product_id = parse_uuid(&request.product_id, "productId")?;
@@ -248,7 +251,12 @@ impl LotRepository {
         }
 
         let qty = quantity(request.quantity);
+        let damaged = quantity(request.damaged_quantity);
+        let remaining = quantity(qty - damaged);
+        let paid_now = money_value(request.paid_now);
         let cost = money_value(request.cost);
+        let pinned_po_id =
+            parse_optional_uuid(request.purchase_order_id.as_deref(), "purchaseOrderId")?;
         let received_date = parse_date(
             &request.received_date,
             crate::backend::constants::ERROR_INVALID_RECEIVED_DATE,
@@ -269,7 +277,7 @@ impl LotRepository {
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, 1, NULL, NULL, ?, ?)",
+                "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?)",
                 [
                     lot_id.into(),
                     product_id.into(),
@@ -277,11 +285,12 @@ impl LotRepository {
                     lot_number.into(),
                     source_type.into(),
                     qty.into(),
-                    qty.into(),
+                    remaining.into(),
+                    damaged.into(),
                     cost.into(),
                     received_date.into(),
                     expiry_date.into(),
-                    user_id.into(),
+                    context.user_id.into(),
                     now.into(),
                     now.into(),
                 ],
@@ -293,17 +302,26 @@ impl LotRepository {
             .map(|(branch_id, _)| *branch_id)
             .unwrap_or_else(Uuid::nil);
 
+        let mut remaining_damage = damaged;
         for (branch_id, branch_qty) in allocations {
+            let branch_damage = if remaining_damage > branch_qty {
+                branch_qty
+            } else {
+                remaining_damage
+            };
+            remaining_damage -= branch_damage;
+            let branch_remaining = quantity(branch_qty - branch_damage);
             transaction
                 .execute_raw(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
-                    "INSERT INTO branch_lots (id, branch_id, product_lot_id, allocated_base_quantity, remaining_base_quantity, reserved_base_quantity, damaged_base_quantity, updated_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?)",
+                    "INSERT INTO branch_lots (id, branch_id, product_lot_id, allocated_base_quantity, remaining_base_quantity, reserved_base_quantity, damaged_base_quantity, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
                     [
                         Uuid::new_v4().into(),
                         branch_id.into(),
                         lot_id.into(),
                         branch_qty.into(),
-                        branch_qty.into(),
+                        branch_remaining.into(),
+                        branch_damage.into(),
                         now.into(),
                     ],
                 ))
@@ -328,12 +346,33 @@ impl LotRepository {
                         reference_type.into(),
                         lot_id.into(),
                         now.into(),
-                        user_id.into(),
+                        context.user_id.into(),
                         now.into(),
                     ],
                 ))
                 .await?;
         }
+
+        let matched = if source_type == LOT_SOURCE_PURCHASE {
+            if let Some(supplier_id) = supplier_id {
+                PurchasingRepository::apply_lot_to_open_po(
+                    transaction,
+                    context,
+                    lot_id,
+                    product_id,
+                    supplier_id,
+                    qty,
+                    cost,
+                    received_date,
+                    pinned_po_id,
+                )
+                .await?
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         let total_cost = money_value(cost * qty);
         if let Some(supplier_id) = supplier_id {
@@ -350,21 +389,41 @@ impl LotRepository {
             transaction
                 .execute_raw(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
-                    "INSERT INTO supplier_ledger_entries (id, supplier_id, branch_id, type, purchase_order_id, goods_receipt_id, money_transaction_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, 0, ?, ?, ?, ?, ?)",
+                    "INSERT INTO supplier_ledger_entries (id, supplier_id, branch_id, type, purchase_order_id, goods_receipt_id, money_transaction_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?, ?, ?)",
                     [
                         Uuid::new_v4().into(),
                         supplier_id.into(),
                         ledger_branch_id.into(),
                         LEDGER_PURCHASE.into(),
+                        matched
+                            .as_ref()
+                            .map(|row| row.purchase_order_id)
+                            .into(),
+                        matched.as_ref().map(|row| row.goods_receipt_id).into(),
                         total_cost.into(),
                         balance_after.into(),
                         format!("Lot receive {lot_id}").into(),
                         now.into(),
-                        user_id.into(),
+                        context.user_id.into(),
                         now.into(),
                     ],
                 ))
                 .await?;
+            if paid_now > Decimal::ZERO {
+                PurchasingRepository::supplier_payment(
+                    transaction,
+                    context,
+                    supplier_id,
+                    &SupplierPaymentRequest {
+                        amount: paid_now,
+                        payment_method: "CASH".into(),
+                        reference_number: None,
+                        notes: Some(format!("Paid on receive {lot_id}")),
+                        client_request_id: None,
+                    },
+                )
+                .await?;
+            }
         }
 
         apply_product_unit_prices_from_receive(transaction, product_id, request, now).await?;
@@ -466,6 +525,9 @@ async fn hydrate(
             received_date: row.received_date.to_string(),
             expiry_date: row.expiry_date.map(|value| value.to_string()),
             branch_lots: by_lot.remove(&row.id).unwrap_or_default(),
+            purchase_order_id: row.purchase_order_id.map(|value| value.to_string()),
+            purchase_order_number: row.purchase_order_number,
+            purchase_order_status: row.purchase_order_status,
             created_at: row.created_at.to_rfc3339(),
             updated_at: row.updated_at.to_rfc3339(),
         })

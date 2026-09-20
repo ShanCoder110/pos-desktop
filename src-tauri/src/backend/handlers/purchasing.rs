@@ -11,7 +11,7 @@ use crate::backend::{
     dto::{
         CreatePurchaseOrderRequest, Paginated, PurchaseOrderListQuery, PurchaseOrderResponse,
         ReceivePurchaseOrderRequest, SupplierLedgerEntryResponse, SupplierLedgerListQuery,
-        SupplierPaymentRequest, SupplierPaymentResponse,
+        SupplierPaymentRequest, SupplierPaymentResponse, UnlinkLotRequest,
     },
     errors::AppError,
     services::PurchasingService,
@@ -60,6 +60,25 @@ pub async fn receive_purchase_order(
 ) -> Result<Json<PurchaseOrderResponse>, AppError> {
     Ok(Json(
         PurchasingService::receive(&state.db, &ctx, parse_id(&id)?, request).await?,
+    ))
+}
+
+pub async fn cancel_purchase_order(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<PurchaseOrderResponse>, AppError> {
+    Ok(Json(
+        PurchasingService::cancel(&state.db, parse_id(&id)?).await?,
+    ))
+}
+
+pub async fn unlink_purchase_order_lot(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<UnlinkLotRequest>,
+) -> Result<Json<PurchaseOrderResponse>, AppError> {
+    Ok(Json(
+        PurchasingService::unlink_lot(&state.db, parse_id(&id)?, request).await?,
     ))
 }
 

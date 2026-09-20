@@ -85,7 +85,7 @@ export const pageMeta: Record<string, { title: string; subtitle?: string }> = {
   [routes.productsCategories]: { title: "Products", subtitle: "Groups used on the catalog" },
   [routes.categories]: { title: "Products", subtitle: "Groups used on the catalog" },
   [routes.transfers]: { title: "Products", subtitle: "Move lots between branches" },
-  [routes.reorder]: { title: "Lots", subtitle: "Receive stock as a new lot" },
+  [routes.reorder]: { title: "Reorders", subtitle: "Pending purchase orders" },
   [routes.customers]: { title: "Customers", subtitle: "Balance, credit sales, and collections" },
   [routes.suppliers]: { title: "Suppliers", subtitle: "Purchasing contacts and stock sources" },
   [routes.employees]: {
