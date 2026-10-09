@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Eye } from "lucide-react";
+import { Eye, Pencil } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { routes } from "@/shared/constants/routes";
 import {
   Badge,
   Button,
@@ -16,6 +18,7 @@ import { useSalesHub } from "@/pages/sales/SalesLayout";
 import type { InvoiceRow, PaymentStatus } from "@/shared/domain/types";
 import { money } from "@/utils/format";
 import { listAllInvoices } from "@/services/sales";
+import { isAbortError } from "@/utils/async";
 import { listAllBranches } from "@/services/org";
 import { listMasterRecords } from "@/services/masters";
 import { MAX_PAGE_SIZE } from "@/shared/constants/config";
@@ -29,6 +32,7 @@ function payTone(s: PaymentStatus) {
 }
 
 export function InvoicesPage() {
+  const navigate = useNavigate();
   const { sectionKpi, invoices: hubInvoices } = useSalesHub();
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [branchNames, setBranchNames] = useState<Record<string, string>>({});
@@ -48,8 +52,12 @@ export function InvoicesPage() {
     }
     const controller = new AbortController();
     listAllInvoices(controller.signal)
-      .then(setRows)
-      .catch(() => setRows([]));
+      .then((data) => {
+        if (!controller.signal.aborted) setRows(data);
+      })
+      .catch((error) => {
+        if (!isAbortError(error) && !controller.signal.aborted) setRows([]);
+      });
     return () => controller.abort();
   }, [hubInvoices]);
 
@@ -80,7 +88,8 @@ export function InvoicesPage() {
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
-      const text = `${r.invoiceNumber} ${r.customerId ? customerNames[r.customerId] ?? "" : ""}`.toLowerCase();
+      const text =
+        `${r.invoiceNumber} ${r.customerId ? (customerNames[r.customerId] ?? "") : ""}`.toLowerCase();
       if (q && !text.includes(q.toLowerCase())) return false;
       if (sectionKpi === "paid") return r.paymentStatus === "PAID" && r.status === "COMPLETED";
       if (sectionKpi === "partial") return r.paymentStatus === "PARTIAL";
@@ -96,8 +105,24 @@ export function InvoicesPage() {
   return (
     <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
-        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Search number or customer" />}
-        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={filtered.length} onChange={setPage} />}
+        toolbar={
+          <SearchInput
+            value={q}
+            onChange={(v) => {
+              setQ(v);
+              setPage(1);
+            }}
+            placeholder="Search number or customer"
+          />
+        }
+        footer={
+          <Pagination
+            page={Math.min(page, pages)}
+            pages={pages}
+            total={filtered.length}
+            onChange={setPage}
+          />
+        }
       >
         <THead>
           <tr>
@@ -120,7 +145,9 @@ export function InvoicesPage() {
               <Td>{row.invoiceNumber}</Td>
               <Td>{row.createdAt}</Td>
               <Td>{branchNames[row.branchId] ?? row.branchId}</Td>
-              <Td>{row.customerId ? customerNames[row.customerId] ?? row.customerId : "Walk-in"}</Td>
+              <Td>
+                {row.customerId ? (customerNames[row.customerId] ?? row.customerId) : "Walk-in"}
+              </Td>
               <Td numeric>{money(row.total)}</Td>
               <Td numeric>{money(row.paidAmount)}</Td>
               <Td numeric>{money(row.creditAmount)}</Td>
@@ -140,7 +167,29 @@ export function InvoicesPage() {
         </tbody>
       </Table>
 
-      <Drawer open={Boolean(open)} title={open?.invoiceNumber ?? "Invoice"} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
+      <Drawer
+        open={Boolean(open)}
+        title={open?.invoiceNumber ?? "Invoice"}
+        onClose={() => setOpen(null)}
+        footer={
+          <div className="flex w-full flex-wrap justify-end gap-2">
+            {open?.status === "COMPLETED" ? (
+              <Button
+                variant="outline"
+                icon={<Pencil size={14} />}
+                onClick={() => {
+                  const id = open.id;
+                  setOpen(null);
+                  navigate(`${routes.pos}?edit=${encodeURIComponent(id)}`);
+                }}
+              >
+                Edit in POS
+              </Button>
+            ) : null}
+            <Button onClick={() => setOpen(null)}>Close</Button>
+          </div>
+        }
+      >
         {open ? (
           <Table>
             <THead>
@@ -155,8 +204,15 @@ export function InvoicesPage() {
               {open.items.length === 0 ? <EmptyRow cols={4} /> : null}
               {open.items.map((item) => (
                 <tr key={item.id}>
-                  <Td>{item.productId}</Td>
-                  <Td numeric>{item.quantity} {item.unitName}</Td>
+                  <Td>
+                    <span className="font-semibold text-ink">{item.productName}</span>
+                    {item.sku ? (
+                      <span className="block text-[10px] text-muted">{item.sku}</span>
+                    ) : null}
+                  </Td>
+                  <Td numeric>
+                    {item.quantity} {item.unitName}
+                  </Td>
                   <Td numeric>{money(item.unitPrice)}</Td>
                   <Td numeric>{money(item.total)}</Td>
                 </tr>

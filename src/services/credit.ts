@@ -259,6 +259,31 @@ export function listReturns(
   );
 }
 
+export function postReturn(payload: {
+  invoiceId: string;
+  returnType: ReturnType;
+  reason: string;
+  notes?: string | null;
+  items: {
+    invoiceItemId: string;
+    quantity: number;
+    condition?: ItemCondition;
+    refundAmount?: number;
+  }[];
+}) {
+  return apiRequest<ReturnResponse>(API_ROUTES.returns, {
+    method: "POST",
+    body: JSON.stringify({
+      ...payload,
+      items: payload.items.map((item) => ({
+        ...item,
+        condition: (item.condition ?? "GOOD").toUpperCase(),
+        refundAmount: item.refundAmount ?? 0,
+      })),
+    }),
+  });
+}
+
 export async function listAllReturns(signal?: AbortSignal): Promise<ReturnRow[]> {
   const rows: ReturnRow[] = [];
   let page = 1;

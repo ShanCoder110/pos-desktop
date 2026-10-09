@@ -65,6 +65,7 @@ export const API_ROUTES = {
   invoices: "/invoices",
   invoiceById: (id: string) => `/invoices/${encodeURIComponent(id)}`,
   invoiceVoid: (id: string) => `/invoices/${encodeURIComponent(id)}/void`,
+  invoiceRevise: (id: string) => `/invoices/${encodeURIComponent(id)}/revise`,
   returns: "/returns",
   returnById: (id: string) => `/returns/${encodeURIComponent(id)}`,
   claims: "/claims",

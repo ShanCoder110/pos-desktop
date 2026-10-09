@@ -7,9 +7,9 @@ use uuid::Uuid;
 use crate::backend::{
     constants::{
         ERROR_CLAIM_NOT_FOUND, ERROR_CUSTOMER_NOT_FOUND, ERROR_INSUFFICIENT_STOCK,
-        ERROR_INVOICE_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND, ERROR_RETURN_NOT_FOUND,
-        LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LOT_SOURCE_RETURN, PAYMENT_DIRECTION_IN,
-        PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED, REFERENCE_RETURN,
+        ERROR_INVOICE_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND, ERROR_RETURN_EXCEEDS_SOLD,
+        ERROR_RETURN_NOT_FOUND, LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LOT_SOURCE_RETURN,
+        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED, REFERENCE_RETURN,
         STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN,
     },
     context::RequestContext,
@@ -86,6 +86,12 @@ struct InvoiceItemMeta {
     product_id: Uuid,
     conversion_to_base: Decimal,
     unit_name: String,
+    displayed_quantity: Decimal,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct ReturnedQtyRow {
+    returned: Decimal,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -596,13 +602,25 @@ impl CreditRepository {
             let invoice_item_id = parse_uuid(&item.invoice_item_id, "items.invoiceItemId")?;
             let meta = InvoiceItemMeta::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT product_id, conversion_to_base, unit_name FROM invoice_items WHERE id = ? AND invoice_id = ? LIMIT 1",
+                "SELECT product_id, conversion_to_base, unit_name, displayed_quantity FROM invoice_items WHERE id = ? AND invoice_id = ? LIMIT 1",
                 [invoice_item_id.into(), invoice_id.into()],
             ))
             .one(transaction)
             .await?
             .ok_or(AppError::Validation("Invoice item not found on invoice.".into()))?;
             let displayed = quantity(item.quantity);
+            let prior = ReturnedQtyRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "SELECT COALESCE(SUM(sri.displayed_quantity), 0) AS returned FROM sale_return_items sri INNER JOIN sale_returns sr ON sr.id = sri.sale_return_id WHERE sri.invoice_item_id = ? AND sr.status = 'COMPLETED'",
+                [invoice_item_id.into()],
+            ))
+            .one(transaction)
+            .await?
+            .map(|row| row.returned)
+            .unwrap_or(Decimal::ZERO);
+            if displayed + prior > meta.displayed_quantity + Decimal::new(1, 6) {
+                return Err(AppError::Validation(ERROR_RETURN_EXCEEDS_SOLD.into()));
+            }
             let base_qty = quantity(displayed * meta.conversion_to_base);
             let condition = item.condition.trim().to_uppercase();
             let refund_amount = money_value(item.refund_amount);
@@ -612,13 +630,72 @@ impl CreditRepository {
             } else {
                 "NO_RESTOCK"
             };
+            let track_damaged = condition == "DAMAGED";
             let original_lot = parse_optional_uuid(
                 item.original_product_lot_id.as_deref(),
                 "originalProductLotId",
             )?;
             let mut movement_id: Option<Uuid> = None;
 
-            if restock == "RESTOCK" {
+            if track_damaged {
+                let damaged_lot = Uuid::new_v4();
+                transaction
+                    .execute_raw(Statement::from_sql_and_values(
+                        DbBackend::Sqlite,
+                        "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, NULL, NULL, NULL, ?, ?, 0, 0, ?, 0, ?, NULL, ?, 1, NULL, ?, ?, ?)",
+                        [
+                            damaged_lot.into(),
+                            meta.product_id.into(),
+                            format!("DMG-{}", &return_id.to_string()[..8]).into(),
+                            LOT_SOURCE_RETURN.into(),
+                            base_qty.into(),
+                            base_qty.into(),
+                            now.date_naive().into(),
+                            context.user_id.into(),
+                            context.device_id.into(),
+                            now.into(),
+                            now.into(),
+                        ],
+                    ))
+                    .await?;
+                transaction
+                    .execute_raw(Statement::from_sql_and_values(
+                        DbBackend::Sqlite,
+                        "INSERT INTO branch_lots (id, branch_id, product_lot_id, allocated_base_quantity, remaining_base_quantity, reserved_base_quantity, damaged_base_quantity, updated_at) VALUES (?, ?, ?, ?, 0, 0, ?, ?)",
+                        [
+                            Uuid::new_v4().into(),
+                            invoice.branch_id.into(),
+                            damaged_lot.into(),
+                            base_qty.into(),
+                            base_qty.into(),
+                            now.into(),
+                        ],
+                    ))
+                    .await?;
+                let mid = Uuid::new_v4();
+                movement_id = Some(mid);
+                transaction
+                    .execute_raw(Statement::from_sql_and_values(
+                        DbBackend::Sqlite,
+                        "INSERT INTO stock_movements (id, branch_id, product_id, product_lot_id, type, displayed_quantity, displayed_unit_name, base_quantity_delta, unit_cost, total_cost, reference_type, reference_id, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)",
+                        [
+                            mid.into(),
+                            invoice.branch_id.into(),
+                            meta.product_id.into(),
+                            damaged_lot.into(),
+                            STOCK_MOVEMENT_RETURN.into(),
+                            displayed.into(),
+                            meta.unit_name.clone().into(),
+                            base_qty.into(),
+                            REFERENCE_RETURN.into(),
+                            return_id.into(),
+                            now.into(),
+                            context.user_id.into(),
+                            now.into(),
+                        ],
+                    ))
+                    .await?;
+            } else if restock == "RESTOCK" {
                 let lot_id = if let Some(lot_id) = original_lot {
                     lot_id
                 } else {

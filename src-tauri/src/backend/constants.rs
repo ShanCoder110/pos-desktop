@@ -66,6 +66,7 @@ pub const SALES_HOLD_BY_ID_ROUTE: &str = "/sales/holds/{id}";
 pub const INVOICES_ROUTE: &str = "/invoices";
 pub const INVOICE_BY_ID_ROUTE: &str = "/invoices/{id}";
 pub const INVOICE_VOID_ROUTE: &str = "/invoices/{id}/void";
+pub const INVOICE_REVISE_ROUTE: &str = "/invoices/{id}/revise";
 
 pub const RETURNS_ROUTE: &str = "/returns";
 pub const RETURN_BY_ID_ROUTE: &str = "/returns/{id}";
@@ -231,6 +232,10 @@ pub const ERROR_INVALID_SOURCE_TYPE: &str = "sourceType must be OPENING or PURCH
 pub const ERROR_INVALID_LOT_SOURCE: &str = "Invalid lot source type.";
 pub const ERROR_SUPPLIER_REQUIRED: &str = "supplierId is required for purchase receipts.";
 pub const ERROR_INVOICE_ALREADY_VOIDED: &str = "Invoice is already voided.";
+pub const ERROR_INVOICE_HAS_RETURNS: &str =
+    "This invoice has returns recorded. Void the returns first or create a new sale.";
+pub const ERROR_RETURN_EXCEEDS_SOLD: &str =
+    "Return quantity exceeds the quantity still available on this invoice line.";
 pub const ERROR_EMPTY_SALE: &str = "Sale must include at least one item.";
 pub const LEDGER_SALE: &str = "SALE";
 pub const LEDGER_PURCHASE: &str = "PURCHASE";

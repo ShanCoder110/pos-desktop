@@ -268,9 +268,11 @@ export interface InvoiceRow {
 export interface InvoiceItemRow {
   id: string;
   productId: string;
+  productUnitId?: string;
   productName?: string;
   sku?: string;
   unitName: string;
+  priceMode?: string;
   quantity: number;
   baseQuantity: number;
   unitPrice: number;

@@ -5,7 +5,8 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { normalizeSellUnits, productSellUnits } from "@/pages/products/productQty";
 import { PrintPreview } from "@/components/print/PrintPreview";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { Skeleton } from "@/components/common/Skeleton";
@@ -29,6 +30,8 @@ import { createMasterRecord } from "@/services/masters";
 import { listCustomersWithBalances } from "@/services/credit";
 import {
   completeSale as completeSaleRequest,
+  getInvoice,
+  reviseInvoice,
   createHold,
   deleteHold,
   listHolds,
@@ -117,17 +120,23 @@ function prettyUnit(u: string) {
 function packOf(p: Product) {
   return p.packQty && p.packQty > 1 ? p.packQty : 0;
 }
+function sellUnitsFor(product: Product) {
+  if (product.sellUnits?.length) return normalizeSellUnits(product.sellUnits);
+  return productSellUnits(product);
+}
+
 function sellUnitOf(product: Product, sellUnit: SellUnit) {
-  const units = product.sellUnits ?? [];
+  const units = sellUnitsFor(product);
   if (sellUnit === "pack") {
+    const packN = packOf(product);
     return (
-      units.find((unit) => unit.contains === packOf(product) && unit.contains > 1) ??
+      units.find((unit) => packN > 1 && unit.contains === packN) ??
       units.find((unit) => unit.kind === "pack" || unit.kind === "bigger")
     );
   }
   return (
-    units.find((unit) => unit.id === product.baseUnitId) ??
-    units.find((unit) => unit.kind === "base" || unit.contains === 1)
+    units.find((unit) => unit.isBase || unit.kind === "base") ??
+    units.find((unit) => unit.contains === 1)
   );
 }
 
@@ -179,6 +188,8 @@ function recompute(item: CartLine): CartLine {
 
 export function PosPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const editInvoiceId = searchParams.get("edit") ?? "";
   const { settings } = useSettings();
   const searchRef = useRef<HTMLInputElement>(null);
   const qtyRef = useRef<HTMLInputElement>(null);
@@ -197,6 +208,8 @@ export function PosPage() {
   const [qtyInput, setQtyInput] = useState("1");
   const [priceMode, setPriceMode] = useState<PriceMode>("retail");
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [editInvoiceNumber, setEditInvoiceNumber] = useState("");
+  const [editDraft, setEditDraft] = useState<Awaited<ReturnType<typeof getInvoice>> | null>(null);
   const [selected, setSelected] = useState(-1);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -323,6 +336,76 @@ export function PosPage() {
       .finally(() => setLoading((current) => ({ ...current, page: false })));
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (!editInvoiceId) {
+      setEditInvoiceNumber("");
+      setEditDraft(null);
+      return;
+    }
+    const controller = new AbortController();
+    getInvoice(editInvoiceId, controller.signal)
+      .then((invoice) => {
+        if (invoice.status !== "COMPLETED") {
+          showToast("Only completed invoices can be edited in POS");
+          setSearchParams({});
+          return;
+        }
+        setEditDraft(invoice);
+        setEditInvoiceNumber(invoice.invoiceNumber);
+        if (invoice.customerId) setCustomerId(invoice.customerId);
+        setBillDiscount(invoice.discount);
+        setDiscMode("rs");
+        setNote(invoice.notes ?? "");
+      })
+      .catch(() => showToast("Could not load invoice for edit"));
+    return () => controller.abort();
+  }, [editInvoiceId, setSearchParams]);
+
+  useEffect(() => {
+    if (!editDraft || !products.length) return;
+    const lines: CartLine[] = [];
+    for (const item of editDraft.items) {
+      const product = products.find((p) => p.id === item.productId);
+      if (!product) continue;
+      const mode: PriceMode =
+        item.priceMode?.toUpperCase() === "WHOLESALE" ? "wholesale" : "retail";
+      const units = sellUnitsFor(product);
+      const unitRow = units.find((u) => u.id === item.productUnitId) ?? sellUnitOf(product, "base");
+      if (!unitRow?.id) continue;
+      const packN = packOf(product);
+      const isPack = packN > 1 && unitRow.contains === packN;
+      const factor = isPack ? packN : 1;
+      const sellU = isPack ? "pack" : product.unit;
+      lines.push(
+        recompute({
+          id: uid(),
+          productId: product.id,
+          productUnitId: unitRow.id,
+          name: product.name,
+          sku: product.sku,
+          baseUnit: product.unit,
+          sellUnit: sellU,
+          packSize: packN || 1,
+          priceMode: mode,
+          minPrice: +(product.min * factor).toFixed(2),
+          listPrice: item.unitPrice,
+          unitPrice: item.unitPrice,
+          qty: item.quantity,
+          baseQty: item.baseQuantity,
+          lineDisc: 0,
+          amount: item.total,
+          lotsNote: "Invoice edit",
+          minWarn: false,
+        }),
+      );
+    }
+    if (lines.length) {
+      setCart(lines);
+      setPriceMode(lines[0].priceMode);
+    }
+    setEditDraft(null);
+  }, [editDraft, products]);
 
   useEffect(() => {
     const q = debounced.trim();
@@ -978,9 +1061,12 @@ export function PosPage() {
               ]
             : [];
     setLoading((current) => ({ ...current, sale: true }));
+    const wasEditing = Boolean(editInvoiceId);
     try {
-      const invoice = await completeSaleRequest({
-        clientRequestId: crypto.randomUUID(),
+      const salePayload = {
+        clientRequestId: wasEditing
+          ? `revise:${editInvoiceId}:${crypto.randomUUID()}`
+          : crypto.randomUUID(),
         customerId: customerId || null,
         items: cart.map((item) => ({
           productId: item.productId,
@@ -994,7 +1080,14 @@ export function PosPage() {
         payments,
         discount: t.billDiscount,
         notes: note.trim() || null,
-      });
+      };
+      const invoice = editInvoiceId
+        ? await reviseInvoice(editInvoiceId, salePayload)
+        : await completeSaleRequest(salePayload);
+      if (editInvoiceId) {
+        setSearchParams({});
+        setEditInvoiceNumber("");
+      }
       setInvoices((prev) => [
         {
           id: invoice.id,
@@ -1003,7 +1096,7 @@ export function PosPage() {
           at: new Date(invoice.createdAt).toLocaleString(),
           customer: displayCustomer.name,
         },
-        ...prev,
+        ...prev.filter((row) => row.id !== invoice.id),
       ]);
       setProducts((current) =>
         current.map((product) => {
@@ -1015,7 +1108,11 @@ export function PosPage() {
       );
       setClearAfterPrint(true);
       setPrintOpen(true);
-      showToast(`Sale ${invoice.invoiceNumber} complete`);
+      showToast(
+        wasEditing
+          ? `Invoice ${invoice.invoiceNumber} updated`
+          : `Sale ${invoice.invoiceNumber} complete`,
+      );
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not complete sale");
     } finally {
@@ -1171,6 +1268,11 @@ export function PosPage() {
         aria-busy={loading.page}
         className="workspace pos-workspace relative [grid-column:2] [grid-row:1] [display:grid] [grid-template-columns:1fr_360px] [min-height:0] [overflow:hidden]"
       >
+        {editInvoiceNumber ? (
+          <div className="absolute left-2 right-[368px] top-2 z-40 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] font-semibold text-ink">
+            Editing invoice {editInvoiceNumber} — saving updates the same bill (no duplicate sale).
+          </div>
+        ) : null}
         {loading.page ? (
           <div
             className="absolute inset-0 z-50 grid grid-cols-[1fr_360px] gap-2 bg-shell p-2"

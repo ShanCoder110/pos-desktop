@@ -99,9 +99,11 @@ export function mapInvoice(row: InvoiceResponse): InvoiceRow {
   const items: InvoiceItemRow[] = (row.items ?? []).map((item) => ({
     id: item.id,
     productId: item.productId,
+    productUnitId: item.productUnitId ?? undefined,
     productName: item.productName,
     sku: item.sku,
     unitName: item.unitName,
+    priceMode: item.priceMode,
     quantity: item.displayedQuantity,
     baseQuantity: item.baseQuantity,
     unitPrice: item.unitPrice,
@@ -166,6 +168,13 @@ export function getInvoice(id: string, signal?: AbortSignal) {
 
 export function completeSale(payload: CompleteSalePayload) {
   return apiRequest<InvoiceResponse>(API_ROUTES.salesComplete, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).then(mapInvoice);
+}
+
+export function reviseInvoice(id: string, payload: CompleteSalePayload) {
+  return apiRequest<InvoiceResponse>(API_ROUTES.invoiceRevise(id), {
     method: "POST",
     body: JSON.stringify(payload),
   }).then(mapInvoice);

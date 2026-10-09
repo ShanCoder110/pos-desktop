@@ -458,6 +458,15 @@ impl SalesRepository {
         Ok(invoice_id)
     }
 
+    pub async fn revise(
+        transaction: &DatabaseTransaction,
+        context: &RequestContext,
+        invoice_id: Uuid,
+        request: &CompleteSaleRequest,
+    ) -> Result<(), AppError> {
+        sales_revise::revise_invoice(transaction, context, invoice_id, request).await
+    }
+
     pub async fn list(
         database: &DatabaseConnection,
         query: &InvoiceListQuery,
@@ -1012,6 +1021,9 @@ fn decimal(value: Decimal) -> f64 {
 }
 
 const PAYMENT_STATUS_REFUNDED_PLACEHOLDER: &str = "REFUNDED";
+
+#[path = "sales_revise.rs"]
+mod sales_revise;
 
 #[allow(dead_code)]
 fn hold_not_found() -> AppError {

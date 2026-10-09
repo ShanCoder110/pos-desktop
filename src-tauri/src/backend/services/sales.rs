@@ -88,6 +88,33 @@ impl SalesService {
         Self::get(database, id).await
     }
 
+    pub async fn revise(
+        database: &DatabaseConnection,
+        context: &RequestContext,
+        id: Uuid,
+        mut request: CompleteSaleRequest,
+    ) -> Result<InvoiceResponse, AppError> {
+        for item in &mut request.items {
+            item.quantity = quantity(item.quantity);
+            item.unit_price = money_value(item.unit_price);
+            item.discount = money_value(item.discount);
+            item.tax = money_value(item.tax);
+        }
+        for payment in &mut request.payments {
+            payment.amount = money_value(payment.amount);
+            if let Some(tendered) = payment.amount_tendered.as_mut() {
+                *tendered = money_value(*tendered);
+            }
+        }
+        request.discount = money_value(request.discount);
+        request.tax = money_value(request.tax);
+        request.validate()?;
+        let transaction = database.begin().await?;
+        SalesRepository::revise(&transaction, context, id, &request).await?;
+        transaction.commit().await?;
+        Self::get(database, id).await
+    }
+
     pub async fn list_holds(
         database: &DatabaseConnection,
         context: &RequestContext,
