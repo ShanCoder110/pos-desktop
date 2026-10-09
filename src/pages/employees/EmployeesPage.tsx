@@ -42,6 +42,8 @@ import {
 } from "@/components/common";
 import type { DateRangeFilter } from "@/components/common/DateRangePeriodPicker";
 import type { FilterChip } from "@/components/common/FilterPicker";
+import { applyFilterChip, chipValuesForField } from "@/utils/filterChips";
+import { chipCsv, chipCsvFromNames } from "@/utils/filterQuery";
 import { rangeForPeriod } from "@/components/common/DateRangePeriodPicker";
 import { DEFAULT_LEDGER_DATE_PERIOD } from "@/shared/constants/charts";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
@@ -103,10 +105,6 @@ import {
 const PAGE = DEFAULT_PAGE_SIZE;
 const PAY_FORM_ID = "employee-pay-form";
 
-function chipValue(chips: FilterChip[], field: string) {
-  return chips.find((chip) => chip.field === field)?.value ?? "";
-}
-
 function when(iso: string) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
@@ -116,13 +114,6 @@ function when(iso: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function paginate<T>(rows: T[], page: number, pageSize: number) {
-  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
-  const safePage = Math.min(page, pages);
-  const start = (safePage - 1) * pageSize;
-  return { rows: rows.slice(start, start + pageSize), pages, total: rows.length, page: safePage };
 }
 
 function nameSlug(name: string) {
@@ -138,22 +129,32 @@ function staffEmailForCreate(id: string, name: string) {
   return `${nameSlug(name)}.${id.slice(0, 8)}@staff.local`;
 }
 
-function staffQuery(search: string, chips: FilterChip[]) {
-  const status = chipValue(chips, "status");
-  const role = chipValue(chips, "role");
+function staffQuery(search: string, chips: FilterChip[], branches: Branch[]) {
+  const statuses = chipValuesForField(chips, "status");
+  const status = statuses.length === 1 ? statuses[0] : "";
+  const active = statuses.includes(STAFF_STATUS_ACTIVE);
+  const inactive = statuses.includes(STAFF_STATUS_INACTIVE);
   return {
     staffOnly: true as const,
     search: search.trim() || undefined,
-    role: role || undefined,
+    role: chipCsv(chips, "role"),
+    branchId: chipCsvFromNames(
+      chipValuesForField(chips, "branch"),
+      (name) => branches.find((branch) => branch.name === name)?.id,
+    ),
     isActive:
-      status === STAFF_STATUS_ACTIVE ? true : status === STAFF_STATUS_INACTIVE ? false : undefined,
+      statuses.length === 0 || (active && inactive)
+        ? undefined
+        : status === STAFF_STATUS_ACTIVE
+          ? true
+          : status === STAFF_STATUS_INACTIVE
+            ? false
+            : active
+              ? true
+              : inactive
+                ? false
+                : undefined,
   };
-}
-
-function branchIdFromChip(chips: FilterChip[], branches: Branch[]) {
-  const name = chipValue(chips, "branch");
-  if (!name) return null;
-  return branches.find((branch) => branch.name === name)?.id ?? null;
 }
 
 const blankEmployee = (branches: Branch[]): StaffUser => ({
@@ -313,8 +314,7 @@ export function EmployeesPage() {
     rangeForPeriod(DEFAULT_LEDGER_DATE_PERIOD),
   );
 
-  const filters = useMemo(() => staffQuery(search, chips), [chips, search]);
-  const branchFilterId = useMemo(() => branchIdFromChip(chips, branches), [branches, chips]);
+  const filters = useMemo(() => staffQuery(search, chips, branches), [branches, chips, search]);
   const filterFields = useMemo(
     () => employeeFilterFields(branches.map((branch) => branch.name)),
     [branches],
@@ -344,24 +344,12 @@ export function EmployeesPage() {
     const guard = createLoadGuard();
     setLoading((current) => ({ ...current, fetching: true }));
 
-    const load = branchFilterId
-      ? listAllUsers(filters, controller.signal).then((response) => {
-          const mapped = response.map(mapUser).filter((row) => row.branchId === branchFilterId);
-          const paged = paginate(mapped, page, pageSize);
-          return { rows: paged.rows, total: paged.total, pages: paged.pages };
-        })
-      : listUsers({ ...filters, page, perPage: pageSize }, controller.signal).then((response) => ({
-          rows: response.data.map(mapUser),
-          total: response.meta.totalItems,
-          pages: Math.max(1, response.meta.totalPages),
-        }));
-
-    load
+    listUsers({ ...filters, page, perPage: pageSize }, controller.signal)
       .then((response) => {
         if (!guard.isActive()) return;
-        setRows(response.rows);
-        setTotal(response.total);
-        setPages(response.pages);
+        setRows(response.data.map(mapUser));
+        setTotal(response.meta.totalItems);
+        setPages(Math.max(1, response.meta.totalPages));
       })
       .catch((error) => {
         if (!guard.isActive() || isAbortError(error)) return;
@@ -378,24 +366,20 @@ export function EmployeesPage() {
       guard.dispose();
       controller.abort();
     };
-  }, [branchFilterId, filters, page, pageSize, reloadKey]);
+  }, [filters, page, pageSize, reloadKey]);
 
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([
-      listUsers({ staffOnly: true, page: 1, perPage: 1 }, controller.signal),
-      listUsers({ staffOnly: true, page: 1, perPage: 1, isActive: true }, controller.signal),
+      listUsers({ ...filters, page: 1, perPage: 1 }, controller.signal),
+      listUsers({ ...filters, page: 1, perPage: 1, isActive: true }, controller.signal),
       listAllUsers(filters, controller.signal),
     ])
       .then(([all, active, matching]) => {
-        const filtered = branchFilterId
-          ? matching.map(mapUser).filter((row) => row.branchId === branchFilterId)
-          : matching.map(mapUser);
+        const filtered = matching.map(mapUser);
         setCounts({
-          all: branchFilterId ? filtered.length : all.meta.totalItems,
-          active: branchFilterId
-            ? filtered.filter((row) => row.isActive).length
-            : active.meta.totalItems,
+          all: all.meta.totalItems,
+          active: active.meta.totalItems,
           totalPaid: filtered.reduce((sum, row) => sum + row.totalPaid, 0),
         });
         setChartRows(filtered);
@@ -406,17 +390,19 @@ export function EmployeesPage() {
         setChartRows([]);
       });
     return () => controller.abort();
-  }, [branchFilterId, filters, reloadKey]);
+  }, [filters, reloadKey]);
 
   useEffect(() => {
     if (tab !== STAFF_TAB_LEDGER) return;
     const controller = new AbortController();
-    const debit = Number(chipValue(ledgerChips, "debit"));
+    const debit = Number(chipValuesForField(ledgerChips, "debit")[0]);
+    const userChips = chipValuesForField(ledgerChips, "user");
+    const entryTypeChips = chipValuesForField(ledgerChips, "entryType");
     const params = {
       search: ledgerSearch.trim() || undefined,
-      user: chipValue(ledgerChips, "user") || undefined,
-      entryType: chipValue(ledgerChips, "entryType") || undefined,
-      notes: chipValue(ledgerChips, "notes") || undefined,
+      user: userChips.length === 1 ? userChips[0] : undefined,
+      entryType: entryTypeChips.length === 1 ? entryTypeChips[0] : undefined,
+      notes: chipValuesForField(ledgerChips, "notes")[0] || undefined,
       debit: Number.isFinite(debit) && debit > 0 ? debit : undefined,
       occurredFrom: ledgerDateRange.from || undefined,
       occurredTo: ledgerDateRange.to || undefined,
@@ -486,11 +472,11 @@ export function EmployeesPage() {
 
   function applyChip(next: FilterChip, ledgerMode = false) {
     if (ledgerMode) {
-      setLedgerChips((current) => [...current.filter((chip) => chip.field !== next.field), next]);
+      setLedgerChips((current) => applyFilterChip(current, next));
       setLedgerPage(1);
       return;
     }
-    setChips((current) => [...current.filter((chip) => chip.field !== next.field), next]);
+    setChips((current) => applyFilterChip(current, next));
     setPage(1);
   }
 

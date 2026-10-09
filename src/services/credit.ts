@@ -44,6 +44,10 @@ export interface CustomerPaymentResponse {
   occurredAt: string;
 }
 
+export interface AdjustCustomerBalanceResponse {
+  balanceAfter: number;
+}
+
 export interface ReturnItemResponse {
   id: string;
   invoiceItemId: string;
@@ -107,6 +111,13 @@ export function mapCustomer(record: MasterRecord, balance = 0): DomainCustomer {
     notes: record.notes ?? "",
     isActive: record.isActive,
     isWalkIn: Boolean(record.isWalkIn),
+    inCreditBook: Boolean(record.inCreditBook),
+    creditSaleCount: record.creditSaleCount ?? 0,
+    openCreditSaleCount: record.openCreditSaleCount ?? 0,
+    creditSaleTotal: record.creditSaleTotal ?? 0,
+    collectedTotal: record.collectedTotal ?? 0,
+    profitOnHold: record.profitOnHold ?? 0,
+    lastCreditSaleAt: record.lastCreditSaleAt ?? undefined,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
@@ -204,6 +215,16 @@ export function recordCustomerPayment(
   },
 ) {
   return apiRequest<CustomerPaymentResponse>(API_ROUTES.customersPayments(customerId), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function adjustCustomerBalance(
+  customerId: string,
+  payload: { amount: number; notes: string },
+) {
+  return apiRequest<AdjustCustomerBalanceResponse>(API_ROUTES.customerAdjustBalance(customerId), {
     method: "POST",
     body: JSON.stringify(payload),
   });

@@ -105,7 +105,7 @@ export function DashboardPage() {
           await Promise.all([
             reportsDashboard(controller.signal).catch(() => null),
             reportsAnalytics({}, controller.signal).catch(() => null),
-            listAllTransfers(controller.signal).catch(() => []),
+            listAllTransfers({}, controller.signal).catch(() => []),
             listAllInvoices(controller.signal, session?.branchId).catch(() => [] as InvoiceRow[]),
             listAllReturns(controller.signal).catch(() => [] as ReturnRow[]),
             listAllExpenses(controller.signal).catch(() => [] as ExpenseRow[]),

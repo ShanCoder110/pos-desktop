@@ -14,6 +14,13 @@ export interface MasterRecord {
   precision?: number;
   balance?: number;
   isWalkIn?: boolean;
+  inCreditBook?: boolean;
+  creditSaleCount?: number;
+  openCreditSaleCount?: number;
+  creditSaleTotal?: number;
+  collectedTotal?: number;
+  profitOnHold?: number;
+  lastCreditSaleAt?: string | null;
   cityId?: string | null;
   cityName?: string | null;
   createdAt: string;
@@ -30,6 +37,7 @@ export interface MasterPayload {
   isActive?: boolean;
   precision?: number;
   isWalkIn?: boolean;
+  inCreditBook?: boolean;
   previousBalance?: number;
   cityId?: string;
 }
@@ -47,6 +55,9 @@ export type MasterListParams = {
   address?: string;
   notes?: string;
   balance?: string;
+  inCreditBook?: boolean;
+  sortBy?: "name" | "updatedAt" | "createdAt";
+  sortDirection?: "asc" | "desc";
 };
 
 const pathFor = (resource: MasterResource) => API_ROUTES[resource];

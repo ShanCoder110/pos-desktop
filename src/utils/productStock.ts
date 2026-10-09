@@ -1,4 +1,4 @@
-import { formatStockQty, unitLabel } from "@/pages/products/productQty";
+import { branchQtyBreakdown, formatStockQty, unitLabel } from "@/pages/products/productQty";
 import type { Product } from "@/shared/types";
 
 export type ProductBranchStock = {
@@ -24,14 +24,23 @@ export function productBranchStock(product: Product, branchId?: string) {
   return row?.quantity ?? product.stock;
 }
 
+function formatBranchQty(product: Product, qty: number) {
+  const { exact, parts } = branchQtyBreakdown(product, qty);
+  if (!parts.length) return `${formatStockQty(exact.qty)} ${exact.name}`;
+  const bits = [
+    `${formatStockQty(exact.qty)} ${exact.name}`,
+    ...parts.map((part) => `${formatStockQty(part.qty)} ${part.name}`),
+  ];
+  return bits.join(" / ");
+}
+
 export function branchStockTooltip(product: Product) {
   const total = productTotalStock(product);
   const rows = productBranchStockRows(product).filter((row) => row.quantity > 0);
-  const unit = unitLabel(product.unit);
-  if (!rows.length) return `Total: ${formatStockQty(total)} ${unit}`;
+  if (!rows.length) return `Total: ${formatBranchQty(product, total)}`;
   return [
-    `Total: ${formatStockQty(total)} ${unit}`,
-    ...rows.map((row) => `${row.branchName}: ${formatStockQty(row.quantity)} ${unit}`),
+    `Total: ${formatBranchQty(product, total)}`,
+    ...rows.map((row) => `${row.branchName}: ${formatBranchQty(product, row.quantity)}`),
   ].join("\n");
 }
 

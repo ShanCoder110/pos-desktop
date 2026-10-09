@@ -30,6 +30,8 @@ export function HubToolbar({
   onDateRange,
   insightControls,
   trailing,
+  viewExtra,
+  tableActive,
 }: {
   columns: ColumnOption[];
   cols: string[];
@@ -56,6 +58,8 @@ export function HubToolbar({
   onDateRange?: (range: DateRangeFilter) => void;
   insightControls?: ReactNode;
   trailing?: ReactNode;
+  viewExtra?: ReactNode;
+  tableActive?: boolean;
 }) {
   return (
     <>
@@ -67,9 +71,9 @@ export function HubToolbar({
             <div className="ui-view-toggle" role="group" aria-label="View">
               <Button
                 size="icon"
-                className={view === "table" ? "is-on" : undefined}
+                className={(tableActive ?? view === "table") ? "is-on" : undefined}
                 aria-label="Table view"
-                aria-pressed={view === "table"}
+                aria-pressed={tableActive ?? view === "table"}
                 onClick={() => onView("table")}
               >
                 <Table2 size={15} />
@@ -83,6 +87,7 @@ export function HubToolbar({
               >
                 <BarChart3 size={15} />
               </Button>
+              {viewExtra}
             </div>
           ) : null}
           {dateRange && onDateRange ? (

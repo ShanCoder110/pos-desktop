@@ -174,6 +174,7 @@ export function listUsers(
     perPage?: number;
     search?: string;
     role?: string;
+    branchId?: string;
     staffOnly?: boolean;
     isActive?: boolean;
   } = {},

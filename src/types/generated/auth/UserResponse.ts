@@ -9,6 +9,8 @@ export type UserResponse = {
   email: string | null;
   role: string;
   defaultBranchId: string | null;
+  cityId: string | null;
+  cityName: string | null;
   isActive: boolean;
   lastLoginAt: string | null;
   permissions: Array<UserPermissionResponse>;

@@ -22,6 +22,7 @@ export interface ShopSettings {
   autoSku: boolean;
   minPriceRule: boolean;
   stockPick: StockPick;
+  creditPriceMode: "WHOLESALE" | "RETAIL";
   defaultTax: number;
   defaultDiscount: number;
   isMainServer: boolean;

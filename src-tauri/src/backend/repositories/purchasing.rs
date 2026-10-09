@@ -876,36 +876,28 @@ impl PurchasingRepository {
             values.push(pattern.clone().into());
             values.push(pattern.into());
         }
-        if let Some(supplier) = query
-            .supplier
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            parts.push("lower(s.name) LIKE ?".to_owned());
-            values.push(format!("%{}%", supplier.to_lowercase()).into());
-        }
-        if let Some(entry_type) = query
-            .entry_type
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            parts.push("sle.type = ?".to_owned());
-            values.push(entry_type.to_uppercase().into());
-        }
+        crate::backend::util::push_in_like(
+            &mut parts,
+            &mut values,
+            "s.name",
+            query.supplier.as_deref(),
+        );
+        crate::backend::util::push_in_strings(
+            &mut parts,
+            &mut values,
+            "sle.type",
+            query.entry_type.as_deref(),
+            true,
+        );
         if let Some(notes) = page.notes.as_deref() {
             parts.push("lower(COALESCE(sle.notes, '')) LIKE ?".to_owned());
             values.push(format!("%{}%", notes.to_lowercase()).into());
         }
-        if let Some(balance) = page.balance.as_deref() {
-            match balance.to_ascii_lowercase().as_str() {
-                "payable" | "owes" => parts.push("sle.balance_after > 0".to_owned()),
-                "advance" => parts.push("sle.balance_after < 0".to_owned()),
-                "settled" => parts.push("sle.balance_after = 0".to_owned()),
-                _ => {}
-            }
-        }
+        crate::backend::util::push_balance_bucket_or(
+            &mut parts,
+            "sle.balance_after",
+            page.balance.as_deref(),
+        );
         if let Some(debit) = query.debit {
             parts.push("sle.debit >= ?".to_owned());
             values.push(debit.into());
@@ -1108,24 +1100,65 @@ fn po_conditions(
         parts.push("po.id = ?".to_owned());
         values.push(id.into());
     }
-    if let Some(supplier_id) = &query.supplier_id {
-        parts.push("po.supplier_id = ?".to_owned());
-        values.push(parse_uuid(supplier_id, "supplierId")?.into());
-    }
+    crate::backend::util::push_in_uuids(
+        &mut parts,
+        &mut values,
+        "po.supplier_id",
+        query.supplier_id.as_deref(),
+        "supplierId",
+    )?;
     if let Some(branch_id) = &query.branch_id {
         parts.push("po.branch_id = ?".to_owned());
         values.push(parse_uuid(branch_id, "branchId")?.into());
     }
-    if let Some(status) = &query.status {
-        parts.push("po.status = ?".to_owned());
-        values.push(status.trim().to_uppercase().into());
+    crate::backend::util::push_in_strings(
+        &mut parts,
+        &mut values,
+        "po.status",
+        query.status.as_deref(),
+        true,
+    );
+    let product_ids = crate::backend::util::csv_values(query.product_id.as_deref());
+    if !product_ids.is_empty() {
+        if product_ids.len() == 1 {
+            parts.push(
+                "EXISTS (SELECT 1 FROM purchase_order_items poi WHERE poi.purchase_order_id = po.id AND poi.product_id = ?)"
+                    .to_owned(),
+            );
+            values.push(parse_uuid(&product_ids[0], "productId")?.into());
+        } else {
+            let placeholders = product_ids
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(", ");
+            parts.push(format!(
+                "EXISTS (SELECT 1 FROM purchase_order_items poi WHERE poi.purchase_order_id = po.id AND poi.product_id IN ({placeholders}))"
+            ));
+            for product_id in product_ids {
+                values.push(parse_uuid(&product_id, "productId")?.into());
+            }
+        }
     }
-    if let Some(product_id) = &query.product_id {
-        parts.push(
-            "EXISTS (SELECT 1 FROM purchase_order_items poi WHERE poi.purchase_order_id = po.id AND poi.product_id = ?)"
-                .to_owned(),
-        );
-        values.push(parse_uuid(product_id, "productId")?.into());
+    let cities = crate::backend::util::csv_values(query.city.as_deref());
+    if !cities.is_empty() {
+        let clauses = cities
+            .iter()
+            .map(|_| {
+                "EXISTS (SELECT 1 FROM suppliers s JOIN cities c ON c.id = s.city_id WHERE s.id = po.supplier_id AND c.deleted_at IS NULL AND lower(c.name) LIKE ?)"
+            })
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        parts.push(format!("({clauses})"));
+        for name in cities {
+            values.push(format!("%{}%", name.to_lowercase()).into());
+        }
+    }
+    if let Some(min_total) = query.min_total {
+        if min_total > 0.0 {
+            parts.push("po.total >= ?".to_owned());
+            values.push(min_total.into());
+        }
     }
     if let Some(from) = query
         .occurred_from

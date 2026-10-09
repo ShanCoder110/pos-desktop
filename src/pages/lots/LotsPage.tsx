@@ -21,11 +21,14 @@ import {
   Td,
   THead,
   Th,
-  dateInRange,
   rangeForPeriod,
 } from "@/components/common";
 import type { DateRangeFilter } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
+import { applyFilterChip, chipValuesForField } from "@/utils/filterChips";
+import { chipCsv, chipCsvFromNames, chipMinNumber } from "@/utils/filterQuery";
+import { createLoadGuard, isAbortError } from "@/utils/async";
+import { listAllLots, listLots, mapLotResponse } from "@/services/lots";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { LotDetailDrawer } from "@/pages/lots/LotDetailDrawer";
 import { useLotDrawer } from "@/pages/lots/useLotDrawer";
@@ -76,28 +79,55 @@ function signedMoney(value: number) {
   return `${value > 0 ? "+" : "−"}${money(Math.abs(value))}`;
 }
 
-function minAmount(raw: string) {
-  const value = Number(String(raw).replace(/[^\d.-]/g, ""));
-  return Number.isFinite(value) ? value : 0;
-}
-
 function lotValueLeft(product: Product | undefined, lot: ProductLotRow) {
   const unitCost = product ? lotCostInStockUnit(product, lot.purchasePrice) : lot.purchasePrice;
   return lot.remainingQuantity * unitCost;
+}
+
+function lotApiFilters(
+  chips: FilterChip[],
+  search: string,
+  dateRange: DateRangeFilter,
+  sectionKpi: string | null,
+  products: Product[],
+  suppliers: { id: string; name: string }[],
+) {
+  const statusFromChips = chipCsv(chips, "status");
+  return {
+    search: search.trim() || undefined,
+    productId: chipCsvFromNames(
+      chipValuesForField(chips, "product"),
+      (name) => products.find((product) => product.name === name)?.id,
+    ),
+    supplierId: chipCsvFromNames(
+      chipValuesForField(chips, "supplier"),
+      (name) => suppliers.find((supplier) => supplier.name === name)?.id,
+    ),
+    city: chipCsv(chips, "city"),
+    lotStatus:
+      sectionKpi === "open" ? "Remaining" : sectionKpi === "empty" ? "Empty" : statusFromChips,
+    occurredFrom: dateRange.from || undefined,
+    occurredTo: dateRange.to || undefined,
+    minValueLeft: chipMinNumber(chips, "valueLeft"),
+  };
 }
 
 export function LotsPage() {
   const {
     setActions,
     sectionKpi,
-    lots: rows,
-    setLots: setRows,
     products,
     setProducts,
+    setLots: syncHubLots,
     refreshLots,
-    loading: hubLoading,
     suppliers,
   } = useProductsHub();
+  const [rows, setRows] = useState<ProductLotRow[]>([]);
+  const [filteredRows, setFilteredRows] = useState<ProductLotRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pages, setPages] = useState(1);
+  const [filteredValueTotal, setFilteredValueTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
   const { edit, nested, supplierRows, openCreate, openEdit, unlinkLot, lotDrawer } = useLotDrawer();
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
@@ -137,8 +167,78 @@ export function LotsPage() {
     return supplierCityName(id, suppliers, supplierRows);
   }
 
+  const apiFilters = useMemo(
+    () => lotApiFilters(chips, q, dateRange, sectionKpi, products, suppliers),
+    [chips, dateRange, products, q, sectionKpi, suppliers],
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [apiFilters]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const guard = createLoadGuard();
+    setLoading(true);
+    const load =
+      pageSize === PAGE_SIZE_ALL
+        ? listAllLots(apiFilters, controller.signal).then((data) => ({
+            rows: data,
+            total: data.length,
+            pages: 1,
+          }))
+        : listLots({ ...apiFilters, page, perPage: pageSize }, controller.signal).then(
+            (response) => ({
+              rows: response.data.map(mapLotResponse),
+              total: response.meta.totalItems,
+              pages: Math.max(1, response.meta.totalPages),
+            }),
+          );
+    void load
+      .then((response) => {
+        if (!guard.isActive()) return;
+        setRows(response.rows);
+        setTotal(response.total);
+        setPages(response.pages);
+      })
+      .catch((error) => {
+        if (isAbortError(error) || !guard.isActive()) return;
+        setRows([]);
+        setTotal(0);
+        setPages(1);
+      })
+      .finally(() => {
+        if (guard.isActive()) setLoading(false);
+      });
+    return () => {
+      guard.dispose();
+      controller.abort();
+    };
+  }, [apiFilters, page, pageSize]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void listAllLots(apiFilters, controller.signal)
+      .then((data) => {
+        setFilteredRows(data);
+        setFilteredValueTotal(
+          data.reduce((sum, lot) => {
+            const product = products.find((item) => item.id === lot.productId);
+            return sum + lotValueLeft(product, lot);
+          }, 0),
+        );
+      })
+      .catch((error) => {
+        if (isAbortError(error)) return;
+        setFilteredRows([]);
+        setFilteredValueTotal(0);
+      });
+    return () => controller.abort();
+  }, [apiFilters, products]);
+
   function writeLots(nextLots: ProductLotRow[], productIds: string[]) {
     setRows(nextLots);
+    syncHubLots(nextLots);
     setProducts((prev) =>
       productIds.reduce((acc, id) => syncProductStock(acc, nextLots, id), prev),
     );
@@ -195,42 +295,9 @@ export function LotsPage() {
     [cityOptions, productFilterOptions, supplierOptions],
   );
 
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const status = chips.find((c) => c.field === "status")?.value;
-    const productFilter = chips.find((c) => c.field === "product")?.value;
-    const supplierFilter = chips.find((c) => c.field === "supplier")?.value;
-    const cityFilter = chips.find((c) => c.field === "city")?.value;
-    const minValueLeft = chips.find((c) => c.field === "valueLeft")?.value;
-    const productId = productFilter
-      ? products.find((product) => product.name === productFilter)?.id
-      : undefined;
-    return rows.filter((r) => {
-      if (!dateInRange(r.receivedAt, dateRange)) return false;
-      if (productId && r.productId !== productId) return false;
-      if (supplierFilter && supplierLabel(r.supplierId) !== supplierFilter) return false;
-      if (cityFilter && cityLabel(r.supplierId) !== cityFilter) return false;
-      if (needle) {
-        const text =
-          `${r.lotNumber} ${productLabel(r.productId)} ${supplierLabel(r.supplierId)} ${cityLabel(r.supplierId)}`.toLowerCase();
-        if (!text.includes(needle)) return false;
-      }
-      if (sectionKpi === "open") return r.remainingQuantity > 0;
-      if (sectionKpi === "empty") return r.remainingQuantity <= 0;
-      if (status === "Remaining") return r.remainingQuantity > 0;
-      if (status === "Empty") return r.remainingQuantity <= 0;
-      if (minValueLeft) {
-        const value = lotValueLeft(productOf(r.productId), r);
-        if (value < minAmount(minValueLeft)) return false;
-      }
-      return true;
-    });
-  }, [rows, q, chips, sectionKpi, products, suppliers, supplierRows, dateRange]);
-
-  const filteredValueTotal = useMemo(
-    () => filtered.reduce((sum, lot) => sum + lotValueLeft(productOf(lot.productId), lot), 0),
-    [filtered, products],
-  );
+  const shown = rows;
+  const listPages = pageSize === PAGE_SIZE_ALL ? 1 : pages;
+  const listTotal = pageSize === PAGE_SIZE_ALL ? rows.length : total;
 
   useLayoutEffect(() => {
     setActions(
@@ -238,7 +305,7 @@ export function LotsPage() {
         <HubExportMenu
           filename="lots"
           sheetName="Lots"
-          rows={filtered}
+          rows={filteredRows}
           columns={[
             { label: "Lot", value: (row) => row.lotNumber },
             { label: "Product", value: (row) => productLabel(row.productId) },
@@ -262,10 +329,10 @@ export function LotsPage() {
       </>,
     );
     return () => setActions(null);
-  }, [filtered, openCreate, setActions]);
+  }, [filteredRows, openCreate, setActions]);
 
   const chartHistory = useMemo(() => {
-    const lots = filtered
+    const lots = filteredRows
       .filter((lot) => lot.productId === chartProductId)
       .slice()
       .sort(
@@ -277,7 +344,7 @@ export function LotsPage() {
       const change = previous ? lot.purchasePrice - previous.purchasePrice : 0;
       return { lot, change, previous };
     });
-  }, [filtered, chartProductId]);
+  }, [filteredRows, chartProductId]);
 
   const chartData = useMemo(
     () =>
@@ -303,9 +370,6 @@ export function LotsPage() {
   const lastIncrease = chartIncreases[chartIncreases.length - 1];
   const chartProduct = productOf(chartProductId);
 
-  const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
-  const shown =
-    pageSize === PAGE_SIZE_ALL ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
   const show = (id: string) => cols.includes(id);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
@@ -319,7 +383,7 @@ export function LotsPage() {
             onCols={setCols}
             chips={chips}
             onApply={(chip) => {
-              setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
+              setChips((prev) => applyFilterChip(prev, chip));
               setPage(1);
             }}
             onRemove={(field) => {
@@ -507,9 +571,9 @@ export function LotsPage() {
               </span>
             </div>
             <Pagination
-              page={Math.min(page, pages)}
-              pages={pages}
-              total={filtered.length}
+              page={Math.min(page, listPages)}
+              pages={listPages}
+              total={listTotal}
               pageSize={pageSize}
               onPageSize={(n) => {
                 setPageSize(n);
@@ -545,13 +609,11 @@ export function LotsPage() {
           </tr>
         </THead>
         <tbody>
-          {hubLoading.hub || hubLoading.lots ? (
+          {loading ? (
             <TableRowsSkeleton columnCount={cols.length} rows={6} selectable hasActions />
           ) : null}
-          {!hubLoading.hub && !hubLoading.lots && shown.length === 0 ? (
-            <EmptyRow cols={cols.length + 2} />
-          ) : null}
-          {!hubLoading.hub && !hubLoading.lots
+          {!loading && shown.length === 0 ? <EmptyRow cols={cols.length + 2} /> : null}
+          {!loading
             ? shown.map((row) => (
                 <tr key={row.id} className="cursor-pointer" onClick={() => setDetail(row)}>
                   <Td className="ui-check-col">

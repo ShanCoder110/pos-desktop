@@ -608,7 +608,7 @@ export function ProductsLayout() {
   const refreshLots = useCallback(async (signal?: AbortSignal) => {
     setLoading((current) => ({ ...current, lots: true }));
     try {
-      const records = await listAllLots(signal);
+      const records = await listAllLots({}, signal);
       setLots(records);
     } finally {
       setLoading((current) => ({ ...current, lots: false }));
@@ -625,7 +625,7 @@ export function ProductsLayout() {
         const [productRows, lotRows, categoryRows, unitRows, supplierRows, transferRows, poRows] =
           await Promise.all([
             listAllProducts(signal),
-            listAllLots(signal),
+            listAllLots({}, signal),
             listMasterRecords(
               "categories",
               { perPage: MAX_PAGE_SIZE, isActive: true },
@@ -643,7 +643,7 @@ export function ProductsLayout() {
                 cityName,
               })),
             ),
-            listAllTransfers(signal),
+            listAllTransfers({}, signal),
             listAllPurchaseOrders({}, signal),
           ]);
         if (guard && !guard.isActive()) return;
@@ -669,6 +669,22 @@ export function ProductsLayout() {
     [],
   );
 
+  // Keep refresh* identities stable. Wrapping them as new arrows inside this
+  // useMemo (e.g. `(s) => refreshLots(s).then(...)`) recreated them whenever
+  // `lots`/`products` changed and caused child pages to refetch in a loop.
+  const refreshHubFn = useCallback(
+    (signal?: AbortSignal) => refreshHub(signal).then(() => undefined),
+    [refreshHub],
+  );
+  const refreshLotsFn = useCallback(
+    (signal?: AbortSignal) => refreshLots(signal).then(() => undefined),
+    [refreshLots],
+  );
+  const refreshProductsFn = useCallback(
+    (signal?: AbortSignal) => refreshProducts(signal).then(() => undefined),
+    [refreshProducts],
+  );
+
   const ctx = useMemo(
     () => ({
       setActions,
@@ -687,9 +703,9 @@ export function ProductsLayout() {
       transfers,
       purchaseOrders,
       loading,
-      refreshHub: (signal?: AbortSignal) => refreshHub(signal).then(() => undefined),
-      refreshLots: (signal?: AbortSignal) => refreshLots(signal).then(() => undefined),
-      refreshProducts: (signal?: AbortSignal) => refreshProducts(signal).then(() => undefined),
+      refreshHub: refreshHubFn,
+      refreshLots: refreshLotsFn,
+      refreshProducts: refreshProductsFn,
     }),
     [
       section,
@@ -703,9 +719,9 @@ export function ProductsLayout() {
       transfers,
       purchaseOrders,
       loading,
-      refreshHub,
-      refreshLots,
-      refreshProducts,
+      refreshHubFn,
+      refreshLotsFn,
+      refreshProductsFn,
     ],
   );
 

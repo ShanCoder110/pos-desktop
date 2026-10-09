@@ -14,6 +14,8 @@ pub struct TransferListQuery {
     pub from_branch_id: Option<String>,
     #[serde(alias = "to_branch_id")]
     pub to_branch_id: Option<String>,
+    pub occurred_from: Option<String>,
+    pub occurred_to: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Validate)]

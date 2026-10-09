@@ -50,6 +50,125 @@ pub fn phone_digits(value: &str) -> String {
     value.chars().filter(|ch| ch.is_ascii_digit()).collect()
 }
 
+pub fn csv_values(value: Option<&str>) -> Vec<String> {
+    value
+        .map(|raw| {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn push_in_uuids(
+    parts: &mut Vec<String>,
+    values: &mut Vec<sea_orm::Value>,
+    column: &str,
+    raw: Option<&str>,
+    field: &str,
+) -> Result<(), AppError> {
+    let items = csv_values(raw);
+    if items.is_empty() {
+        return Ok(());
+    }
+    if items.len() == 1 {
+        parts.push(format!("{column} = ?"));
+        values.push(parse_uuid(&items[0], field)?.into());
+        return Ok(());
+    }
+    let placeholders = items.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    parts.push(format!("{column} IN ({placeholders})"));
+    for item in &items {
+        values.push(parse_uuid(item, field)?.into());
+    }
+    Ok(())
+}
+
+pub fn push_in_strings(
+    parts: &mut Vec<String>,
+    values: &mut Vec<sea_orm::Value>,
+    column: &str,
+    raw: Option<&str>,
+    uppercase: bool,
+) {
+    let items = csv_values(raw);
+    if items.is_empty() {
+        return;
+    }
+    if items.len() == 1 {
+        parts.push(format!("{column} = ?"));
+        let value = if uppercase {
+            items[0].to_uppercase()
+        } else {
+            items[0].clone()
+        };
+        values.push(value.into());
+        return;
+    }
+    let placeholders = items.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    parts.push(format!("{column} IN ({placeholders})"));
+    for item in items {
+        let value = if uppercase {
+            item.to_uppercase()
+        } else {
+            item.clone()
+        };
+        values.push(value.into());
+    }
+}
+
+pub fn push_in_like(
+    parts: &mut Vec<String>,
+    values: &mut Vec<sea_orm::Value>,
+    column: &str,
+    raw: Option<&str>,
+) {
+    let items = csv_values(raw);
+    if items.is_empty() {
+        return;
+    }
+    if items.len() == 1 {
+        parts.push(format!("lower({column}) LIKE ?"));
+        values.push(format!("%{}%", items[0].to_lowercase()).into());
+        return;
+    }
+    let clauses = items
+        .iter()
+        .map(|_| format!("lower({column}) LIKE ?"))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    parts.push(format!("({clauses})"));
+    for item in items {
+        values.push(format!("%{}%", item.to_lowercase()).into());
+    }
+}
+
+pub fn push_balance_bucket_or(parts: &mut Vec<String>, balance_expr: &str, raw: Option<&str>) {
+    let items = csv_values(raw);
+    if items.is_empty() {
+        return;
+    }
+    let clauses = items
+        .iter()
+        .filter_map(|value| match value.to_ascii_lowercase().as_str() {
+            "payable" | "owes" => Some(format!("({balance_expr}) > 0")),
+            "advance" => Some(format!("({balance_expr}) < 0")),
+            "settled" => Some(format!("({balance_expr}) = 0")),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if clauses.is_empty() {
+        return;
+    }
+    if clauses.len() == 1 {
+        parts.push(clauses[0].clone());
+        return;
+    }
+    parts.push(format!("({})", clauses.join(" OR ")));
+}
+
 pub fn optional_pk_mobile(raw: Option<&str>) -> Result<Option<String>, AppError> {
     let digits = raw.map(phone_digits).filter(|value| !value.is_empty());
     match digits {

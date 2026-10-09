@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLotDrawer } from "@/pages/lots/useLotDrawer";
 import { QuickReorderPopover } from "@/components/reorders/QuickReorderPopover";
 import {
   AlertTriangle,
+  ArrowLeft,
   ChevronDown,
   FileSpreadsheet,
   FileText,
@@ -42,6 +44,12 @@ import {
   toaster,
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
+import {
+  applyFilterChip,
+  chipValues,
+  chipValuesForField,
+  makeFilterChip,
+} from "@/utils/filterChips";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { ProductDetailDrawer } from "@/pages/products/ProductDetailDrawer";
 import { ProductForm } from "@/pages/products/ProductForm";
@@ -60,6 +68,7 @@ import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import {
   DEFAULT_PRODUCT_COLUMNS,
   DEFAULT_REORDER_COLUMNS,
+  productsHref,
   PRODUCT_COPY,
   PRODUCT_HEALTH_FROM_LABEL,
   PRODUCT_HEALTH_LABEL,
@@ -69,6 +78,7 @@ import {
   type ProductInsightMetric,
 } from "@/shared/constants/products";
 import { REORDER_COPY } from "@/shared/constants/reorders";
+import { QUERY_CATEGORY_ID } from "@/shared/constants/query";
 import { useSettings } from "@/shared/settings";
 import type { Product } from "@/shared/types";
 import type { InvoiceRow, ProductLotRow } from "@/shared/domain/types";
@@ -328,6 +338,9 @@ function ExportMenu({ rows, shopName }: { rows: Product[]; shopName: string }) {
 }
 
 export function ProductsPage() {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const categoryIdFromUrl = searchParams.get(QUERY_CATEGORY_ID);
   const { settings } = useSettings();
   const {
     setActions,
@@ -417,6 +430,28 @@ export function ProductsPage() {
   }, [tab, sectionKpi]);
 
   useEffect(() => {
+    if (!categoryIdFromUrl) return;
+    const category = categories.find((row) => row.id === categoryIdFromUrl);
+    if (!category) {
+      setSearchParams(
+        (current) => {
+          const params = new URLSearchParams(current);
+          params.delete(QUERY_CATEGORY_ID);
+          return params;
+        },
+        { replace: true },
+      );
+      return;
+    }
+    setChips((prev) => {
+      const names = chipValuesForField(prev, "category");
+      if (names.length === 1 && names[0] === category.name) return prev;
+      return applyFilterChip(prev, makeFilterChip("category", "Category", [category.name]));
+    });
+    setPage(1);
+  }, [categoryIdFromUrl, categories, setSearchParams]);
+
+  useEffect(() => {
     setCols(tab === "low" ? DEFAULT_REORDER_COLUMNS : DEFAULT_PRODUCT_COLUMNS);
   }, [tab]);
 
@@ -444,35 +479,77 @@ export function ProductsPage() {
       const text = `${r.name} ${r.sku} ${r.category}`.toLowerCase();
       if (q && !text.includes(q.toLowerCase())) return false;
       for (const chip of chips) {
+        const selected = chipValues(chip);
         if (chip.field === "health") {
-          const key = PRODUCT_HEALTH_FROM_LABEL[chip.value];
-          if (!key || !matchesHealth(r, key)) return false;
+          if (
+            selected.length &&
+            !selected.some((value) => {
+              const key = PRODUCT_HEALTH_FROM_LABEL[value];
+              return key && matchesHealth(r, key);
+            })
+          ) {
+            return false;
+          }
         }
-        if (chip.field === "name" && !r.name.toLowerCase().includes(chip.value.toLowerCase()))
-          return false;
-        if (chip.field === "sku" && !r.sku.toLowerCase().includes(chip.value.toLowerCase()))
-          return false;
-        if (chip.field === "category" && r.category !== chip.value) return false;
-        if (chip.field === "sales") {
-          if (productSalesStats(r.id, salesStats).sales < minAmount(chip.value)) return false;
-        }
-        if (chip.field === "cost" && fifoCostForProduct(r, lots) < minAmount(chip.value))
-          return false;
-        if (chip.field === "minimumPrice" && r.min < minAmount(chip.value)) return false;
-        if (chip.field === "wholesale" && r.wholesale < minAmount(chip.value)) return false;
-        if (chip.field === "retail" && r.retail < minAmount(chip.value)) return false;
-        if (chip.field === "stockQty" && r.stock < minAmount(chip.value)) return false;
         if (
-          chip.field === "stockValue" &&
-          openLotStockValue(lots, rows, r.id) < minAmount(chip.value)
-        )
+          chip.field === "name" &&
+          selected.length &&
+          !selected.some((value) => r.name.toLowerCase().includes(value.toLowerCase()))
+        ) {
           return false;
-        if (chip.field === "margin" && marginPct(r, lots) < minAmount(chip.value)) return false;
+        }
+        if (
+          chip.field === "sku" &&
+          selected.length &&
+          !selected.some((value) => r.sku.toLowerCase().includes(value.toLowerCase()))
+        ) {
+          return false;
+        }
+        if (chip.field === "category" && selected.length && !selected.includes(r.category))
+          return false;
+        if (chip.field === "sales") {
+          const min = Math.min(...selected.map((value) => minAmount(value)));
+          if (productSalesStats(r.id, salesStats).sales < min) return false;
+        }
+        if (chip.field === "cost") {
+          const min = Math.min(...selected.map((value) => minAmount(value)));
+          if (fifoCostForProduct(r, lots) < min) return false;
+        }
+        if (chip.field === "minimumPrice") {
+          const min = Math.min(...selected.map((value) => minAmount(value)));
+          if (r.min < min) return false;
+        }
+        if (chip.field === "wholesale") {
+          const min = Math.min(...selected.map((value) => minAmount(value)));
+          if (r.wholesale < min) return false;
+        }
+        if (chip.field === "retail") {
+          const min = Math.min(...selected.map((value) => minAmount(value)));
+          if (r.retail < min) return false;
+        }
+        if (chip.field === "stockQty") {
+          const min = Math.min(...selected.map((value) => minAmount(value)));
+          if (r.stock < min) return false;
+        }
+        if (chip.field === "stockValue") {
+          const min = Math.min(...selected.map((value) => minAmount(value)));
+          if (openLotStockValue(lots, rows, r.id) < min) return false;
+        }
+        if (chip.field === "margin") {
+          const min = Math.min(...selected.map((value) => minAmount(value)));
+          if (marginPct(r, lots) < min) return false;
+        }
         if (chip.field === "stock") {
-          const tone = stockTone(r);
-          if (chip.value === "In stock" && tone !== "ok") return false;
-          if (chip.value === "Low stock" && tone !== "warn") return false;
-          if (chip.value === "Out of stock" && tone !== "danger") return false;
+          if (selected.length) {
+            const tone = stockTone(r);
+            const ok = selected.some((value) => {
+              if (value === "In stock") return tone === "ok";
+              if (value === "Low stock") return tone === "warn";
+              if (value === "Out of stock") return tone === "danger";
+              return false;
+            });
+            if (!ok) return false;
+          }
         }
       }
       if (tab === "low") {
@@ -513,14 +590,28 @@ export function ProductsPage() {
   const show = (id: string) => cols.includes(id);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
+  function clearCategoryFromUrl() {
+    if (!searchParams.get(QUERY_CATEGORY_ID)) return;
+    setSearchParams(
+      (current) => {
+        const params = new URLSearchParams(current);
+        params.delete(QUERY_CATEGORY_ID);
+        return params;
+      },
+      { replace: true },
+    );
+  }
+
   function removeChip(field: string) {
     if (field === "health") setHealth(null);
+    if (field === "category") clearCategoryFromUrl();
     setChips((prev) => prev.filter((c) => c.field !== field));
     setPage(1);
   }
 
   function clearChips() {
     setHealth(null);
+    clearCategoryFromUrl();
     setChips([]);
     setPage(1);
   }
@@ -690,7 +781,7 @@ export function ProductsPage() {
             onCols={setCols}
             chips={chips}
             onApply={(chip) => {
-              setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
+              setChips((prev) => applyFilterChip(prev, chip));
               setPage(1);
             }}
             onRemove={removeChip}
@@ -769,43 +860,54 @@ export function ProductsPage() {
               />
             }
             trailing={
-              selected.length > 0 ? (
-                <BulkActions count={selected.length}>
-                  <BulkAction
-                    icon={<FileText size={14} />}
-                    onClick={() => exportProductsCsv(picked, "selected-products.csv")}
+              <>
+                {categoryIdFromUrl ? (
+                  <Button
+                    variant="ghost"
+                    icon={<ArrowLeft size={14} />}
+                    onClick={() => navigate(productsHref("categories"))}
                   >
-                    CSV
-                  </BulkAction>
-                  <BulkAction
-                    icon={<FileSpreadsheet size={14} />}
-                    onClick={() => exportProductsExcel(picked, "selected-products.xls")}
-                  >
-                    Excel
-                  </BulkAction>
-                  <BulkAction
-                    icon={<Receipt size={14} />}
-                    onClick={() => printProducts(picked, "thermal", settings.shopName)}
-                  >
-                    Thermal printer
-                  </BulkAction>
-                  <BulkAction
-                    icon={<Printer size={14} />}
-                    onClick={() => printProducts(picked, "a4", settings.shopName)}
-                  >
-                    A4
-                  </BulkAction>
-                  <BulkAction
-                    icon={<Tags size={14} />}
-                    onClick={() => {
-                      const first = picked[0];
-                      if (first) openEdit(first);
-                    }}
-                  >
-                    Edit selected
-                  </BulkAction>
-                </BulkActions>
-              ) : null
+                    Back to categories
+                  </Button>
+                ) : null}
+                {selected.length > 0 ? (
+                  <BulkActions count={selected.length}>
+                    <BulkAction
+                      icon={<FileText size={14} />}
+                      onClick={() => exportProductsCsv(picked, "selected-products.csv")}
+                    >
+                      CSV
+                    </BulkAction>
+                    <BulkAction
+                      icon={<FileSpreadsheet size={14} />}
+                      onClick={() => exportProductsExcel(picked, "selected-products.xls")}
+                    >
+                      Excel
+                    </BulkAction>
+                    <BulkAction
+                      icon={<Receipt size={14} />}
+                      onClick={() => printProducts(picked, "thermal", settings.shopName)}
+                    >
+                      Thermal printer
+                    </BulkAction>
+                    <BulkAction
+                      icon={<Printer size={14} />}
+                      onClick={() => printProducts(picked, "a4", settings.shopName)}
+                    >
+                      A4
+                    </BulkAction>
+                    <BulkAction
+                      icon={<Tags size={14} />}
+                      onClick={() => {
+                        const first = picked[0];
+                        if (first) openEdit(first);
+                      }}
+                    >
+                      Edit selected
+                    </BulkAction>
+                  </BulkActions>
+                ) : null}
+              </>
             }
           />
         }

@@ -32,7 +32,7 @@ export const managementNav: { label: string; items: NavItem[] }[] = [
     label: "SALES",
     items: [
       { to: routes.sales, label: "Sales", icon: Receipt },
-      { to: routes.credit, label: "Customer credit", icon: BookOpen },
+      { to: routes.credit, label: "Credit sales", icon: BookOpen },
     ],
   },
   {
@@ -75,7 +75,10 @@ export const pageMeta: Record<string, { title: string; subtitle?: string }> = {
   [routes.salesProducts]: { title: "Sales", subtitle: "Paid, credit, partial, and repair sales" },
   [routes.invoices]: { title: "Sales", subtitle: "Completed bills from the counter" },
   [routes.returns]: { title: "Sales", subtitle: "Refunds and replacements against invoices" },
-  [routes.credit]: { title: "Customer credit", subtitle: "Customer balance. + owes, − advance" },
+  [routes.credit]: {
+    title: "Credit sales",
+    subtitle: "Customer book, credit invoices, and collections",
+  },
   [routes.products]: { title: "Products", subtitle: "Catalog, lots, units, and transfers" },
   [routes.productsClaims]: { title: "Sales", subtitle: "Products with claims" },
   [routes.productsLow]: { title: "Products", subtitle: "Plan stock replenishment" },

@@ -27,6 +27,9 @@ pub struct MasterRequest {
     pub precision: Option<i16>,
     #[serde(default)]
     pub is_walk_in: bool,
+    /// When set on a customer, enrolls/unenrolls them in the credit sales book.
+    #[serde(default)]
+    pub in_credit_book: Option<bool>,
     /// Opening balance. Positive = shop owes supplier / customer owes shop. Negative = advance.
     #[serde(default)]
     pub previous_balance: Option<f64>,
@@ -63,6 +66,13 @@ pub struct MasterResponse {
     pub precision: Option<i16>,
     pub balance: Option<f64>,
     pub is_walk_in: Option<bool>,
+    pub in_credit_book: Option<bool>,
+    pub credit_sale_count: Option<i64>,
+    pub open_credit_sale_count: Option<i64>,
+    pub credit_sale_total: Option<f64>,
+    pub collected_total: Option<f64>,
+    pub profit_on_hold: Option<f64>,
+    pub last_credit_sale_at: Option<String>,
     pub city_id: Option<String>,
     pub city_name: Option<String>,
     pub created_at: String,

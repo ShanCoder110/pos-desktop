@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   BulkAction,
   BulkActions,
@@ -24,10 +25,15 @@ import {
   toaster,
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
+import { applyFilterChip } from "@/utils/filterChips";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
-import { CATEGORY_COPY, CATEGORY_TABLE_COLUMNS } from "@/shared/constants/products";
+import {
+  CATEGORY_COPY,
+  CATEGORY_TABLE_COLUMNS,
+  productsCategoryHref,
+} from "@/shared/constants/products";
 import { FORM_COPY } from "@/shared/constants/fields";
 import { createMasterRecord, deleteMasterRecord, updateMasterRecord } from "@/services/masters";
 import { useAppForm } from "@/hooks/useAppForm";
@@ -75,6 +81,7 @@ function CategoryEditForm({
 }
 
 export function CategoriesPage() {
+  const navigate = useNavigate();
   const {
     setActions,
     sectionKpi,
@@ -163,6 +170,10 @@ export function CategoriesPage() {
     }
   }
 
+  function openCategory(category: CategoryRow) {
+    navigate(productsCategoryHref(category.id));
+  }
+
   async function deleteCategories(ids: string[]) {
     if (ids.length === 0) return;
     setLoading((current) => ({ ...current, deleting: true }));
@@ -189,7 +200,7 @@ export function CategoriesPage() {
             onCols={setCols}
             chips={chips}
             onApply={(chip) => {
-              setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
+              setChips((prev) => applyFilterChip(prev, chip));
               setPage(1);
             }}
             onRemove={(field) => {
@@ -269,30 +280,39 @@ export function CategoriesPage() {
           {!hubLoading.hub && shown.length === 0 ? <EmptyRow cols={cols.length + 2} /> : null}
           {!hubLoading.hub
             ? shown.map((row) => (
-                <tr key={row.id}>
+                <tr key={row.id} className="cursor-pointer" onClick={() => openCategory(row)}>
                   <Td className="ui-check-col">
-                    <Checkbox
-                      checked={selected.includes(row.id)}
-                      onChange={(e) => {
-                        setSelected((s) =>
-                          e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
-                        );
-                      }}
-                    />
+                    <div onClick={(event) => event.stopPropagation()}>
+                      <Checkbox
+                        checked={selected.includes(row.id)}
+                        onChange={(e) => {
+                          setSelected((s) =>
+                            e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
+                          );
+                        }}
+                      />
+                    </div>
                   </Td>
                   <Td>{row.name}</Td>
                   {cols.includes("products") ? (
-                    <Td numeric>{categoryProductCount(row, products)}</Td>
+                    <Td numeric className="text-accent">
+                      {categoryProductCount(row, products)}
+                    </Td>
                   ) : null}
                   <Td>
-                    <Menu>
-                      <MenuItem icon={<Pencil size={14} />} onClick={() => setEdit(row)}>
-                        Edit
-                      </MenuItem>
-                      <MenuItem danger icon={<Trash2 size={14} />} onClick={() => setRemove(row)}>
-                        Delete
-                      </MenuItem>
-                    </Menu>
+                    <div onClick={(event) => event.stopPropagation()}>
+                      <Menu>
+                        <MenuItem icon={<Eye size={14} />} onClick={() => openCategory(row)}>
+                          View products
+                        </MenuItem>
+                        <MenuItem icon={<Pencil size={14} />} onClick={() => setEdit(row)}>
+                          Edit
+                        </MenuItem>
+                        <MenuItem danger icon={<Trash2 size={14} />} onClick={() => setRemove(row)}>
+                          Delete
+                        </MenuItem>
+                      </Menu>
+                    </div>
                   </Td>
                 </tr>
               ))

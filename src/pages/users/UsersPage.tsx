@@ -34,6 +34,8 @@ import {
   toaster,
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
+import { applyFilterChip, chipValuesForField } from "@/utils/filterChips";
+import { chipCsvFromNames } from "@/utils/filterQuery";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { UserForm, USER_FORM_ID, type UserFormValues } from "@/pages/users/UserForm";
 import type { Branch, StaffUser } from "@/shared/domain/types";
@@ -73,10 +75,6 @@ import { formatEntityRef, shortError } from "@/utils/format";
 
 const PAGE = DEFAULT_PAGE_SIZE;
 
-function chipValue(chips: FilterChip[], field: string) {
-  return chips.find((chip) => chip.field === field)?.value ?? "";
-}
-
 function deriveUsername(email: string) {
   const local = email.trim().split("@")[0]?.trim();
   return local || "user";
@@ -89,13 +87,30 @@ function roleFromChip(value: string) {
   return USER_ACCESS_ROLES.find((role) => userAccessRoleLabel(role) === value);
 }
 
-function userQuery(search: string, chips: FilterChip[]) {
-  const status = chipValue(chips, "status");
+function userQuery(search: string, chips: FilterChip[], branches: Branch[]) {
+  const statuses = chipValuesForField(chips, "status");
+  const status = statuses.length === 1 ? statuses[0] : "";
+  const active = statuses.includes(STAFF_STATUS_ACTIVE);
+  const inactive = statuses.includes(STAFF_STATUS_INACTIVE);
   return {
     search: search.trim() || undefined,
-    role: roleFromChip(chipValue(chips, "role")),
+    role: chipCsvFromNames(chipValuesForField(chips, "role"), (label) => roleFromChip(label)),
+    branchId: chipCsvFromNames(
+      chipValuesForField(chips, "branch"),
+      (name) => branches.find((branch) => branch.name === name)?.id,
+    ),
     isActive:
-      status === STAFF_STATUS_ACTIVE ? true : status === STAFF_STATUS_INACTIVE ? false : undefined,
+      statuses.length === 0 || (active && inactive)
+        ? undefined
+        : status === STAFF_STATUS_ACTIVE
+          ? true
+          : status === STAFF_STATUS_INACTIVE
+            ? false
+            : active
+              ? true
+              : inactive
+                ? false
+                : undefined,
   };
 }
 
@@ -104,13 +119,6 @@ function permissionsPayload(permissions: Record<string, boolean>) {
     permissionKey,
     isAllowed: Boolean(permissions[permissionKey]),
   }));
-}
-
-function paginate<T>(rows: T[], page: number, pageSize: number) {
-  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
-  const safePage = Math.min(page, pages);
-  const start = (safePage - 1) * pageSize;
-  return { rows: rows.slice(start, start + pageSize), pages, total: rows.length, page: safePage };
 }
 
 const blankUser = (branches: Branch[]): StaffUser => ({
@@ -148,13 +156,7 @@ export function UsersPage() {
   const [loading, setLoading] = useState({ fetching: true, saving: false, deleting: false });
 
   const canViewUsers = staffCanViewUsers(viewerRole);
-  const apiFilters = useMemo(() => userQuery(search, chips), [chips, search]);
-  const branchFilterId = useMemo(() => {
-    const name = chipValue(chips, "branch");
-    if (!name) return undefined;
-    return branches.find((branch) => branch.name === name)?.id;
-  }, [branches, chips]);
-  const useClientBranch = Boolean(branchFilterId);
+  const apiFilters = useMemo(() => userQuery(search, chips, branches), [branches, chips, search]);
 
   const filterFields = useMemo(
     () =>
@@ -192,25 +194,14 @@ export function UsersPage() {
 
     const load = async () => {
       try {
-        if (useClientBranch) {
-          const all = await listAllUsers(apiFilters, controller.signal);
-          const filtered = all.map(mapUser).filter((row) => row.branchId === branchFilterId);
-          const userPage = paginate(filtered, page, pageSize);
-          if (!guard.isActive()) return;
-          setRows(userPage.rows);
-          setTotal(userPage.total);
-          setPages(userPage.pages);
-          setChartRows(filtered);
-        } else {
-          const response = await listUsers(
-            { ...apiFilters, page, perPage: pageSize },
-            controller.signal,
-          );
-          if (!guard.isActive()) return;
-          setRows(response.data.map(mapUser));
-          setTotal(response.meta.totalItems);
-          setPages(Math.max(1, response.meta.totalPages));
-        }
+        const response = await listUsers(
+          { ...apiFilters, page, perPage: pageSize },
+          controller.signal,
+        );
+        if (!guard.isActive()) return;
+        setRows(response.data.map(mapUser));
+        setTotal(response.meta.totalItems);
+        setPages(Math.max(1, response.meta.totalPages));
       } catch (error) {
         if (isAbortError(error)) return;
         if (!guard.isActive()) return;
@@ -229,10 +220,9 @@ export function UsersPage() {
       guard.dispose();
       controller.abort();
     };
-  }, [apiFilters, branchFilterId, page, pageSize, reloadKey, useClientBranch]);
+  }, [apiFilters, page, pageSize, reloadKey]);
 
   useEffect(() => {
-    if (useClientBranch) return;
     const controller = new AbortController();
     void listAllUsers(apiFilters, controller.signal)
       .then((response) => setChartRows(response.map(mapUser)))
@@ -241,27 +231,10 @@ export function UsersPage() {
         setChartRows([]);
       });
     return () => controller.abort();
-  }, [apiFilters, reloadKey, useClientBranch]);
+  }, [apiFilters, reloadKey]);
 
   useEffect(() => {
     const controller = new AbortController();
-    if (useClientBranch) {
-      void listAllUsers(apiFilters, controller.signal)
-        .then((response) => {
-          const filtered = response.map(mapUser).filter((row) => row.branchId === branchFilterId);
-          setCounts({
-            all: filtered.length,
-            active: filtered.filter((row) => row.isActive).length,
-            owners: filtered.filter((row) => row.role === STAFF_ROLE_OWNER).length,
-          });
-        })
-        .catch((error) => {
-          if (isAbortError(error)) return;
-          setCounts({ all: 0, active: 0, owners: 0 });
-        });
-      return () => controller.abort();
-    }
-
     void Promise.all([
       listUsers({ ...apiFilters, page: 1, perPage: 1 }, controller.signal),
       listUsers({ ...apiFilters, page: 1, perPage: 1, isActive: true }, controller.signal),
@@ -279,7 +252,7 @@ export function UsersPage() {
         setCounts({ all: 0, active: 0, owners: 0 });
       });
     return () => controller.abort();
-  }, [apiFilters, branchFilterId, reloadKey, useClientBranch]);
+  }, [apiFilters, reloadKey]);
 
   const branchName = (id: string) => branches.find((branch) => branch.id === id)?.name ?? "—";
   const isNew = Boolean(edit && !edit.id);
@@ -403,7 +376,7 @@ export function UsersPage() {
             onCols={setCols}
             chips={chips}
             onApply={(chip) => {
-              setChips((current) => [...current.filter((item) => item.field !== chip.field), chip]);
+              setChips((current) => applyFilterChip(current, chip));
               setPage(1);
             }}
             onRemove={(field) => {

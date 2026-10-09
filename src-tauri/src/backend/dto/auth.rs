@@ -105,6 +105,8 @@ pub struct UserListQuery {
     #[serde(flatten)]
     pub page: PageQuery,
     pub role: Option<String>,
+    #[serde(alias = "branch_id")]
+    pub branch_id: Option<String>,
     pub staff_only: Option<bool>,
 }
 

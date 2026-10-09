@@ -5,6 +5,7 @@ import { RootRedirect } from "@/components/common/auth/RootRedirect";
 import { SessionProvider } from "@/components/common/auth/SessionProvider";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { AnalyticsPage } from "@/pages/analytics/AnalyticsPage";
+import { CreditCustomerPage } from "@/pages/credit/CreditCustomerPage";
 import { CreditSalesPage } from "@/pages/credit/CreditSalesPage";
 import { CustomersPage } from "@/pages/customers/CustomersPage";
 import { DashboardPage } from "@/pages/dashboard/DashboardPage";
@@ -61,6 +62,7 @@ export default function App() {
                 </Route>
                 <Route path={routes.invoices} element={<Navigate to={routes.sales} replace />} />
                 <Route path={routes.credit} element={<CreditSalesPage />} />
+                <Route path={`${routes.credit}/:customerId`} element={<CreditCustomerPage />} />
                 <Route
                   path={routes.returns}
                   element={<Navigate to={routes.salesReturns} replace />}

@@ -164,7 +164,11 @@ impl SalesRepository {
         request: &CompleteSaleRequest,
         invoice_number: String,
     ) -> Result<Uuid, AppError> {
-        let cash_session_id = context.require_cash_session()?;
+        let cash_session_id = if request.payments.is_empty() {
+            context.cash_session_id
+        } else {
+            Some(context.require_cash_session()?)
+        };
         let now = now_utc();
         let invoice_id = Uuid::new_v4();
         let customer_id = parse_optional_uuid(request.customer_id.as_deref(), "customerId")?;
@@ -438,6 +442,14 @@ impl SalesRepository {
                             context.user_id.into(),
                             now.into(),
                         ],
+                    ))
+                    .await?;
+                // Enroll named customers in the credit sales book when they take credit.
+                transaction
+                    .execute_raw(Statement::from_sql_and_values(
+                        DbBackend::Sqlite,
+                        "UPDATE customers SET in_credit_book = 1, updated_at = ? WHERE id = ? AND is_walk_in = 0 AND deleted_at IS NULL",
+                        [now.to_rfc3339().into(), customer_id.into()],
                     ))
                     .await?;
             }

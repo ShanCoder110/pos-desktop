@@ -39,6 +39,7 @@ export { PageHead, EmptyRow } from "@/components/common/PageHead";
 export { Pagination, PAGE_SIZE_ALL, PAGE_SIZE_OPTIONS } from "@/components/common/Pagination";
 export { Popover } from "@/components/common/Popover";
 export { ProductSearch } from "@/components/common/ProductSearch";
+export { CustomerSearch } from "@/components/common/CustomerSearch";
 export { ProductQuantityPicker } from "@/components/common/ProductQuantityPicker";
 export type { ProductQuantityValue } from "@/components/common/ProductQuantityPicker";
 export { SearchInput } from "@/components/common/SearchInput";

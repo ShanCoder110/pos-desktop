@@ -9,14 +9,19 @@ export const CUSTOMER_TABS = [
   { id: CUSTOMER_TAB_LEDGER, label: "Customer ledger" },
 ] as const;
 
+export const CREDIT_TAB_BOOKS = "credit-books";
+export const CREDIT_TAB_LEDGER = "ledger";
+
 export const CREDIT_TABS = [
-  { id: "all", label: "All" },
-  { id: "owe", label: "Owes" },
-  { id: "advance", label: "Advance" },
-  { id: "settled", label: "Settled" },
+  { id: CREDIT_TAB_BOOKS, label: "Credit books" },
+  { id: CREDIT_TAB_LEDGER, label: "Ledger" },
 ] as const;
 
 export const CUSTOMER_CREDIT_ROUTE = routes.credit;
+
+export function creditCustomerHref(customerId: string) {
+  return `${routes.credit}/${encodeURIComponent(customerId)}`;
+}
 
 export const CUSTOMER_STATUS_ACTIVE = "Active";
 export const CUSTOMER_STATUS_INACTIVE = "Inactive";
@@ -31,6 +36,20 @@ export const CUSTOMER_TABLE_COLUMNS: ColumnOption[] = [
   { id: "city", label: "City" },
   { id: "balance", label: "Balance" },
 ];
+
+export const CREDIT_TABLE_COLUMNS: ColumnOption[] = [
+  { id: "name", label: "Customer" },
+  { id: "phone", label: "Phone" },
+  { id: "openSales", label: "Open sales" },
+  { id: "balance", label: "Balance" },
+  { id: "profitHold", label: "Profit on hold" },
+  { id: "creditTotal", label: "Credit total" },
+  { id: "collected", label: "Collected" },
+  { id: "lastSale", label: "Last credit sale" },
+  { id: "address", label: "Address" },
+];
+
+export const CREDIT_DEFAULT_COLUMNS = ["name", "phone", "openSales", "balance"];
 
 export const CUSTOMER_LEDGER_COLUMNS: ColumnOption[] = [
   { id: "occurredAt", label: "When" },
@@ -171,8 +190,30 @@ export const CUSTOMER_COPY = {
 } as const;
 
 export const CREDIT_COPY = {
-  title: "Customer credit",
-  hint: "+ balance = customer owes. 0 = settled. − balance = advance on the next bill. Walk-in invoices never hit this ledger.",
+  title: "Credit sales",
+  hint: "Add a customer to the credit book, open their page, then record products they took on credit. Balance updates from each credit sale and payment.",
+  customerBook: "Customers book",
+  addBook: "Add to book",
+  addBookSaved: "Customer added to credit book",
+  addBookFailed: "Could not add customer to credit book",
+  viewProducts: "Open credit sales",
+  backToBook: "Back to customers book",
+  newCreditSale: "New credit sale",
+  newCreditSaleSubtitle:
+    "Add products the customer took on credit. Stock is reduced and their balance increases (Owes).",
+  creditSalesFor: "Credit sales for",
+  noCreditSales: "No data found",
+  noBookCustomers: "No customers in the credit book yet.",
+  noBookMatch: "No matching credit records found.",
+  saleSaved: "Credit sale recorded",
+  saleFailed: "Could not record credit sale",
+  addLine: "Add line",
+  linesRequired: "Add at least one product line",
+  productRequired: "Choose a product",
+  selectProduct: "Choose product",
+  tabCreditSales: "Credit sales",
+  tabInvoices: "Invoices",
+  tabLedger: "Ledger",
   owedToShop: "Owed to shop",
   owingCount: "Owing",
   advanceHeld: "Advance",
@@ -181,6 +222,13 @@ export const CREDIT_COPY = {
   customersHint: "Customers",
   advanceHint: "Held for next bill",
   zeroBalanceHint: "Zero balance",
+  editCustomer: "Edit",
+  moveToTrash: "Move to Trash",
+  trashConfirmTitle: "Move customer to Trash?",
+  trashMoved: "moved to Trash.",
+  trashFailed: "Could not move this customer to Trash.",
+  customerUpdated: "Customer updated.",
+  customerUpdateFailed: "Could not update this customer.",
 } as const;
 
 export const CUSTOMER_PLACEHOLDERS = {

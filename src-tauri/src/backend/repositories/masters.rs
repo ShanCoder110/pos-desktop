@@ -33,11 +33,11 @@ impl MasterKind {
 
     const fn projection(self) -> &'static str {
         match self {
-            Self::Category => "id, name, NULL AS symbol, NULL AS phone, NULL AS email, NULL AS address, description AS notes, is_active, NULL AS precision, NULL AS balance, NULL AS is_walk_in, NULL AS city_id, NULL AS city_name, created_at, updated_at",
-            Self::City => "id, name, NULL AS symbol, NULL AS phone, NULL AS email, NULL AS address, NULL AS notes, is_active, NULL AS precision, NULL AS balance, NULL AS is_walk_in, NULL AS city_id, NULL AS city_name, created_at, updated_at",
-            Self::Unit => "id, name, symbol, NULL AS phone, NULL AS email, NULL AS address, NULL AS notes, is_active, precision, NULL AS balance, NULL AS is_walk_in, NULL AS city_id, NULL AS city_name, created_at, updated_at",
-            Self::Supplier => "id, name, NULL AS symbol, phone, email, address, notes, is_active, NULL AS precision, CAST((SELECT sle.balance_after FROM supplier_ledger_entries sle WHERE sle.supplier_id = suppliers.id ORDER BY sle.occurred_at DESC, sle.created_at DESC LIMIT 1) AS REAL) AS balance, NULL AS is_walk_in, city_id, (SELECT c.name FROM cities c WHERE c.id = suppliers.city_id AND c.deleted_at IS NULL LIMIT 1) AS city_name, created_at, updated_at",
-            Self::Customer => "id, name, NULL AS symbol, phone, email, address, notes, is_active, NULL AS precision, CAST((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id ORDER BY cle.occurred_at DESC, cle.created_at DESC LIMIT 1) AS REAL) AS balance, is_walk_in, city_id, (SELECT c.name FROM cities c WHERE c.id = customers.city_id AND c.deleted_at IS NULL LIMIT 1) AS city_name, created_at, updated_at",
+            Self::Category => "id, name, NULL AS symbol, NULL AS phone, NULL AS email, NULL AS address, description AS notes, is_active, NULL AS precision, NULL AS balance, NULL AS is_walk_in, NULL AS in_credit_book, NULL AS credit_sale_count, NULL AS open_credit_sale_count, NULL AS credit_sale_total, NULL AS collected_total, NULL AS profit_on_hold, NULL AS last_credit_sale_at, NULL AS city_id, NULL AS city_name, created_at, updated_at",
+            Self::City => "id, name, NULL AS symbol, NULL AS phone, NULL AS email, NULL AS address, NULL AS notes, is_active, NULL AS precision, NULL AS balance, NULL AS is_walk_in, NULL AS in_credit_book, NULL AS credit_sale_count, NULL AS open_credit_sale_count, NULL AS credit_sale_total, NULL AS collected_total, NULL AS profit_on_hold, NULL AS last_credit_sale_at, NULL AS city_id, NULL AS city_name, created_at, updated_at",
+            Self::Unit => "id, name, symbol, NULL AS phone, NULL AS email, NULL AS address, NULL AS notes, is_active, precision, NULL AS balance, NULL AS is_walk_in, NULL AS in_credit_book, NULL AS credit_sale_count, NULL AS open_credit_sale_count, NULL AS credit_sale_total, NULL AS collected_total, NULL AS profit_on_hold, NULL AS last_credit_sale_at, NULL AS city_id, NULL AS city_name, created_at, updated_at",
+            Self::Supplier => "id, name, NULL AS symbol, phone, email, address, notes, is_active, NULL AS precision, CAST((SELECT sle.balance_after FROM supplier_ledger_entries sle WHERE sle.supplier_id = suppliers.id ORDER BY sle.occurred_at DESC, sle.created_at DESC LIMIT 1) AS REAL) AS balance, NULL AS is_walk_in, NULL AS in_credit_book, NULL AS credit_sale_count, NULL AS open_credit_sale_count, NULL AS credit_sale_total, NULL AS collected_total, NULL AS profit_on_hold, NULL AS last_credit_sale_at, city_id, (SELECT c.name FROM cities c WHERE c.id = suppliers.city_id AND c.deleted_at IS NULL LIMIT 1) AS city_name, created_at, updated_at",
+            Self::Customer => "id, name, NULL AS symbol, phone, email, address, notes, is_active, NULL AS precision, CAST((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id ORDER BY cle.occurred_at DESC, cle.created_at DESC LIMIT 1) AS REAL) AS balance, is_walk_in, in_credit_book, (SELECT COUNT(*) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type = 'SALE') AS credit_sale_count, (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = customers.id AND i.credit_amount > 0 AND i.status = 'COMPLETED' AND i.deleted_at IS NULL) AS open_credit_sale_count, CAST(COALESCE((SELECT SUM(cle.debit) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type = 'SALE'), 0) AS REAL) AS credit_sale_total, CAST(COALESCE((SELECT SUM(cle.credit) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type IN ('PAYMENT_RECEIVED', 'PAYMENT')), 0) AS REAL) AS collected_total, CAST(COALESCE((SELECT SUM(ii.gross_profit * CASE WHEN i.total > 0 THEN i.credit_amount / i.total ELSE 0 END) FROM invoices i INNER JOIN invoice_items ii ON ii.invoice_id = i.id WHERE i.customer_id = customers.id AND i.credit_amount > 0 AND i.status = 'COMPLETED' AND i.deleted_at IS NULL), 0) AS REAL) AS profit_on_hold, (SELECT MAX(cle.occurred_at) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type = 'SALE') AS last_credit_sale_at, city_id, (SELECT c.name FROM cities c WHERE c.id = customers.city_id AND c.deleted_at IS NULL LIMIT 1) AS city_name, created_at, updated_at",
         }
     }
 }
@@ -55,6 +55,13 @@ struct MasterRow {
     precision: Option<i16>,
     balance: Option<rust_decimal::Decimal>,
     is_walk_in: Option<bool>,
+    in_credit_book: Option<bool>,
+    credit_sale_count: Option<i64>,
+    open_credit_sale_count: Option<i64>,
+    credit_sale_total: Option<rust_decimal::Decimal>,
+    collected_total: Option<rust_decimal::Decimal>,
+    profit_on_hold: Option<rust_decimal::Decimal>,
+    last_credit_sale_at: Option<String>,
     city_id: Option<Uuid>,
     city_name: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
@@ -81,6 +88,13 @@ impl From<MasterRow> for MasterResponse {
             balance: row.balance.and_then(|value| value.to_f64()),
             is_walk_in: row.is_walk_in,
             city_id: row.city_id.map(|value| value.to_string()),
+            in_credit_book: row.in_credit_book,
+            credit_sale_count: row.credit_sale_count,
+            open_credit_sale_count: row.open_credit_sale_count,
+            credit_sale_total: row.credit_sale_total.and_then(|value| value.to_f64()),
+            collected_total: row.collected_total.and_then(|value| value.to_f64()),
+            profit_on_hold: row.profit_on_hold.and_then(|value| value.to_f64()),
+            last_credit_sale_at: row.last_credit_sale_at,
             city_name: row.city_name,
             created_at: row.created_at.to_rfc3339(),
             updated_at: row.updated_at.to_rfc3339(),
@@ -346,12 +360,13 @@ fn conditions(kind: MasterKind, query: &PageQuery) -> (String, Vec<sea_orm::Valu
                 MasterKind::Customer => CUSTOMER_BALANCE_SQL,
                 _ => "",
             };
-            match balance.to_ascii_lowercase().as_str() {
-                "payable" | "owes" => parts.push(format!("({expr}) > 0")),
-                "advance" => parts.push(format!("({expr}) < 0")),
-                "settled" => parts.push(format!("({expr}) = 0")),
-                _ => {}
-            }
+            crate::backend::util::push_balance_bucket_or(&mut parts, expr, Some(balance));
+        }
+    }
+    if matches!(kind, MasterKind::Customer) {
+        if let Some(in_credit_book) = query.in_credit_book {
+            parts.push("in_credit_book = ?".to_owned());
+            values.push(in_credit_book.into());
         }
     }
     (parts.join(" AND "), values)
@@ -404,8 +419,21 @@ fn insert_statement(
             vec![id.into(), request.name.trim().into(), request.phone.clone().unwrap_or_default().into(), request.email.clone().unwrap_or_default().into(), request.address.clone().unwrap_or_default().into(), city_id.into(), request.notes.clone().unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), now.to_rfc3339().into()],
         ),
         MasterKind::Customer => (
-            "INSERT INTO customers (id, name, phone, email, address, city_id, is_walk_in, notes, is_active, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
-            vec![id.into(), request.name.trim().into(), request.phone.clone().unwrap_or_default().into(), request.email.clone().into(), request.address.clone().unwrap_or_default().into(), city_id.into(), request.is_walk_in.into(), request.notes.clone().unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), now.to_rfc3339().into()],
+            "INSERT INTO customers (id, name, phone, email, address, city_id, is_walk_in, in_credit_book, notes, is_active, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+            vec![
+                id.into(),
+                request.name.trim().into(),
+                request.phone.clone().unwrap_or_default().into(),
+                request.email.clone().into(),
+                request.address.clone().unwrap_or_default().into(),
+                city_id.into(),
+                request.is_walk_in.into(),
+                request.in_credit_book.unwrap_or(false).into(),
+                request.notes.clone().unwrap_or_default().into(),
+                request.is_active.into(),
+                now.to_rfc3339().into(),
+                now.to_rfc3339().into(),
+            ],
         ),
     }
 }
@@ -435,8 +463,20 @@ fn update_statement(
             vec![request.name.trim().into(), request.phone.clone().unwrap_or_default().into(), request.email.clone().unwrap_or_default().into(), request.address.clone().unwrap_or_default().into(), city_id.into(), request.notes.clone().unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), id.into()],
         ),
         MasterKind::Customer => (
-            "UPDATE customers SET name = ?, phone = ?, email = ?, address = ?, city_id = ?, is_walk_in = ?, notes = ?, is_active = ?, version = version + 1, updated_at = ? WHERE id = ?",
-            vec![request.name.trim().into(), request.phone.clone().unwrap_or_default().into(), request.email.clone().into(), request.address.clone().unwrap_or_default().into(), city_id.into(), request.is_walk_in.into(), request.notes.clone().unwrap_or_default().into(), request.is_active.into(), now.to_rfc3339().into(), id.into()],
+            "UPDATE customers SET name = ?, phone = ?, email = ?, address = ?, city_id = ?, is_walk_in = ?, in_credit_book = COALESCE(?, in_credit_book), notes = ?, is_active = ?, version = version + 1, updated_at = ? WHERE id = ?",
+            vec![
+                request.name.trim().into(),
+                request.phone.clone().unwrap_or_default().into(),
+                request.email.clone().into(),
+                request.address.clone().unwrap_or_default().into(),
+                city_id.into(),
+                request.is_walk_in.into(),
+                request.in_credit_book.into(),
+                request.notes.clone().unwrap_or_default().into(),
+                request.is_active.into(),
+                now.to_rfc3339().into(),
+                id.into(),
+            ],
         ),
     }
 }

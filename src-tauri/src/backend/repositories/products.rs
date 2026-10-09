@@ -8,7 +8,6 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::backend::{
-    constants::ERROR_INVALID_CATEGORY_ID,
     dto::{ProductBranchStockResponse, ProductListQuery, ProductResponse, ProductSellUnitResponse},
     entities::{product, product_lot, product_unit, Product, ProductUnit},
     errors::AppError,
@@ -212,6 +211,59 @@ impl ProductRepository {
         Ok(true)
     }
 
+    pub async fn list_units(
+        database: &impl ConnectionTrait,
+        product_id: Uuid,
+    ) -> Result<Vec<product_unit::Model>, AppError> {
+        Ok(ProductUnit::find()
+            .filter(product_unit::Column::ProductId.eq(product_id))
+            .filter(product_unit::Column::DeletedAt.is_null())
+            .all(database)
+            .await?)
+    }
+
+    /// When the inventory base unit changes, rescale open lot qty/cost so physical stock is preserved.
+    /// `factor` = how many **old** base units equal 1 **new** base unit (e.g. 12 when Piece → Dozen).
+    pub async fn rescale_inventory_for_base_change(
+        transaction: &DatabaseTransaction,
+        product_id: Uuid,
+        factor: Decimal,
+    ) -> Result<(), AppError> {
+        if factor <= Decimal::ZERO || factor == Decimal::ONE {
+            return Ok(());
+        }
+        let now = chrono::Utc::now();
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE product_lots SET original_base_quantity = original_base_quantity / ?, remaining_base_quantity = remaining_base_quantity / ?, damaged_base_quantity = damaged_base_quantity / ?, purchase_price_per_base = purchase_price_per_base * ?, version = version + 1, updated_at = ? WHERE product_id = ? AND deleted_at IS NULL",
+                [
+                    factor.into(),
+                    factor.into(),
+                    factor.into(),
+                    factor.into(),
+                    now.into(),
+                    product_id.into(),
+                ],
+            ))
+            .await?;
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE branch_lots SET allocated_base_quantity = allocated_base_quantity / ?, remaining_base_quantity = remaining_base_quantity / ?, reserved_base_quantity = reserved_base_quantity / ?, damaged_base_quantity = damaged_base_quantity / ?, updated_at = ? WHERE product_lot_id IN (SELECT id FROM product_lots WHERE product_id = ? AND deleted_at IS NULL)",
+                [
+                    factor.into(),
+                    factor.into(),
+                    factor.into(),
+                    factor.into(),
+                    now.into(),
+                    product_id.into(),
+                ],
+            ))
+            .await?;
+        Ok(())
+    }
+
     pub async fn replace_units(
         transaction: &DatabaseTransaction,
         product_id: Uuid,
@@ -346,16 +398,20 @@ fn build_conditions(
             needle.into(),
         ]);
     }
-    if let Some(category_id) = &query.category_id {
-        let parsed = Uuid::parse_str(category_id)
-            .map_err(|_| AppError::Validation(ERROR_INVALID_CATEGORY_ID.into()))?;
-        parts.push("p.category_id = ?".to_owned());
-        values.push(parsed.into());
-    }
-    if let Some(product_type) = &query.product_type {
-        parts.push("p.product_type = ?".to_owned());
-        values.push(product_type.to_uppercase().into());
-    }
+    crate::backend::util::push_in_uuids(
+        &mut parts,
+        &mut values,
+        "p.category_id",
+        query.category_id.as_deref(),
+        "categoryId",
+    )?;
+    crate::backend::util::push_in_strings(
+        &mut parts,
+        &mut values,
+        "p.product_type",
+        query.product_type.as_deref(),
+        true,
+    );
     if query.in_stock == Some(true) {
         parts.push(stock_compare(branch_id, &mut values, "> 0"));
     }

@@ -13,6 +13,7 @@ mod m20260920_000010_soft_delete_filter_indexes;
 mod m20260921_000011_cities;
 mod m20260921_000012_purchase_order_statuses;
 mod m20260921_000013_purchase_order_fk_repair;
+mod m20261003_000014_customer_credit_book;
 
 pub struct Migrator;
 
@@ -33,6 +34,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260921_000011_cities::Migration),
             Box::new(m20260921_000012_purchase_order_statuses::Migration),
             Box::new(m20260921_000013_purchase_order_fk_repair::Migration),
+            Box::new(m20261003_000014_customer_credit_book::Migration),
         ]
     }
 }
@@ -90,6 +92,23 @@ mod tests {
             .data
             .iter()
             .any(|unit| unit.name == "Piece" && unit.symbol.as_deref() == Some("pc")));
+
+        database
+            .execute_unprepared(
+                "INSERT INTO customers (id, name, phone, address, is_walk_in, in_credit_book, notes, is_active, version, created_at, updated_at) VALUES (X'00000000000000000000000000000101', 'Credit test', '', '', 0, 1, '', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            )
+            .await
+            .expect("insert credit customer");
+        let customers = MasterService::list(&database, MasterKind::Customer, PageQuery::default())
+            .await
+            .expect("load customer credit summaries");
+        let credit_customer = customers
+            .data
+            .iter()
+            .find(|customer| customer.name == "Credit test")
+            .expect("find credit customer");
+        assert_eq!(credit_customer.open_credit_sale_count, Some(0));
+        assert_eq!(credit_customer.profit_on_hold, Some(0.0));
 
         let user_count = database
             .query_one_raw(sea_orm::Statement::from_string(

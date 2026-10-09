@@ -99,12 +99,16 @@ export function mapInvoice(row: InvoiceResponse): InvoiceRow {
   const items: InvoiceItemRow[] = (row.items ?? []).map((item) => ({
     id: item.id,
     productId: item.productId,
+    productName: item.productName,
+    sku: item.sku,
     unitName: item.unitName,
     quantity: item.displayedQuantity,
     baseQuantity: item.baseQuantity,
     unitPrice: item.unitPrice,
     discount: item.discount,
     total: item.lineTotal,
+    fifoCost: item.fifoCost,
+    grossProfit: item.grossProfit,
   }));
   return {
     id: row.id,

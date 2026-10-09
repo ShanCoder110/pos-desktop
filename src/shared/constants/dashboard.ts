@@ -24,7 +24,7 @@ export const DASHBOARD_COPY = {
 export const DASHBOARD_KPI = {
   sales: { label: "Today’s sales", hint: "Completed bills", to: routes.sales },
   collected: { label: "Collected today", hint: "Cash and bank in", to: routes.transactions },
-  credit: { label: "Customer owes", hint: "Open balance", to: routes.credit },
+  credit: { label: "Credit sales", hint: "Open customer balance", to: routes.credit },
   low: { label: "Low stock", hint: "Below minimum", to: productsHref("low") },
 } as const;
 

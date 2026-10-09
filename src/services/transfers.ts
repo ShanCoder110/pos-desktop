@@ -73,9 +73,12 @@ export function listTransfers(
   params: {
     page?: number;
     perPage?: number;
+    search?: string;
     status?: string;
     fromBranchId?: string;
     toBranchId?: string;
+    occurredFrom?: string;
+    occurredTo?: string;
   } = {},
   signal?: AbortSignal,
 ) {
@@ -85,11 +88,14 @@ export function listTransfers(
   );
 }
 
-export async function listAllTransfers(signal?: AbortSignal): Promise<StockTransferRow[]> {
+export async function listAllTransfers(
+  params: Omit<Parameters<typeof listTransfers>[0], "page" | "perPage"> = {},
+  signal?: AbortSignal,
+): Promise<StockTransferRow[]> {
   const rows: StockTransferRow[] = [];
   let page = 1;
   for (;;) {
-    const response = await listTransfers({ page, perPage: MAX_PAGE_SIZE }, signal);
+    const response = await listTransfers({ ...params, page, perPage: MAX_PAGE_SIZE }, signal);
     rows.push(...response.data.map(mapTransfer));
     if (!response.meta.hasNextPage) return rows;
     page += 1;

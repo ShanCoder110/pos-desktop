@@ -103,6 +103,8 @@ export function listPurchaseOrders(
     status?: string;
     supplierId?: string;
     productId?: string;
+    city?: string;
+    minTotal?: number;
     occurredFrom?: string;
     occurredTo?: string;
   } = {},

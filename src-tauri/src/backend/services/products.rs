@@ -187,6 +187,8 @@ impl ProductService {
             ensure_one_stock_unit(&base_unit_id.to_string(), sell_units);
             validate_sell_units(&base_unit_id.to_string(), sell_units)?;
             if let Some(stock) = sell_units.iter().find(|unit| unit.is_base) {
+                // Inventory base stays the canonical unit (conversion = 1).
+                // UI preferred unit is is_default and must not rescale lots/prices.
                 base_unit_id = parse_uuid(&stock.unit_id, "sellUnits.unitId")?;
             }
         }
@@ -436,7 +438,7 @@ fn normalize_create(request: &mut CreateProductRequest) {
 #[cfg(test)]
 mod tests {
     use rust_decimal::Decimal;
-    use sea_orm::Database;
+    use sea_orm::{Database, DatabaseConnection};
     use uuid::Uuid;
 
     use crate::backend::{
@@ -444,11 +446,30 @@ mod tests {
         context::RequestContext,
         db::connect_memory,
         dto::{MasterRequest, OpeningStockInput, ProductUnitInput},
-        repositories::MasterKind,
+        repositories::{MasterKind, OrgRepository},
         services::MasterService,
     };
 
     use super::*;
+
+    async fn seed_test_owner(database: &DatabaseConnection) {
+        OrgRepository::create_user(
+            database,
+            Uuid::parse_str(SEED_USER_ID).unwrap(),
+            "Owner",
+            "owner",
+            "test-password-hash",
+            None,
+            None,
+            "OWNER",
+            Some(Uuid::parse_str(SEED_BRANCH_ID).unwrap()),
+            None,
+            true,
+            chrono::Utc::now(),
+        )
+        .await
+        .expect("seed test owner");
+    }
 
     #[test]
     fn normalizes_money_and_quantity_at_the_service_boundary() {
@@ -493,6 +514,7 @@ mod tests {
     #[tokio::test]
     async fn creates_product_units_and_opening_stock_atomically() {
         let database = connect_memory().await.expect("memory db");
+        seed_test_owner(&database).await;
         let context = RequestContext {
             session_id: Uuid::new_v4(),
             user_id: Uuid::parse_str(SEED_USER_ID).unwrap(),
@@ -517,6 +539,7 @@ mod tests {
                 is_active: true,
                 precision: None,
                 is_walk_in: false,
+                in_credit_book: None,
                 previous_balance: None,
             },
             None,
@@ -583,6 +606,7 @@ mod tests {
     #[tokio::test]
     async fn updates_product_units_in_place_without_unique_violation() {
         let database = connect_memory().await.expect("memory db");
+        seed_test_owner(&database).await;
         let context = RequestContext {
             session_id: Uuid::new_v4(),
             user_id: Uuid::parse_str(SEED_USER_ID).unwrap(),
@@ -607,6 +631,7 @@ mod tests {
                 is_active: true,
                 precision: None,
                 is_walk_in: false,
+                in_credit_book: None,
                 previous_balance: None,
             },
             None,

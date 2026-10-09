@@ -44,16 +44,20 @@ import { LinkedUnitBoxes, UnitQtyFields } from "@/pages/products/LotFields";
 import { ensureSession } from "@/services/auth";
 import { listAllBranches } from "@/services/org";
 import {
+  applyBaseUnitChange,
   applyDerivedPrices,
-  baseUnit,
   biggerUnit,
+  canonicalUnit,
   containsLabel,
+  conversionFactor,
+  deriveAll,
   emptyPrices,
   extraKind,
-  extraUnits,
   formatMixedQty,
   formatStockQty,
-  isBiggerSymbol,
+  isLinearStockUnit,
+  normalizeSellUnits,
+  preferredUnit,
   priceFromStock,
   pricePerStock,
   productSellUnits,
@@ -95,36 +99,19 @@ function newExtraUnit(): ProductSellUnit {
     id: crypto.randomUUID(),
     name: "",
     symbol: "",
-    kind: "smaller",
+    kind: "bigger",
     contains: 0,
     ...emptyPrices(),
     barcode: "",
     priceManual: {},
+    isBase: false,
+    isDefault: false,
   };
-}
-
-function normalizeKind(u: ProductSellUnit, product: Product): ProductSellUnit["kind"] {
-  if (u.isBase || u.kind === "base" || u.symbol === product.unit) return "base";
-  if (u.kind === "pack" || (isBiggerSymbol(u.symbol) && u.symbol !== product.unit)) return "bigger";
-  if (u.kind === "small" || u.contains > 1) return "smaller";
-  if (u.kind === "bigger" || u.kind === "smaller") return u.kind;
-  return "smaller";
 }
 
 function defaultSellUnits(product: Product): ProductSellUnit[] {
   if (product.sellUnits?.length) {
-    const mapped = product.sellUnits.map((u) => ({
-      ...emptyPrices(),
-      ...u,
-      barcode: u.barcode ?? "",
-      kind: normalizeKind(u, product),
-      priceManual: u.priceManual ?? {},
-    }));
-    if (mapped.some((u) => u.kind === "base")) return mapped;
-    const match = mapped.find((u) => u.symbol === product.unit) ?? mapped[0];
-    return mapped.map((u) =>
-      u.id === match.id ? { ...u, kind: "base" as const, contains: 1 } : u,
-    );
+    return normalizeSellUnits(product.sellUnits);
   }
   const packN = product.packQty && product.packQty > 1 ? product.packQty : null;
   const base: ProductSellUnit = {
@@ -140,56 +127,27 @@ function defaultSellUnits(product: Product): ProductSellUnit[] {
     barcode: product.barcode ?? "",
     priceManual: {},
     isBase: true,
+    isDefault: true,
   };
   if (!packN) return [base];
-  return [
+  return normalizeSellUnits([
+    base,
     {
       id: crypto.randomUUID(),
       name: "Pack",
       symbol: "pk",
-      kind: "base",
-      contains: 1,
+      kind: "bigger",
+      contains: packN,
       cost: product.cost * packN,
       min: product.min * packN,
       wholesale: product.wholesale * packN,
       price: product.packPrice || product.retail * packN,
       barcode: "",
       priceManual: {},
-      isBase: true,
-    },
-    { ...base, kind: "smaller" as const, contains: packN, isBase: false },
-  ];
-}
-
-function applyStockUnit(units: ProductSellUnit[], nextId: string): ProductSellUnit[] {
-  const current = units.find((unit) => unit.kind === "base");
-  const next = units.find((unit) => unit.id === nextId);
-  if (!next) return units;
-  if (current?.id === next.id) {
-    return units.map((unit) =>
-      unit.id === next.id ? { ...unit, kind: "base", contains: 1, isBase: true } : unit,
-    );
-  }
-  const factor = next.contains > 0 ? next.contains : 1;
-  const nextIsBigger = extraKind(next.symbol) === "bigger" || isBiggerSymbol(next.symbol);
-  return units.map((unit) => {
-    if (unit.id === next.id) {
-      return { ...unit, kind: "base" as const, contains: 1, isBase: true };
-    }
-    if (current && unit.id === current.id) {
-      return {
-        ...unit,
-        kind: nextIsBigger ? "smaller" : "bigger",
-        contains: factor,
-        isBase: false,
-      };
-    }
-    return {
-      ...unit,
       isBase: false,
-      kind: unit.kind === "base" ? extraKind(unit.symbol) : unit.kind,
-    };
-  });
+      isDefault: false,
+    },
+  ]);
 }
 
 function focusables(root: HTMLElement) {
@@ -314,12 +272,12 @@ export function ProductForm({
   const [lotOpened, setLotOpened] = useState<Record<string, number>>({});
   const sellUnits = qtyUnits(defaultSellUnits(product));
   const unitLayoutKey = sellUnits
-    .map((unit) => `${unit.id}:${unit.kind}:${unit.contains}`)
+    .map((unit) => `${unit.id}:${unit.kind}:${unit.contains}:${unit.isBase ? 1 : 0}`)
     .join("|");
-  const base = baseUnit(sellUnits) ?? sellUnits[0];
+  const base = preferredUnit(sellUnits) ?? sellUnits[0];
+  const inventory = canonicalUnit(sellUnits) ?? base;
   const pack = biggerUnit(sellUnits);
-  const extras = extraUnits(sellUnits);
-  const stockSymbol = product.unit || base.symbol || "pc";
+  const stockSymbol = inventory?.symbol || product.unit || "pc";
   const priceLot = lotDraft.find((l) => l.id === priceLotId);
   const activeSuppliers = useMemo(() => {
     const ids = [
@@ -380,11 +338,11 @@ export function ProductForm({
     }
     if (!product.sellUnits?.length) {
       const sellUnits = defaultSellUnits(product);
-      const stock = sellUnits.find((unit) => unit.kind === "base");
+      const inventory = canonicalUnit(sellUnits);
       onChange({
         ...product,
         sellUnits,
-        unit: stock?.symbol ?? product.unit,
+        unit: inventory?.symbol ?? product.unit,
       });
     }
     requestAnimationFrame(() => {
@@ -535,46 +493,89 @@ export function ProductForm({
   }
 
   function setStockUnit(unitId: string) {
-    const next = applyStockUnit(sellUnits, unitId);
-    const stock = next.find((unit) => unit.kind === "base");
-    const symbol = stock?.symbol ?? product.unit;
+    const target = sellUnits.find((unit) => unit.id === unitId);
+    if (!target) return;
+    const preferred = preferredUnit(sellUnits);
+    if (preferred?.id === target.id) return;
+
+    // Preferred base only — never rescale stock, conversions, or prices.
+    const next = applyBaseUnitChange(sellUnits, unitId);
+    const nextPreferred = preferredUnit(next) ?? target;
+    const nextInventory = canonicalUnit(next) ?? nextPreferred;
+
     onChange({
       ...product,
       sellUnits: next,
-      unit: symbol,
-      isLinear: symbol === "m" || symbol === "gaz",
+      unit: nextInventory.symbol || product.unit,
+      isLinear: isLinearStockUnit(nextInventory.symbol),
+      cost: nextPreferred.cost,
+      min: nextPreferred.min,
+      wholesale: nextPreferred.wholesale,
+      retail: nextPreferred.price,
     });
   }
 
   function setBaseUnit(v: string) {
+    const preferred = preferredUnit(sellUnits) ?? sellUnits[0];
+    if (!preferred) return;
     const next = sellUnits.map((row) =>
-      row.id === base.id ? { ...row, symbol: v, name: unitLabel(v), kind: "base" as const } : row,
+      row.id === preferred.id
+        ? {
+            ...row,
+            symbol: v,
+            name: unitLabel(v),
+            kind: "base" as const,
+            isBase: true,
+            isDefault: true,
+          }
+        : row,
     );
-    onChange({ ...product, sellUnits: next, unit: v, isLinear: v === "m" || v === "gaz" });
+    const inventory = canonicalUnit(next) ?? preferred;
+    onChange({
+      ...product,
+      sellUnits: next,
+      unit: inventory.symbol || v,
+      isLinear: isLinearStockUnit(inventory.symbol || v),
+    });
   }
 
   function setBaseField(key: PriceKey, value: number) {
-    setUnits(sellUnits.map((u) => (u.id === base.id ? { ...u, [key]: value } : u)));
+    const preferred = preferredUnit(sellUnits);
+    if (!preferred) return;
+    const updated = sellUnits.map((u) => (u.id === preferred.id ? { ...u, [key]: value } : u));
+    const derived = deriveAll(updated);
+    const nextPreferred = preferredUnit(derived) ?? preferred;
+    onChange({
+      ...product,
+      sellUnits: derived,
+      cost: nextPreferred.cost,
+      min: nextPreferred.min,
+      wholesale: nextPreferred.wholesale,
+      retail: nextPreferred.price,
+    });
   }
 
   function setExtraField(id: string, patchRow: Partial<ProductSellUnit>, manual?: PriceKey) {
     if (patchRow.kind || patchRow.symbol || patchRow.contains !== undefined)
       changedUnitId.current = id;
-    setUnits(
-      sellUnits.map((u) =>
-        u.id === id
-          ? {
-              ...u,
-              ...patchRow,
-              priceManual: manual ? { ...u.priceManual, [manual]: true } : u.priceManual,
-            }
-          : u,
-      ),
+    const updated = sellUnits.map((u) =>
+      u.id === id
+        ? {
+            ...u,
+            ...patchRow,
+            priceManual: manual ? { ...u.priceManual, [manual]: true } : u.priceManual,
+          }
+        : u,
     );
+    const needsDerive =
+      patchRow.contains !== undefined ||
+      patchRow.kind !== undefined ||
+      patchRow.symbol !== undefined;
+    setUnits(needsDerive && !manual ? deriveAll(updated) : updated);
   }
 
   function setUnitPrice(row: ProductSellUnit, key: PriceKey, value: number) {
-    const isBase = row.kind === "base";
+    const isPreferred = preferredUnit(sellUnits)?.id === row.id;
     if (priceLot && key === "cost") {
       setLotDraft((prev) =>
         prev.map((l) =>
@@ -585,7 +586,7 @@ export function ProductForm({
       );
       return;
     }
-    if (isBase) setBaseField(key, value);
+    if (isPreferred) setBaseField(key, value);
     else setExtraField(row.id, { [key]: value }, key);
   }
 
@@ -670,16 +671,12 @@ export function ProductForm({
       toaster.error(validationToastMessage("unitPrices"));
       return;
     }
-    const smaller = extras.filter((u) => u.kind === "smaller");
-    const stock =
-      smaller.find((u) => u.symbol === "m") ??
-      smaller.find((u) => u.symbol === "gaz") ??
-      (isBiggerSymbol(base.symbol) ? smaller[0] : base);
-    const stockSymbol = stock?.symbol || base.symbol || product.unit;
-    const packRow = pack ?? (isBiggerSymbol(base.symbol) ? base : undefined);
-    const metersInPack = isBiggerSymbol(base.symbol)
-      ? smaller.find((u) => u.symbol === "m" || u.symbol === stockSymbol)?.contains
-      : packRow?.contains;
+    const preferred = preferredUnit(sellUnits) ?? base;
+    const inventoryUnit = canonicalUnit(sellUnits) ?? preferred;
+    const inventorySymbol = inventoryUnit?.symbol || preferred.symbol || product.unit;
+    const packRow = pack;
+    const metersInPack =
+      packRow && conversionFactor(packRow) > 1 ? conversionFactor(packRow) : null;
     const totals = isNew ? { stock: product.stock, damaged: product.damaged } : lotTotals(lotDraft);
     const openingBranches = isNew ? normalizedBranchStock() : branchStock;
     const next: Product = {
@@ -688,13 +685,13 @@ export function ProductForm({
       name: product.name.trim(),
       sku: product.sku.trim(),
       barcode: product.barcode?.trim() ?? "",
-      unit: stockSymbol,
-      isLinear: stockSymbol === "m" || stockSymbol === "gaz",
-      cost: stock?.cost ?? base.cost,
-      min: stock?.min ?? base.min,
-      wholesale: stock?.wholesale ?? base.wholesale,
-      retail: stock?.price ?? base.price,
-      packQty: metersInPack && metersInPack > 1 ? metersInPack : null,
+      unit: inventorySymbol,
+      isLinear: isLinearStockUnit(inventorySymbol),
+      cost: inventoryUnit?.cost ?? preferred.cost,
+      min: inventoryUnit?.min ?? preferred.min,
+      wholesale: inventoryUnit?.wholesale ?? preferred.wholesale,
+      retail: inventoryUnit?.price ?? preferred.price,
+      packQty: metersInPack,
       packPrice: packRow?.price ?? 0,
       stock: isNew ? product.stock : totals.stock,
       damaged: totals.damaged,
@@ -1227,7 +1224,8 @@ export function ProductForm({
           )}
           <div className="product-small-list [display:grid] [gap:10px]">
             {sellUnits.map((row) => {
-              const isBase = row.kind === "base";
+              const isPreferred = preferredUnit(sellUnits)?.id === row.id;
+              const isCanonical = canonicalUnit(sellUnits)?.id === row.id;
               return (
                 <div
                   key={row.id}
@@ -1235,18 +1233,18 @@ export function ProductForm({
                     unitCards.current[row.id] = element;
                   }}
                   className={
-                    isBase
+                    isPreferred
                       ? "product-small-card relative [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)] is-base"
                       : "product-small-card relative [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)]"
                   }
                 >
-                  <div className="product-small-top [display:grid] [grid-template-columns:minmax(0,_1.1fr)_minmax(90px,_1fr)_auto_36px] [gap:8px] [align-items:end]">
-                    <Field label={isBase ? "Product unit" : "Sell as"}>
+                  <div className="product-small-top [display:grid] [grid-template-columns:minmax(0,_1.2fr)_minmax(100px,_0.95fr)_minmax(118px,_auto)_36px] [gap:8px] [align-items:end]">
+                    <Field label={isPreferred ? "Base unit" : "Sell as"}>
                       <SearchableSelect
-                        name={isBase ? "product-unit" : "sell-as"}
+                        name={isPreferred ? "product-unit" : "sell-as"}
                         value={row.symbol ?? ""}
                         onChange={(v) => {
-                          if (isBase) {
+                          if (isPreferred) {
                             setBaseUnit(v);
                             return;
                           }
@@ -1260,18 +1258,9 @@ export function ProductForm({
                                 }
                               : unit,
                           );
-                          const stockIsBigger = isBiggerSymbol(base?.symbol);
-                          const next =
-                            !stockIsBigger && extraKind(v) === "bigger"
-                              ? applyStockUnit(patched, row.id)
-                              : patched;
-                          const stock = next.find((unit) => unit.kind === "base");
-                          const symbol = stock?.symbol ?? product.unit;
                           onChange({
                             ...product,
-                            sellUnits: next,
-                            unit: symbol,
-                            isLinear: symbol === "m" || symbol === "gaz",
+                            sellUnits: deriveAll(patched),
                           });
                         }}
                         placeholder="Pack, Meter, Gaz…"
@@ -1287,16 +1276,16 @@ export function ProductForm({
                         clearable={false}
                       />
                     </Field>
-                    {isBase ? (
+                    {isCanonical ? (
                       <Field label="Contains">
                         <TextInput value="1" disabled />
                       </Field>
                     ) : (
-                      <Field label={containsLabel(base, pack, row)}>
+                      <Field label={containsLabel(sellUnits, row)}>
                         <TextInput
                           inputMode="decimal"
                           maxLength={FIELD_LIMITS.qty}
-                          placeholder="90"
+                          placeholder="12"
                           value={numStr(row.contains)}
                           onChange={(e) =>
                             setExtraField(row.id, { contains: numVal(e.target.value) })
@@ -1304,25 +1293,44 @@ export function ProductForm({
                         />
                       </Field>
                     )}
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={isBase ? "soft" : "ghost"}
-                      className={cn("product-stock-unit-btn", isBase && "is-on")}
-                      disabled={isBase}
-                      aria-pressed={isBase}
-                      onClick={() => setStockUnit(row.id)}
-                    >
-                      {isBase ? PRODUCT_COPY.stockUnit : PRODUCT_COPY.makeStockUnit}
-                    </Button>
-                    {isBase ? (
-                      <span />
+                    <Field label="Default">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={isPreferred ? "soft" : "outline"}
+                        className={cn(
+                          "product-stock-unit-btn",
+                          isPreferred ? "is-on" : "is-action",
+                        )}
+                        disabled={isPreferred}
+                        aria-pressed={isPreferred}
+                        icon={<Check size={13} strokeWidth={2.5} />}
+                        onClick={() => setStockUnit(row.id)}
+                      >
+                        {isPreferred ? PRODUCT_COPY.stockUnit : PRODUCT_COPY.makeStockUnit}
+                      </Button>
+                    </Field>
+                    {isCanonical ? (
+                      <span className="product-small-spacer" />
                     ) : (
                       <Button
                         size="icon"
                         variant="ghost"
+                        className="product-small-remove"
                         aria-label="Remove unit"
-                        onClick={() => setUnits(sellUnits.filter((u) => u.id !== row.id))}
+                        onClick={() => {
+                          const remaining = sellUnits.filter((u) => u.id !== row.id);
+                          if (!remaining.length) {
+                            setUnits(remaining);
+                            return;
+                          }
+                          const fallbackId = canonicalUnit(remaining)?.id ?? remaining[0]?.id ?? "";
+                          setUnits(
+                            isPreferred && fallbackId
+                              ? applyBaseUnitChange(remaining, fallbackId)
+                              : remaining,
+                          );
+                        }}
                       >
                         <Trash2 size={14} />
                       </Button>

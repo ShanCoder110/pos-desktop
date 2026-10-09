@@ -14,6 +14,7 @@ export const defaultSettings: ShopSettings = {
   autoSku: false,
   minPriceRule: true,
   stockPick: "oldest",
+  creditPriceMode: "WHOLESALE",
   defaultTax: 0,
   defaultDiscount: 0,
   isMainServer: true,

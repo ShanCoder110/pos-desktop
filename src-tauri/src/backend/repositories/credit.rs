@@ -34,6 +34,13 @@ struct BalanceRow {
 }
 
 #[derive(Debug, FromQueryResult)]
+struct OpenCreditInvoiceRow {
+    id: Uuid,
+    paid_amount: Decimal,
+    credit_amount: Decimal,
+}
+
+#[derive(Debug, FromQueryResult)]
 struct LedgerRow {
     id: Uuid,
     customer_id: Uuid,
@@ -331,6 +338,48 @@ impl CreditRepository {
                 ],
             ))
             .await?;
+
+        if collecting && amount > Decimal::ZERO {
+            let mut remaining_to_apply = amount;
+            let open_invoices = OpenCreditInvoiceRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "SELECT id, CAST(paid_amount AS REAL) AS paid_amount, CAST(credit_amount AS REAL) AS credit_amount FROM invoices WHERE customer_id = ? AND credit_amount > 0 AND status = 'COMPLETED' AND deleted_at IS NULL ORDER BY created_at ASC, id ASC",
+                [customer_id.into()],
+            ))
+            .all(transaction)
+            .await?;
+
+            for inv in open_invoices {
+                if remaining_to_apply <= Decimal::ZERO {
+                    break;
+                }
+                let apply_amount = remaining_to_apply.min(inv.credit_amount);
+                let new_paid = inv.paid_amount + apply_amount;
+                let new_credit = inv.credit_amount - apply_amount;
+                let new_status = if new_credit <= Decimal::ZERO {
+                    crate::backend::constants::PAYMENT_STATUS_PAID
+                } else {
+                    crate::backend::constants::PAYMENT_STATUS_PARTIAL
+                };
+
+                transaction
+                    .execute_raw(Statement::from_sql_and_values(
+                        DbBackend::Sqlite,
+                        "UPDATE invoices SET paid_amount = ?, credit_amount = ?, payment_status = ?, updated_at = ? WHERE id = ?",
+                        [
+                            new_paid.into(),
+                            new_credit.into(),
+                            new_status.into(),
+                            now.into(),
+                            inv.id.into(),
+                        ],
+                    ))
+                    .await?;
+
+                remaining_to_apply -= apply_amount;
+            }
+        }
+
         Ok(CustomerPaymentResponse {
             id: payment_id.to_string(),
             customer_id: customer_id.to_string(),
@@ -356,36 +405,28 @@ impl CreditRepository {
             values.push(pattern.clone().into());
             values.push(pattern.into());
         }
-        if let Some(customer) = query
-            .customer
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            parts.push("lower(c.name) LIKE ?".to_owned());
-            values.push(format!("%{}%", customer.to_lowercase()).into());
-        }
-        if let Some(entry_type) = query
-            .entry_type
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            parts.push("cle.type = ?".to_owned());
-            values.push(entry_type.to_uppercase().into());
-        }
+        crate::backend::util::push_in_like(
+            &mut parts,
+            &mut values,
+            "c.name",
+            query.customer.as_deref(),
+        );
+        crate::backend::util::push_in_strings(
+            &mut parts,
+            &mut values,
+            "cle.type",
+            query.entry_type.as_deref(),
+            true,
+        );
         if let Some(notes) = page.notes.as_deref() {
             parts.push("lower(COALESCE(cle.notes, '')) LIKE ?".to_owned());
             values.push(format!("%{}%", notes.to_lowercase()).into());
         }
-        if let Some(balance) = page.balance.as_deref() {
-            match balance.to_ascii_lowercase().as_str() {
-                "payable" | "owes" => parts.push("cle.balance_after > 0".to_owned()),
-                "advance" => parts.push("cle.balance_after < 0".to_owned()),
-                "settled" => parts.push("cle.balance_after = 0".to_owned()),
-                _ => {}
-            }
-        }
+        crate::backend::util::push_balance_bucket_or(
+            &mut parts,
+            "cle.balance_after",
+            page.balance.as_deref(),
+        );
         if let Some(debit) = query.debit {
             parts.push("cle.debit >= ?".to_owned());
             values.push(debit.into());

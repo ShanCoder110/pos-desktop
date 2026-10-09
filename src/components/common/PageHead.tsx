@@ -6,16 +6,20 @@ export function PageHead({
   title,
   subtitle,
   icon,
+  leading,
   children,
 }: {
   title: string;
   subtitle?: string;
   icon?: ReactNode;
+  /** Left-side control before the title (e.g. back button). Not wrapped in the decorative icon box. */
+  leading?: ReactNode;
   children?: ReactNode;
 }) {
   return (
     <div className="ui-page-head [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [width:100%] [flex-shrink:0]">
       <div className="ui-page-heading">
+        {leading ? <div className="ui-page-heading-leading shrink-0">{leading}</div> : null}
         {icon ? <span className="ui-page-heading-icon">{icon}</span> : null}
         <div>
           <h1 className="ui-page-title [font-size:22px] [font-weight:800] [letter-spacing:-0.03em] [color:var(--ink)] [min-width:0]">

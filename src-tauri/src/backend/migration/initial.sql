@@ -275,6 +275,7 @@ CREATE TABLE IF NOT EXISTS customers (
   address TEXT NOT NULL DEFAULT '',
   credit_limit REAL,
   is_walk_in INTEGER NOT NULL DEFAULT 0,
+  in_credit_book INTEGER NOT NULL DEFAULT 0,
   notes TEXT NOT NULL DEFAULT '',
   is_active INTEGER NOT NULL DEFAULT 1,
   version INTEGER NOT NULL DEFAULT 1,

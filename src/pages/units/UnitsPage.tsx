@@ -23,6 +23,7 @@ import {
   Th,
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
+import { applyFilterChip } from "@/utils/filterChips";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import type { UnitRow } from "@/shared/domain/types";
@@ -161,7 +162,7 @@ export function UnitsPage() {
             onCols={setCols}
             chips={chips}
             onApply={(chip) => {
-              setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
+              setChips((prev) => applyFilterChip(prev, chip));
               setPage(1);
             }}
             onRemove={(field) => {

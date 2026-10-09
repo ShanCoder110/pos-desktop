@@ -1,4 +1,10 @@
-import { qtyUnits, unitLabel } from "@/pages/products/productQty";
+import {
+  canonicalUnit,
+  conversionFactor,
+  preferredUnit,
+  qtyUnits,
+  unitLabel,
+} from "@/pages/products/productQty";
 import type { Product } from "@/shared/types";
 
 type UnitRow = { id: string; symbol: string; name?: string };
@@ -28,31 +34,35 @@ function unitIdForSymbol(symbol: string, units: UnitRow[], fallbackId: string) {
   );
 }
 
+/**
+ * Inventory `is_base` / `baseUnitId` = canonical unit (factor 1).
+ * UI preferred base = `isDefault` only — does not redefine conversions.
+ */
 function mapSellUnits(product: Product, units: UnitRow[]) {
   const rows = qtyUnits(product.sellUnits ?? []);
-  const stock =
-    rows.find((unit) => unit.kind === "base") ??
-    rows.find((unit) => unit.symbol === product.unit) ??
-    rows.find((unit) => (unit.contains || 1) <= 1) ??
-    rows[0];
-  const baseSymbol = stock?.symbol ?? product.unit;
-  const baseUnitId = unitIdForSymbol(baseSymbol, units, product.baseUnitId ?? "");
-  if (!baseUnitId || !stock) return null;
+  const inventory = canonicalUnit(rows) ?? rows[0];
+  const preferred = preferredUnit(rows) ?? inventory;
+  if (!inventory) return null;
+
+  const inventorySymbol = inventory.symbol ?? product.unit;
+  const baseUnitId = unitIdForSymbol(inventorySymbol, units, product.baseUnitId ?? "");
+  if (!baseUnitId) return null;
 
   const mapped = rows.map((unit) => {
-    const isStock = unit.id === stock.id;
+    const isInventory = unit.id === inventory.id;
+    const isPreferred = unit.id === preferred.id;
     return {
       ...(unit.id?.trim() ? { id: unit.id } : {}),
-      unitId: unitIdForSymbol(unit.symbol ?? baseSymbol, units, baseUnitId),
-      name: unit.name || unitLabel(unit.symbol ?? baseSymbol),
-      contains: isStock ? 1 : unit.contains,
+      unitId: unitIdForSymbol(unit.symbol ?? inventorySymbol, units, baseUnitId),
+      name: unit.name || unitLabel(unit.symbol ?? inventorySymbol),
+      contains: isInventory ? 1 : conversionFactor(unit),
       cost: unit.cost,
       min: unit.min,
       wholesale: unit.wholesale,
       price: unit.price,
       barcode: unit.barcode?.trim() || undefined,
-      isBase: isStock,
-      isDefault: isStock,
+      isBase: isInventory,
+      isDefault: isPreferred,
     };
   });
 
@@ -69,6 +79,9 @@ export function buildCreateProductPayload(
 ) {
   const mapped = mapSellUnits(product, options.units);
   if (!mapped) return null;
+
+  const inventory = canonicalUnit(product.sellUnits ?? []);
+  const openingCost = inventory?.cost ?? product.cost;
 
   const payload: Record<string, unknown> = {
     name: product.name.trim(),
@@ -93,7 +106,7 @@ export function buildCreateProductPayload(
       branchId: row.branchId,
       supplierId: product.supplierId || undefined,
       quantity: row.quantity,
-      cost: product.cost,
+      cost: openingCost,
       receivedDate,
     }));
 
@@ -106,7 +119,7 @@ export function buildCreateProductPayload(
       branchId: options.branchId,
       supplierId: product.supplierId || undefined,
       quantity: product.stock,
-      cost: product.cost,
+      cost: openingCost,
       receivedDate,
     };
   }

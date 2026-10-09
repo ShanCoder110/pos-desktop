@@ -14,12 +14,13 @@ import {
   Td,
   THead,
   Th,
-  dateInRange,
   rangeForPeriod,
   toaster,
 } from "@/components/common";
 import type { DateRangeFilter } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
+import { applyFilterChip, chipValuesForField } from "@/utils/filterChips";
+import { chipCsv, chipCsvFromNames, chipMinNumber, chipStatusCsv } from "@/utils/filterQuery";
 import { HubToolbar } from "@/pages/products/HubToolbar";
 import {
   hubCityOptions,
@@ -44,6 +45,7 @@ import {
   cancelPurchaseOrder,
   getPurchaseOrder,
   listAllPurchaseOrders,
+  listPurchaseOrders,
   type PurchaseOrder,
 } from "@/services/purchasing";
 import { money, shortError } from "@/utils/format";
@@ -71,9 +73,39 @@ function isOpen(row: PurchaseOrder) {
   return row.status === "PENDING" || row.status === "PARTIALLY_RECEIVED";
 }
 
-function minAmount(raw: string) {
-  const value = Number(String(raw).replace(/[^\d.-]/g, ""));
-  return Number.isFinite(value) ? value : 0;
+const REORDER_STATUS_FROM_LABEL = Object.fromEntries(
+  Object.entries(REORDER_STATUS_LABEL).map(([status, label]) => [label, status]),
+) as Record<string, ReorderStatus>;
+
+function reorderApiFilters(
+  chips: FilterChip[],
+  search: string,
+  dateRange: DateRangeFilter,
+  sectionKpi: string | null,
+  suppliers: { id: string; name: string }[],
+  products: { id: string; name: string }[],
+) {
+  const statusFromChips = chipStatusCsv(
+    chips,
+    "status",
+    (label) => REORDER_STATUS_FROM_LABEL[label],
+  );
+  return {
+    search: search.trim() || undefined,
+    status: sectionKpi || statusFromChips,
+    supplierId: chipCsvFromNames(
+      chipValuesForField(chips, "supplier"),
+      (name) => suppliers.find((row) => row.name === name)?.id,
+    ),
+    productId: chipCsvFromNames(
+      chipValuesForField(chips, "product"),
+      (name) => products.find((row) => row.name === name)?.id,
+    ),
+    city: chipCsv(chips, "city"),
+    minTotal: chipMinNumber(chips, "lineTotal"),
+    occurredFrom: dateRange.from || undefined,
+    occurredTo: dateRange.to || undefined,
+  };
 }
 
 export function ReordersPage() {
@@ -88,27 +120,50 @@ export function ReordersPage() {
   const [dateRange, setDateRange] = useState<DateRangeFilter>(() => rangeForPeriod("all"));
   const [cols] = useState(COLUMNS.map((col) => col.id));
   const [rows, setRows] = useState<PurchaseOrder[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pages, setPages] = useState(1);
+  const [filteredTotalCost, setFilteredTotalCost] = useState(0);
   const [loading, setLoading] = useState(true);
   const [cancelRow, setCancelRow] = useState<PurchaseOrder | null>(null);
   const [viewRow, setViewRow] = useState<PurchaseOrder | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
-    void listAllPurchaseOrders({}, controller.signal)
-      .then((data) => setRows(data))
-      .catch((error) => {
-        if ((error as { name?: string })?.name === "AbortError") return;
-        toaster.error(shortError(error, REORDER_COPY.createFailed));
-      })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [purchaseOrders]);
+  const apiFilters = useMemo(
+    () => reorderApiFilters(chips, search, dateRange, sectionKpi, suppliers, products),
+    [chips, dateRange, products, search, sectionKpi, suppliers],
+  );
 
   useEffect(() => {
     setPage(1);
   }, [sectionKpi, chips, search, dateRange]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    void listPurchaseOrders({ ...apiFilters, page, perPage: pageSize }, controller.signal)
+      .then((response) => {
+        setRows(response.data);
+        setTotal(response.meta.totalItems);
+        setPages(Math.max(1, response.meta.totalPages));
+      })
+      .catch((error) => {
+        if ((error as { name?: string })?.name === "AbortError") return;
+        setRows([]);
+        setTotal(0);
+        setPages(1);
+        toaster.error(shortError(error, REORDER_COPY.createFailed));
+      })
+      .finally(() => setLoading(false));
+    return () => controller.abort();
+  }, [apiFilters, page, pageSize, purchaseOrders]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void listAllPurchaseOrders(apiFilters, controller.signal)
+      .then((data) => setFilteredTotalCost(data.reduce((sum, row) => sum + row.total, 0)))
+      .catch(() => setFilteredTotalCost(0));
+    return () => controller.abort();
+  }, [apiFilters, purchaseOrders]);
 
   const productName = (id: string) => products.find((row) => row.id === id)?.name ?? id;
   const supplierOptions = useMemo(() => hubSupplierOptions(suppliers), [suppliers]);
@@ -118,43 +173,9 @@ export function ReordersPage() {
     [products],
   );
 
-  const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    const statusChip = chips.find((chip) => chip.field === "status")?.value;
-    const supplierChip = chips.find((chip) => chip.field === "supplier")?.value;
-    const productChip = chips.find((chip) => chip.field === "product")?.value;
-    const cityChip = chips.find((chip) => chip.field === "city")?.value;
-    const minLineTotal = chips.find((chip) => chip.field === "lineTotal")?.value;
-
-    return rows.filter((row) => {
-      const item = row.items[0];
-      if (!dateInRange(row.orderDate, dateRange)) return false;
-      if (sectionKpi && row.status !== sectionKpi) return false;
-      if (needle) {
-        const text =
-          `${row.orderNumber} ${item ? productName(item.productId) : ""} ${supplierLabel(row.supplierId, suppliers)} ${supplierCityName(row.supplierId, suppliers)}`.toLowerCase();
-        if (!text.includes(needle)) return false;
-      }
-      if (statusChip) {
-        const label = REORDER_STATUS_LABEL[row.status as ReorderStatus] ?? row.status;
-        if (label !== statusChip) return false;
-      }
-      if (supplierChip && supplierLabel(row.supplierId, suppliers) !== supplierChip) return false;
-      if (productChip && (!item || productName(item.productId) !== productChip)) return false;
-      if (cityChip && supplierCityName(row.supplierId, suppliers) !== cityChip) return false;
-      if (minLineTotal && row.total < minAmount(minLineTotal)) return false;
-      return true;
-    });
-  }, [rows, search, chips, sectionKpi, dateRange, products, suppliers]);
-
-  const filteredTotalCost = useMemo(
-    () => filtered.reduce((sum, row) => sum + row.total, 0),
-    [filtered],
-  );
-
-  const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
-  const shown =
-    pageSize === PAGE_SIZE_ALL ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
+  const shown = rows;
+  const listPages = pageSize === PAGE_SIZE_ALL ? 1 : pages;
+  const listTotal = pageSize === PAGE_SIZE_ALL ? rows.length : total;
 
   useEffect(() => {
     if (!shown.length) {
@@ -209,25 +230,46 @@ export function ReordersPage() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [cancelRow, focusedId, shown]);
 
-  const exportRows = useMemo(
-    () =>
-      filtered.map((row) => {
-        const item = row.items[0];
-        return {
-          orderNumber: row.orderNumber,
-          product: item ? productName(item.productId) : "—",
-          supplier: supplierLabel(row.supplierId, suppliers),
-          city: supplierCityName(row.supplierId, suppliers) || "—",
-          ordered: item?.orderedBaseQuantity ?? 0,
-          received: item?.receivedBaseQuantity ?? 0,
-          status: REORDER_STATUS_LABEL[row.status as ReorderStatus] ?? row.status,
-          date: row.orderDate,
-          unitCost: item?.expectedUnitCost ?? 0,
-          total: row.total,
-        };
-      }),
-    [filtered, products, suppliers],
-  );
+  const [exportRows, setExportRows] = useState<
+    {
+      orderNumber: string;
+      product: string;
+      supplier: string;
+      city: string;
+      ordered: number;
+      received: number;
+      status: string;
+      date: string;
+      unitCost: number;
+      total: number;
+    }[]
+  >([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void listAllPurchaseOrders(apiFilters, controller.signal)
+      .then((data) =>
+        setExportRows(
+          data.map((row) => {
+            const item = row.items[0];
+            return {
+              orderNumber: row.orderNumber,
+              product: item ? productName(item.productId) : "—",
+              supplier: supplierLabel(row.supplierId, suppliers),
+              city: supplierCityName(row.supplierId, suppliers) || "—",
+              ordered: item?.orderedBaseQuantity ?? 0,
+              received: item?.receivedBaseQuantity ?? 0,
+              status: REORDER_STATUS_LABEL[row.status as ReorderStatus] ?? row.status,
+              date: row.orderDate,
+              unitCost: item?.expectedUnitCost ?? 0,
+              total: row.total,
+            };
+          }),
+        ),
+      )
+      .catch(() => setExportRows([]));
+    return () => controller.abort();
+  }, [apiFilters, products, purchaseOrders, suppliers]);
 
   const filterFields = useMemo(
     () =>
@@ -304,7 +346,7 @@ export function ReordersPage() {
             onCols={() => undefined}
             chips={chips}
             onApply={(chip) => {
-              setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
+              setChips((prev) => applyFilterChip(prev, chip));
               setPage(1);
             }}
             onRemove={(field) => {
@@ -340,9 +382,9 @@ export function ReordersPage() {
               </span>
             </div>
             <Pagination
-              page={Math.min(page, pages)}
-              pages={pages}
-              total={filtered.length}
+              page={Math.min(page, listPages)}
+              pages={listPages}
+              total={listTotal}
               pageSize={pageSize}
               onPageSize={(n) => {
                 setPageSize(n);

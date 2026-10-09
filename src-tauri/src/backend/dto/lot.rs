@@ -15,6 +15,14 @@ pub struct LotListQuery {
     pub branch_id: Option<String>,
     #[serde(alias = "source_type")]
     pub source_type: Option<String>,
+    #[serde(alias = "supplier_id")]
+    pub supplier_id: Option<String>,
+    pub city: Option<String>,
+    pub lot_status: Option<String>,
+    pub occurred_from: Option<String>,
+    pub occurred_to: Option<String>,
+    #[serde(alias = "min_value_left")]
+    pub min_value_left: Option<Decimal>,
 }
 
 #[derive(Clone, Debug, Deserialize, Validate)]

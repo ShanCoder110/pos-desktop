@@ -19,6 +19,7 @@ export function ProductSearch({
   maxResults = 8,
   showInventory = false,
   showCost = false,
+  showPrice = false,
   blockOutOfStock = false,
   compact = false,
   className,
@@ -35,6 +36,7 @@ export function ProductSearch({
   maxResults?: number;
   showInventory?: boolean;
   showCost?: boolean;
+  showPrice?: boolean;
   blockOutOfStock?: boolean;
   compact?: boolean;
   className?: string;
@@ -205,8 +207,8 @@ export function ProductSearch({
           id={listId}
           role="listbox"
           className={cn(
-            "absolute top-[calc(100%+6px)] right-0 left-0 z-40 overflow-hidden rounded-xl border border-line bg-paper p-1.5 shadow-[0_16px_36px_rgba(15,23,42,0.16)]",
-            (showInventory || showCost) && "min-w-[420px]",
+            "ui-search-popover absolute top-[calc(100%+6px)] right-0 left-0 z-40 overflow-hidden rounded-xl border border-line bg-paper p-1.5 shadow-[0_16px_36px_rgba(15,23,42,0.16)]",
+            (showInventory || showCost || showPrice) && "min-w-[420px]",
           )}
         >
           {results.length ? (
@@ -241,6 +243,7 @@ export function ProductSearch({
                       <small className="mt-0.5 block truncate text-[10px] text-muted">
                         {product.sku} · {product.category}
                         {showCost ? ` · Cost ${money(product.cost)}` : ""}
+                        {showPrice ? ` · Retail ${money(product.retail)}` : ""}
                       </small>
                     </span>
                     {showInventory ? (

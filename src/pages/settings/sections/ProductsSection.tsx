@@ -8,6 +8,7 @@ const KEYS = [
   "autoSku",
   "minPriceRule",
   "stockPick",
+  "creditPriceMode",
   "fifoEnabled",
   "skuPrefix",
   "lotPrefix",
@@ -73,6 +74,17 @@ export function ProductsSection() {
               {stockPickLabel[id]}
             </option>
           ))}
+        </SelectInput>
+      </Field>
+      <Field label="Default credit-sale price" hint="The rate can still be changed on each sale">
+        <SelectInput
+          value={draft.creditPriceMode}
+          onChange={(event) =>
+            patch({ creditPriceMode: event.target.value as "WHOLESALE" | "RETAIL" })
+          }
+        >
+          <option value="WHOLESALE">Wholesale</option>
+          <option value="RETAIL">Retail</option>
         </SelectInput>
       </Field>
       <p className="settings-note">

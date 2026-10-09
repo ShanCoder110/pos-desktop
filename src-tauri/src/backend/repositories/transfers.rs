@@ -407,17 +407,44 @@ fn transfer_conditions(
 ) -> Result<(String, Vec<sea_orm::Value>), AppError> {
     let mut parts = vec!["1=1".to_owned()];
     let mut values = Vec::new();
-    if let Some(status) = &query.status {
-        parts.push("st.status = ?".to_owned());
-        values.push(status.trim().to_uppercase().into());
+    crate::backend::util::push_in_strings(
+        &mut parts,
+        &mut values,
+        "st.status",
+        query.status.as_deref(),
+        true,
+    );
+    crate::backend::util::push_in_uuids(
+        &mut parts,
+        &mut values,
+        "st.from_branch_id",
+        query.from_branch_id.as_deref(),
+        "fromBranchId",
+    )?;
+    crate::backend::util::push_in_uuids(
+        &mut parts,
+        &mut values,
+        "st.to_branch_id",
+        query.to_branch_id.as_deref(),
+        "toBranchId",
+    )?;
+    if let Some(from) = query
+        .occurred_from
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        parts.push("date(st.created_at) >= date(?)".to_owned());
+        values.push(from.into());
     }
-    if let Some(from_branch_id) = &query.from_branch_id {
-        parts.push("st.from_branch_id = ?".to_owned());
-        values.push(parse_uuid(from_branch_id, "fromBranchId")?.into());
-    }
-    if let Some(to_branch_id) = &query.to_branch_id {
-        parts.push("st.to_branch_id = ?".to_owned());
-        values.push(parse_uuid(to_branch_id, "toBranchId")?.into());
+    if let Some(to) = query
+        .occurred_to
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        parts.push("date(st.created_at) <= date(?)".to_owned());
+        values.push(to.into());
     }
     if let Some(search) = &query.page.search {
         parts.push("lower(st.transfer_number) LIKE ?".to_owned());

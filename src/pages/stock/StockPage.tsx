@@ -15,6 +15,7 @@ import {
   Th,
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
+import { applyFilterChip, chipValuesForField } from "@/utils/filterChips";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import type { CatalogProduct, StockMovementRow } from "@/shared/domain/types";
@@ -52,7 +53,7 @@ export function StockPage() {
       const [branches, users, lots] = await Promise.all([
         listAllBranches(controller.signal).catch(() => []),
         listAllUsers(controller.signal).catch(() => []),
-        listAllLots(controller.signal).catch(() => []),
+        listAllLots({}, controller.signal).catch(() => []),
       ]);
       setBranchNames(Object.fromEntries(branches.map((b) => [b.id, b.name])));
       setUserNames(Object.fromEntries(users.map((u) => [u.id, u.name])));
@@ -91,22 +92,29 @@ export function StockPage() {
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const status = chips.find((c) => c.field === "status")?.value;
+    const statuses = chipValuesForField(chips, "status");
     return seed.filter((r) => {
       if (needle && !`${r.name} ${r.sku}`.toLowerCase().includes(needle)) return false;
       if (sectionKpi === "healthy") return r.onHand >= r.minimumStock;
       if (sectionKpi === "risk") return r.onHand > 0 && r.onHand < r.minimumStock;
       if (sectionKpi === "dead") return r.onHand <= 0;
       if (sectionKpi === "made") return r.isManufactured;
-      if (status === "Healthy") return r.onHand >= r.minimumStock;
-      if (status === "Below min") return r.onHand > 0 && r.onHand < r.minimumStock;
-      if (status === "Zero") return r.onHand <= 0;
+      if (statuses.length) {
+        const ok = statuses.some((status) => {
+          if (status === "Healthy") return r.onHand >= r.minimumStock;
+          if (status === "Below min") return r.onHand > 0 && r.onHand < r.minimumStock;
+          if (status === "Zero") return r.onHand <= 0;
+          return false;
+        });
+        if (!ok) return false;
+      }
       return true;
     });
   }, [q, chips, sectionKpi, seed]);
 
   const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(rows.length / pageSize));
-  const shown = pageSize === PAGE_SIZE_ALL ? rows : rows.slice((page - 1) * pageSize, page * pageSize);
+  const shown =
+    pageSize === PAGE_SIZE_ALL ? rows : rows.slice((page - 1) * pageSize, page * pageSize);
   const chartData = rows
     .map((row) => ({ id: row.id, label: row.name, value: row.onHand }))
     .sort((a, b) => b.value - a.value);
@@ -123,7 +131,7 @@ export function StockPage() {
             onCols={setCols}
             chips={chips}
             onApply={(chip) => {
-              setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
+              setChips((prev) => applyFilterChip(prev, chip));
               setPage(1);
             }}
             onRemove={(field) => {
@@ -134,7 +142,9 @@ export function StockPage() {
               setChips([]);
               setPage(1);
             }}
-            filterFields={[{ id: "status", label: "Status", options: ["Healthy", "Below min", "Zero"] }]}
+            filterFields={[
+              { id: "status", label: "Status", options: ["Healthy", "Below min", "Zero"] },
+            ]}
             search={q}
             onSearch={(v) => {
               setQ(v);
@@ -145,7 +155,11 @@ export function StockPage() {
             onView={setView}
           />
         }
-        body={view === "insights" ? <HubChart type="bar" title="On-hand stock by product" data={chartData} /> : undefined}
+        body={
+          view === "insights" ? (
+            <HubChart type="bar" title="On-hand stock by product" data={chartData} />
+          ) : undefined
+        }
         footer={
           <Pagination
             page={Math.min(page, pages)}
@@ -166,7 +180,8 @@ export function StockPage() {
               <Checkbox
                 checked={allShownSelected}
                 onChange={(e) => {
-                  if (e.target.checked) setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
+                  if (e.target.checked)
+                    setSelected((s) => [...new Set([...s, ...shown.map((r) => r.id)])]);
                   else setSelected((s) => s.filter((id) => !shown.some((r) => r.id === id)));
                 }}
               />
@@ -191,7 +206,9 @@ export function StockPage() {
                   <Checkbox
                     checked={selected.includes(row.id)}
                     onChange={(e) => {
-                      setSelected((s) => (e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id)));
+                      setSelected((s) =>
+                        e.target.checked ? [...s, row.id] : s.filter((id) => id !== row.id),
+                      );
                     }}
                   />
                 </Td>
@@ -205,11 +222,18 @@ export function StockPage() {
                 {show("minimum") ? <Td numeric>{qty(row.minimumStock, row.baseUnit)}</Td> : null}
                 {show("status") ? (
                   <Td>
-                    <Badge tone={dead ? "danger" : low ? "warn" : "ok"}>{dead ? "Out" : low ? "Low" : "OK"}</Badge>
+                    <Badge tone={dead ? "danger" : low ? "warn" : "ok"}>
+                      {dead ? "Out" : low ? "Low" : "OK"}
+                    </Badge>
                   </Td>
                 ) : null}
                 <Td>
-                  <Button size="icon" variant="ghost" onClick={() => setOpen(row)} aria-label="Movements">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => setOpen(row)}
+                    aria-label="Movements"
+                  >
                     <Eye size={15} />
                   </Button>
                 </Td>
@@ -219,7 +243,12 @@ export function StockPage() {
         </tbody>
       </Table>
 
-      <Drawer open={Boolean(open)} title={open ? `${open.name} movements` : "Movements"} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
+      <Drawer
+        open={Boolean(open)}
+        title={open ? `${open.name} movements` : "Movements"}
+        onClose={() => setOpen(null)}
+        footer={<Button onClick={() => setOpen(null)}>Close</Button>}
+      >
         {open ? (
           <div className="ui-stack [display:grid] [gap:12px]">
             <Table>

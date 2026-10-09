@@ -326,7 +326,7 @@ export function ProductDetailDrawer({
                       {here ? <em>{PRODUCT_COPY.detailThisBranch}</em> : null}
                     </span>
                     <strong>
-                      {formatStockQty(row.quantity)} {stockUnit}
+                      <DetailQtyDisplay product={product} qty={row.quantity} mode="branch" />
                     </strong>
                   </li>
                 );

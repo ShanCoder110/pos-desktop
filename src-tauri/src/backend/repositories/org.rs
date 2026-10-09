@@ -94,7 +94,7 @@ impl OrgRepository {
         query: &UserListQuery,
     ) -> Result<(Vec<UserResponse>, u64), AppError> {
         let page = query.page.clone().normalized();
-        let (where_sql, values) = user_conditions(&page, query);
+        let (where_sql, values) = user_conditions(&page, query)?;
         let total = CountRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
             format!("SELECT COUNT(*) AS count FROM users u WHERE {where_sql}"),
@@ -839,11 +839,11 @@ fn user_response(row: UserRow, permissions: Vec<UserPermissionResponse>) -> User
 fn user_conditions(
     page: &crate::backend::dto::PageQuery,
     query: &UserListQuery,
-) -> (String, Vec<sea_orm::Value>) {
-    let mut where_sql = String::from("u.deleted_at IS NULL");
+) -> Result<(String, Vec<sea_orm::Value>), AppError> {
+    let mut parts = vec!["u.deleted_at IS NULL".to_owned()];
     let mut values = Vec::new();
     if let Some(search) = page.search.as_deref() {
-        where_sql.push_str(" AND (u.name LIKE ? OR u.username LIKE ? OR u.role LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)");
+        parts.push("(u.name LIKE ? OR u.username LIKE ? OR u.role LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)".to_owned());
         let pattern = format!("%{search}%");
         values.push(pattern.clone().into());
         values.push(pattern.clone().into());
@@ -852,22 +852,27 @@ fn user_conditions(
         values.push(pattern.into());
     }
     if let Some(is_active) = page.is_active {
-        where_sql.push_str(" AND u.is_active = ?");
+        parts.push("u.is_active = ?".to_owned());
         values.push(is_active.into());
     }
     if query.staff_only == Some(true) {
-        where_sql.push_str(" AND u.role != 'OWNER'");
+        parts.push("u.role != 'OWNER'".to_owned());
     }
-    if let Some(role) = query
-        .role
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        where_sql.push_str(" AND u.role = ?");
-        values.push(role.to_uppercase().into());
-    }
-    (where_sql, values)
+    crate::backend::util::push_in_strings(
+        &mut parts,
+        &mut values,
+        "u.role",
+        query.role.as_deref(),
+        true,
+    );
+    crate::backend::util::push_in_uuids(
+        &mut parts,
+        &mut values,
+        "u.default_branch_id",
+        query.branch_id.as_deref(),
+        "branchId",
+    )?;
+    Ok((parts.join(" AND "), values))
 }
 
 fn branch_conditions(query: &PageQuery) -> (String, Vec<sea_orm::Value>) {

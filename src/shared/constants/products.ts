@@ -1,4 +1,4 @@
-import { QUERY_TAB } from "@/shared/constants/query";
+import { QUERY_CATEGORY_ID, QUERY_TAB } from "@/shared/constants/query";
 import { routes } from "@/shared/constants/routes";
 
 export const PRODUCT_TAB_ALL = "all";
@@ -17,6 +17,10 @@ export type ProductSectionTab = (typeof PRODUCT_SECTION_TABS)[number]["id"];
 
 export function productsHref(tab: ProductSectionTab = PRODUCT_TAB_ALL) {
   return `${routes.products}?${QUERY_TAB}=${tab}`;
+}
+
+export function productsCategoryHref(categoryId: string) {
+  return `${routes.products}?${QUERY_TAB}=${PRODUCT_TAB_ALL}&${QUERY_CATEGORY_ID}=${encodeURIComponent(categoryId)}`;
 }
 
 export const PRODUCT_INSIGHT_METRICS = [
@@ -105,9 +109,9 @@ export const PRODUCT_COPY = {
   categoryRequired: "Choose a category",
   unitRequired: "Choose a unit",
   unitsHint:
-    "The biggest unit is the stock unit by default. Assign another unit as stock when adding or editing. Qty converts through that unit. Each unit has its own prices and profit.",
-  stockUnit: "Stock unit",
-  makeStockUnit: "Use as stock",
+    "Details ki Unit pehle base hoti hai. Box Dozen Bag add karne se base nahi badalta, sirf Use as base se. Prices conversion se auto bharti hain, manually bhi change kar sakte ho. Base badalne se prices ya stock nahi badalte.",
+  stockUnit: "Base unit",
+  makeStockUnit: "Set as base",
   sessionRequired: "Sign in again to save products",
   branchesTitle: "Branch stock",
   branchesHint: "Split opening quantity across branches. FIFO lots are created per branch.",

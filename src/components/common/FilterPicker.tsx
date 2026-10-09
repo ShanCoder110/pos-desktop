@@ -1,11 +1,17 @@
 import { useState } from "react";
-import { ArrowLeft, Funnel, X } from "lucide-react";
+import { ArrowLeft, Check, Funnel, X } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { Popover } from "@/components/common/Popover";
 import { TextInput } from "@/components/common/fields";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
+import {
+  chipValues,
+  formatChipDisplay,
+  makeFilterChip,
+  type FilterChip,
+} from "@/utils/filterChips";
 
-export type FilterChip = { field: string; label: string; value: string };
+export type { FilterChip };
 
 export function FilterChips({
   items,
@@ -27,8 +33,8 @@ export function FilterChips({
           onClick={() => onRemove(item.field)}
         >
           <span className="ui-chip-label [opacity:0.75]">{item.label}:</span>
-          <span className="ui-chip-value [max-width:140px] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]">
-            {item.value}
+          <span className="ui-chip-value [max-width:180px] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]">
+            {item.value || formatChipDisplay(chipValues(item))}
           </span>
           <X size={11} />
         </button>
@@ -65,6 +71,7 @@ export function FilterPicker({
   const [open, setOpen] = useState(false);
   const [field, setField] = useState<string | null>(null);
   const [value, setValue] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
   const [optQ, setOptQ] = useState("");
   const current = fields.find((f) => f.id === field);
   const options = (current?.options ?? []).filter((opt) =>
@@ -75,7 +82,14 @@ export function FilterPicker({
     setOpen(false);
     setField(null);
     setValue("");
+    setSelected([]);
     setOptQ("");
+  }
+
+  function toggleOption(opt: string) {
+    setSelected((prev) =>
+      prev.includes(opt) ? prev.filter((item) => item !== opt) : [...prev, opt],
+    );
   }
 
   return (
@@ -86,6 +100,7 @@ export function FilterPicker({
         if (!next) {
           setField(null);
           setValue("");
+          setSelected([]);
           setOptQ("");
         }
       }}
@@ -109,6 +124,7 @@ export function FilterPicker({
               onClick={() => {
                 setField(null);
                 setValue("");
+                setSelected([]);
                 setOptQ("");
               }}
               aria-label="Back"
@@ -130,26 +146,43 @@ export function FilterPicker({
                   />
                 </div>
               )}
+              {selected.length ? (
+                <div className="ui-pop-meta [padding:0_8px_6px] [font-size:11px] [font-weight:650] [color:var(--muted)]">
+                  {selected.length} selected
+                </div>
+              ) : null}
               <div className="ui-pop-list [display:grid] [max-height:240px] [overflow:auto]">
                 {options.length === 0 ? (
                   <div className="ui-pop-empty [padding:16px_10px] [text-align:center] [font-size:12px] [color:var(--muted)]">
                     No matches
                   </div>
                 ) : (
-                  options.map((opt) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      className={
-                        value === opt
-                          ? "ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer] is-on"
-                          : "ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"
-                      }
-                      onClick={() => setValue(opt)}
-                    >
-                      {opt}
-                    </button>
-                  ))
+                  options.map((opt) => {
+                    const on = selected.includes(opt);
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        className={
+                          on
+                            ? "ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer] is-on"
+                            : "ui-pop-item [display:flex] [align-items:center] [gap:8px] [width:100%] [min-height:32px] [padding:0_8px] [border:0] [border-radius:6px] [background:transparent] [color:var(--ink)] [font-size:12px] [font-weight:550] [text-align:left] [cursor:pointer]"
+                        }
+                        onClick={() => toggleOption(opt)}
+                      >
+                        <span
+                          className={
+                            on
+                              ? "ui-pop-check [display:inline-flex] [width:14px] [height:14px] [align-items:center] [justify-content:center] [border-radius:4px] [background:var(--accent)] [color:#fff]"
+                              : "ui-pop-check [display:inline-flex] [width:14px] [height:14px] [align-items:center] [justify-content:center] [border-radius:4px] [border:1px_solid_var(--line)]"
+                          }
+                        >
+                          {on ? <Check size={10} strokeWidth={3} /> : null}
+                        </span>
+                        <span className="min-w-0 truncate">{opt}</span>
+                      </button>
+                    );
+                  })
                 )}
               </div>
             </>
@@ -165,20 +198,35 @@ export function FilterPicker({
                 placeholder={current.placeholder ?? current.label}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && value.trim()) {
-                    onApply({ field: current.id, label: current.label, value: value.trim() });
+                    onApply(makeFilterChip(current.id, current.label, [value.trim()]));
                     close();
                   }
                 }}
               />
             </div>
           )}
-          <div className="ui-pop-foot [display:flex] [justify-content:flex-end] [gap:8px] [padding-top:8px] [margin-top:8px] [border-top:1px_solid_var(--line)]">
+          <div className="ui-pop-foot [display:flex] [justify-content:space-between] [align-items:center] [gap:8px] [padding-top:8px] [margin-top:8px] [border-top:1px_solid_var(--line)]">
+            {current.options ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!selected.length}
+                onClick={() => setSelected([])}
+              >
+                Clear
+              </Button>
+            ) : (
+              <span />
+            )}
             <Button
               variant="soft"
               size="sm"
               onClick={() => {
-                if (!value.trim()) return;
-                onApply({ field: current.id, label: current.label, value: value.trim() });
+                if (current.options) {
+                  onApply(makeFilterChip(current.id, current.label, selected));
+                } else if (value.trim()) {
+                  onApply(makeFilterChip(current.id, current.label, [value.trim()]));
+                }
                 close();
               }}
             >
@@ -196,11 +244,12 @@ export function FilterPicker({
               onClick={() => {
                 setField(item.id);
                 setValue(chips.find((c) => c.field === item.id)?.value ?? "");
+                setSelected(chipValues(chips.find((c) => c.field === item.id)));
                 setOptQ("");
               }}
             >
               <span>{item.label}</span>
-              {chips.some((c) => c.field === item.id) ? (
+              {chips.some((c) => c.field === item.id && chipValues(c).length) ? (
                 <span className="ui-pop-dot [width:6px] [height:6px] [margin-left:auto] [border-radius:99px] [background:var(--accent)]" />
               ) : null}
             </button>

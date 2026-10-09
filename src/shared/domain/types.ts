@@ -68,7 +68,16 @@ export type StockMoveType =
   | "DAMAGE"
   | "ADJUSTMENT";
 
-export type LedgerType = "CREDIT_SALE" | "PAYMENT" | "REFUND" | "ADVANCE" | "ADJUSTMENT";
+export type LedgerType =
+  | "OPENING_BALANCE"
+  | "SALE"
+  | "PAYMENT_RECEIVED"
+  | "PAYMENT_MADE"
+  | "ADJUSTMENT"
+  | "CREDIT_SALE"
+  | "PAYMENT"
+  | "REFUND"
+  | "ADVANCE";
 
 export type TxnType = "SALE_PAYMENT" | "CUSTOMER_PAYMENT" | "REFUND" | "EXPENSE" | "COMMISSION";
 
@@ -259,12 +268,16 @@ export interface InvoiceRow {
 export interface InvoiceItemRow {
   id: string;
   productId: string;
+  productName?: string;
+  sku?: string;
   unitName: string;
   quantity: number;
   baseQuantity: number;
   unitPrice: number;
   discount: number;
   total: number;
+  fifoCost?: number;
+  grossProfit?: number;
 }
 
 export interface ReturnRow {
@@ -305,6 +318,13 @@ export interface DomainCustomer {
   notes: string;
   isActive: boolean;
   isWalkIn?: boolean;
+  inCreditBook?: boolean;
+  creditSaleCount?: number;
+  openCreditSaleCount?: number;
+  creditSaleTotal?: number;
+  collectedTotal?: number;
+  profitOnHold?: number;
+  lastCreditSaleAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }

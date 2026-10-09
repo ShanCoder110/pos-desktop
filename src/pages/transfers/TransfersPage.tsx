@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Eye, Plus } from "lucide-react";
 import {
@@ -16,11 +16,13 @@ import {
   Td,
   THead,
   Th,
-  dateInRange,
   rangeForPeriod,
 } from "@/components/common";
 import type { DateRangeFilter } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
+import { applyFilterChip } from "@/utils/filterChips";
+import { chipStatusCsv } from "@/utils/filterQuery";
+import { createLoadGuard, isAbortError } from "@/utils/async";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { TransferDetailDrawer } from "@/pages/transfers/TransferDetailDrawer";
@@ -33,7 +35,7 @@ import {
   TRANSFER_TABLE_COLUMNS,
 } from "@/shared/constants/products";
 import { ensureSession } from "@/services/auth";
-import { getTransfer, listAllTransfers } from "@/services/transfers";
+import { getTransfer, listAllTransfers, listTransfers, mapTransfer } from "@/services/transfers";
 import { listAllBranches, type BranchResponse } from "@/services/org";
 import {
   TransferFromStockCell,
@@ -66,10 +68,36 @@ function statusLabel(status: TransferStatus) {
   return "Pending";
 }
 
+function transferApiFilters(
+  chips: FilterChip[],
+  search: string,
+  dateRange: DateRangeFilter,
+  sectionKpi: string | null,
+) {
+  const statusFromChips = chipStatusCsv(chips, "status", (label) => {
+    if (label === "Pending") return "PENDING";
+    if (label === "Completed") return "COMPLETED";
+    if (label === "Cancelled") return "CANCELLED";
+    return undefined;
+  });
+  return {
+    search: search.trim() || undefined,
+    status:
+      sectionKpi === "PENDING" || sectionKpi === "COMPLETED" || sectionKpi === "CANCELLED"
+        ? sectionKpi
+        : statusFromChips,
+    occurredFrom: dateRange.from || undefined,
+    occurredTo: dateRange.to || undefined,
+  };
+}
+
 export function TransfersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { setActions, sectionKpi, products, lots, refreshHub } = useProductsHub();
-  const [transfers, setTransfers] = useState<StockTransferRow[]>([]);
+  const [rows, setRows] = useState<StockTransferRow[]>([]);
+  const [filteredRows, setFilteredRows] = useState<StockTransferRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pages, setPages] = useState(1);
   const [branches, setBranches] = useState<BranchResponse[]>([]);
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
@@ -82,6 +110,7 @@ export function TransfersPage() {
   const [viewTransfer, setViewTransfer] = useState<StockTransferRow | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [loading, setLoading] = useState({ page: true });
 
   const prefilledProductId = searchParams.get("productId") ?? undefined;
@@ -95,27 +124,74 @@ export function TransfersPage() {
     return map;
   }, [branches]);
 
-  const loadTransfers = useCallback(async (signal?: AbortSignal) => {
-    const rows = await listAllTransfers(signal).catch(() => [] as StockTransferRow[]);
-    setTransfers(rows);
-  }, []);
+  const apiFilters = useMemo(
+    () => transferApiFilters(chips, q, dateRange, sectionKpi),
+    [chips, dateRange, q, sectionKpi],
+  );
 
   useEffect(() => {
     setPage(1);
-  }, [sectionKpi]);
+  }, [apiFilters, sectionKpi]);
 
   useEffect(() => {
     const controller = new AbortController();
-    void (async () => {
-      await ensureSession(controller.signal);
-      const [, branchRows] = await Promise.all([
-        loadTransfers(controller.signal),
-        listAllBranches(controller.signal).catch(() => [] as BranchResponse[]),
-      ]);
-      setBranches(branchRows);
-    })().finally(() => setLoading((current) => ({ ...current, page: false })));
+    void ensureSession(controller.signal)
+      .then(() => listAllBranches(controller.signal))
+      .then((branchRows) => setBranches(branchRows))
+      .catch(() => setBranches([]));
     return () => controller.abort();
-  }, [loadTransfers]);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const guard = createLoadGuard();
+    setLoading({ page: true });
+    const load =
+      pageSize === PAGE_SIZE_ALL
+        ? listAllTransfers(apiFilters, controller.signal).then((data) => ({
+            rows: data,
+            total: data.length,
+            pages: 1,
+          }))
+        : listTransfers({ ...apiFilters, page, perPage: pageSize }, controller.signal).then(
+            (response) => ({
+              rows: response.data.map(mapTransfer),
+              total: response.meta.totalItems,
+              pages: Math.max(1, response.meta.totalPages),
+            }),
+          );
+    void load
+      .then((response) => {
+        if (!guard.isActive()) return;
+        setRows(response.rows);
+        setTotal(response.total);
+        setPages(response.pages);
+      })
+      .catch((error) => {
+        if (isAbortError(error) || !guard.isActive()) return;
+        setRows([]);
+        setTotal(0);
+        setPages(1);
+      })
+      .finally(() => {
+        if (guard.isActive()) setLoading({ page: false });
+      });
+    return () => {
+      guard.dispose();
+      controller.abort();
+    };
+  }, [apiFilters, page, pageSize, reloadKey]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void listAllTransfers(apiFilters, controller.signal)
+      .then(setFilteredRows)
+      .catch((error) => {
+        if (isAbortError(error)) return;
+        setFilteredRows([]);
+      });
+    return () => controller.abort();
+  }, [apiFilters, reloadKey]);
 
   useEffect(() => {
     if (prefilledProductId || prefilledLotId) {
@@ -142,24 +218,9 @@ export function TransfersPage() {
       .catch(() => undefined);
   }
 
-  const rows = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const status = chips.find((c) => c.field === "status")?.value?.toUpperCase();
-    return transfers.filter((r) => {
-      const mapped = mapStatus(r.status);
-      if (!dateInRange(r.createdAt, dateRange)) return false;
-      if (needle) {
-        const text =
-          `${branchNames[r.fromBranchId] ?? ""} ${branchNames[r.toBranchId] ?? ""} ${r.notes}`.toLowerCase();
-        if (!text.includes(needle)) return false;
-      }
-      if (sectionKpi === "PENDING" || sectionKpi === "COMPLETED" || sectionKpi === "CANCELLED") {
-        return mapped === sectionKpi;
-      }
-      if (status) return mapped === status;
-      return true;
-    });
-  }, [transfers, q, chips, sectionKpi, dateRange, branchNames]);
+  const shown = rows;
+  const listPages = pageSize === PAGE_SIZE_ALL ? 1 : pages;
+  const listTotal = pageSize === PAGE_SIZE_ALL ? rows.length : total;
 
   useLayoutEffect(() => {
     setActions(
@@ -167,7 +228,7 @@ export function TransfersPage() {
         <HubExportMenu
           filename="transfers"
           sheetName="Transfers"
-          rows={rows}
+          rows={filteredRows}
           columns={[
             { label: "From", value: (row) => branchNames[row.fromBranchId] ?? row.fromBranchId },
             { label: "To", value: (row) => branchNames[row.toBranchId] ?? row.toBranchId },
@@ -184,21 +245,18 @@ export function TransfersPage() {
       </>,
     );
     return () => setActions(null);
-  }, [branchNames, openCreate, products, rows, setActions]);
+  }, [branchNames, filteredRows, openCreate, products, setActions]);
 
-  const pages = pageSize === PAGE_SIZE_ALL ? 1 : Math.max(1, Math.ceil(rows.length / pageSize));
-  const shown =
-    pageSize === PAGE_SIZE_ALL ? rows : rows.slice((page - 1) * pageSize, page * pageSize);
   const chartData = useMemo(() => {
     const grouped = new Map<string, number>();
-    rows.forEach((row) => {
+    filteredRows.forEach((row) => {
       const label = statusLabel(mapStatus(row.status));
       grouped.set(label, (grouped.get(label) ?? 0) + row.items.length);
     });
     return [...grouped.entries()]
       .map(([label, value]) => ({ label, value }))
       .sort((a, b) => b.value - a.value);
-  }, [rows]);
+  }, [filteredRows]);
   const show = (id: string) => cols.includes(id);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
 
@@ -212,7 +270,7 @@ export function TransfersPage() {
             onCols={setCols}
             chips={chips}
             onApply={(chip) => {
-              setChips((prev) => [...prev.filter((c) => c.field !== chip.field), chip]);
+              setChips((prev) => applyFilterChip(prev, chip));
               setPage(1);
             }}
             onRemove={(field) => {
@@ -246,16 +304,16 @@ export function TransfersPage() {
             <HubChart
               type="donut"
               title="Transferred items by status"
-              subtitle={`${rows.length} transfers after search, status, and date filters`}
+              subtitle={`${listTotal} transfers after search, status, and date filters`}
               data={chartData}
             />
           ) : undefined
         }
         footer={
           <Pagination
-            page={Math.min(page, pages)}
-            pages={pages}
-            total={rows.length}
+            page={Math.min(page, listPages)}
+            pages={listPages}
+            total={listTotal}
             pageSize={pageSize}
             onPageSize={(n) => {
               setPageSize(n);
@@ -419,7 +477,7 @@ export function TransfersPage() {
           onClose={closeCreate}
           onSavingChange={setCreating}
           onSaved={() => {
-            void loadTransfers();
+            setReloadKey((key) => key + 1);
             void refreshHub();
           }}
         />

@@ -59,9 +59,16 @@ export interface ReceiveLotPayload {
 export interface LotListParams {
   page?: number;
   perPage?: number;
+  search?: string;
   productId?: string;
   branchId?: string;
   sourceType?: string;
+  supplierId?: string;
+  city?: string;
+  lotStatus?: string;
+  occurredFrom?: string;
+  occurredTo?: string;
+  minValueLeft?: number;
 }
 
 export interface UpdateLotPayload {
@@ -110,11 +117,14 @@ export function listLots(params: LotListParams = {}, signal?: AbortSignal) {
   });
 }
 
-export async function listAllLots(signal?: AbortSignal): Promise<ProductLotRow[]> {
+export async function listAllLots(
+  params: Omit<LotListParams, "page" | "perPage"> = {},
+  signal?: AbortSignal,
+): Promise<ProductLotRow[]> {
   const lots: ProductLotRow[] = [];
   let page = 1;
   for (;;) {
-    const response = await listLots({ page, perPage: MAX_PAGE_SIZE }, signal);
+    const response = await listLots({ ...params, page, perPage: MAX_PAGE_SIZE }, signal);
     lots.push(...response.data.map(mapLotResponse));
     if (!response.meta.hasNextPage) return lots;
     page += 1;

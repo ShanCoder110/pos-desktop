@@ -445,10 +445,13 @@ fn build_conditions(
         parts.push("pl.id = ?".to_owned());
         values.push(id.into());
     }
-    if let Some(product_id) = &query.product_id {
-        parts.push("pl.product_id = ?".to_owned());
-        values.push(parse_uuid(product_id, "productId")?.into());
-    }
+    crate::backend::util::push_in_uuids(
+        &mut parts,
+        &mut values,
+        "pl.product_id",
+        query.product_id.as_deref(),
+        "productId",
+    )?;
     if let Some(branch_id) = &query.branch_id {
         parts.push(
             "EXISTS (SELECT 1 FROM branch_lots bl WHERE bl.product_lot_id = pl.id AND bl.branch_id = ?)"
@@ -456,9 +459,76 @@ fn build_conditions(
         );
         values.push(parse_uuid(branch_id, "branchId")?.into());
     }
-    if let Some(source_type) = &query.source_type {
-        parts.push("pl.source_type = ?".to_owned());
-        values.push(source_type.trim().to_uppercase().into());
+    crate::backend::util::push_in_uuids(
+        &mut parts,
+        &mut values,
+        "pl.supplier_id",
+        query.supplier_id.as_deref(),
+        "supplierId",
+    )?;
+    crate::backend::util::push_in_strings(
+        &mut parts,
+        &mut values,
+        "pl.source_type",
+        query.source_type.as_deref(),
+        true,
+    );
+    let cities = crate::backend::util::csv_values(query.city.as_deref());
+    if !cities.is_empty() {
+        let clauses = cities
+            .iter()
+            .map(|_| {
+                "EXISTS (SELECT 1 FROM suppliers s JOIN cities c ON c.id = s.city_id WHERE s.id = pl.supplier_id AND c.deleted_at IS NULL AND lower(c.name) LIKE ?)"
+            })
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        parts.push(format!("({clauses})"));
+        for name in cities {
+            values.push(format!("%{}%", name.to_lowercase()).into());
+        }
+    }
+    let statuses = crate::backend::util::csv_values(query.lot_status.as_deref())
+        .into_iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if !statuses.is_empty() {
+        let clauses = statuses
+            .iter()
+            .filter_map(|status| {
+                if status == "remaining" {
+                    Some("pl.remaining_base_quantity > 0".to_owned())
+                } else if status == "empty" {
+                    Some("pl.remaining_base_quantity <= 0".to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if !clauses.is_empty() {
+            parts.push(format!("({})", clauses.join(" OR ")));
+        }
+    }
+    if let Some(min_value) = query.min_value_left {
+        parts.push("(pl.remaining_base_quantity * pl.purchase_price_per_base) >= ?".to_owned());
+        values.push(min_value.into());
+    }
+    if let Some(from) = query
+        .occurred_from
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        parts.push("date(pl.received_date) >= date(?)".to_owned());
+        values.push(from.into());
+    }
+    if let Some(to) = query
+        .occurred_to
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        parts.push("date(pl.received_date) <= date(?)".to_owned());
+        values.push(to.into());
     }
     if let Some(search) = &query.page.search {
         parts.push(

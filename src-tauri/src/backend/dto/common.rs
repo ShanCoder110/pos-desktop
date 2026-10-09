@@ -111,6 +111,12 @@ pub struct PageQuery {
     pub address: Option<String>,
     pub notes: Option<String>,
     pub balance: Option<String>,
+    #[serde(
+        default,
+        alias = "in_credit_book",
+        deserialize_with = "deserialize_query_option_bool"
+    )]
+    pub in_credit_book: Option<bool>,
 }
 
 impl Default for PageQuery {
@@ -128,6 +134,7 @@ impl Default for PageQuery {
             address: None,
             notes: None,
             balance: None,
+            in_credit_book: None,
         }
     }
 }

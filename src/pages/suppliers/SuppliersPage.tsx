@@ -28,6 +28,8 @@ import {
 } from "@/components/common";
 import type { DateRangeFilter } from "@/components/common/DateRangePeriodPicker";
 import type { FilterChip } from "@/components/common/FilterPicker";
+import { applyFilterChip, chipValuesForField } from "@/utils/filterChips";
+import { chipCsv } from "@/utils/filterQuery";
 import { rangeForPeriod } from "@/components/common/DateRangePeriodPicker";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import {
@@ -391,27 +393,32 @@ function mapSupplier(record: MasterRecord): SupplierRow {
   };
 }
 
-function chipValue(chips: FilterChip[], field: string) {
-  return chips.find((chip) => chip.field === field)?.value;
-}
-
 function supplierQuery(
   search: string,
   chips: FilterChip[],
 ): Omit<MasterListParams, "page" | "perPage"> {
-  const status = chipValue(chips, "status");
+  const statuses = chipValuesForField(chips, "status");
+  const status = statuses.length === 1 ? statuses[0] : "";
+  const active = statuses.includes(SUPPLIER_STATUS_ACTIVE);
+  const inactive = statuses.includes(SUPPLIER_STATUS_INACTIVE);
   return {
     search,
-    name: chipValue(chips, "name"),
-    phone: chipValue(chips, "phone"),
-    address: chipValue(chips, "address"),
-    balance: chipValue(chips, "balance"),
+    name: chipCsv(chips, "name"),
+    phone: chipCsv(chips, "phone"),
+    address: chipCsv(chips, "address"),
+    balance: chipCsv(chips, "balance"),
     isActive:
-      status === SUPPLIER_STATUS_ACTIVE
-        ? true
-        : status === SUPPLIER_STATUS_INACTIVE
-          ? false
-          : undefined,
+      statuses.length === 0 || (active && inactive)
+        ? undefined
+        : status === SUPPLIER_STATUS_ACTIVE
+          ? true
+          : status === SUPPLIER_STATUS_INACTIVE
+            ? false
+            : active
+              ? true
+              : inactive
+                ? false
+                : undefined,
   };
 }
 
@@ -470,16 +477,16 @@ export function SuppliersPage() {
 
   const filters = useMemo(() => supplierQuery(search, chips), [chips, search]);
   const canAdjust = supplierCanAdjust(viewerRole);
-  const statusChip = chipValue(chips, "status");
-  const balanceChip = chipValue(chips, "balance");
+  const statusChips = chipValuesForField(chips, "status");
+  const balanceChips = chipValuesForField(chips, "balance");
   const kpi =
-    !statusChip && !balanceChip
+    !statusChips.length && !balanceChips.length
       ? "all"
-      : statusChip === SUPPLIER_STATUS_ACTIVE
+      : statusChips.length === 1 && statusChips[0] === SUPPLIER_STATUS_ACTIVE
         ? "active"
-        : balanceChip === SUPPLIER_BALANCE_PAYABLE
+        : balanceChips.length === 1 && balanceChips[0] === SUPPLIER_BALANCE_PAYABLE
           ? "payable"
-          : balanceChip === SUPPLIER_BALANCE_ADVANCE
+          : balanceChips.length === 1 && balanceChips[0] === SUPPLIER_BALANCE_ADVANCE
             ? "advance"
             : "";
 
@@ -537,14 +544,14 @@ export function SuppliersPage() {
   useEffect(() => {
     if (tab !== SUPPLIER_TAB_LEDGER) return;
     const controller = new AbortController();
-    const debit = Number(chipValue(ledgerChips, "debit"));
-    const credit = Number(chipValue(ledgerChips, "credit"));
+    const debit = Number(chipValuesForField(ledgerChips, "debit")[0]);
+    const credit = Number(chipValuesForField(ledgerChips, "credit")[0]);
     const params = {
       search: ledgerSearch,
-      supplier: chipValue(ledgerChips, "supplier"),
-      entryType: chipValue(ledgerChips, "entryType"),
-      notes: chipValue(ledgerChips, "notes"),
-      balance: chipValue(ledgerChips, "balance"),
+      supplier: chipCsv(ledgerChips, "supplier"),
+      entryType: chipCsv(ledgerChips, "entryType"),
+      notes: chipCsv(ledgerChips, "notes"),
+      balance: chipCsv(ledgerChips, "balance"),
       debit: Number.isFinite(debit) && debit > 0 ? debit : undefined,
       credit: Number.isFinite(credit) && credit > 0 ? credit : undefined,
       occurredFrom: dateRange.from || undefined,
@@ -621,7 +628,7 @@ export function SuppliersPage() {
 
   function applyChip(next: FilterChip, ledger = false) {
     const set = ledger ? setLedgerChips : setChips;
-    set((current) => [...current.filter((chip) => chip.field !== next.field), next]);
+    set((current) => applyFilterChip(current, next));
     if (ledger) setLedgerPage(1);
     else setPage(1);
   }

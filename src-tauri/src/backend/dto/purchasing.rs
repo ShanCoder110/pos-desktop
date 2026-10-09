@@ -31,6 +31,9 @@ pub struct PurchaseOrderListQuery {
     pub product_id: Option<String>,
     pub occurred_from: Option<String>,
     pub occurred_to: Option<String>,
+    pub city: Option<String>,
+    #[serde(alias = "min_total")]
+    pub min_total: Option<f64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Validate)]
