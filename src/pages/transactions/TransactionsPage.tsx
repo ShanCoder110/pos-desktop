@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Badge,
   EmptyRow,
+  HubExportMenu,
   KpiCard,
   PageHead,
   Pagination,
@@ -13,6 +14,7 @@ import {
   THead,
   Th,
 } from "@/components/common";
+import type { TableExportColumn } from "@/utils/exportFile";
 import type { MoneyTxnRow } from "@/shared/domain/types";
 import { useQueryTab } from "@/hooks/useQueryTab";
 import { money } from "@/utils/format";
@@ -69,6 +71,16 @@ export function TransactionsPage() {
   const inn = seed.filter((t) => t.direction === "IN").reduce((s, t) => s + t.amount, 0);
   const out = seed.filter((t) => t.direction === "OUT").reduce((s, t) => s + t.amount, 0);
 
+  const exportColumns: TableExportColumn<MoneyTxnRow>[] = [
+    { label: "When", value: (row) => row.createdAt },
+    { label: "Branch", value: (row) => branchNames[row.branchId] ?? row.branchId },
+    { label: "Direction", value: (row) => row.direction },
+    { label: "Type", value: (row) => row.type },
+    { label: "Amount", value: (row) => row.amount },
+    { label: "Method", value: (row) => row.paymentMethod },
+    { label: "Notes", value: (row) => row.notes ?? "" },
+  ];
+
   return (
     <div className="ui-stack [display:grid] [gap:12px]">
       <PageHead title="Transactions" />
@@ -100,14 +112,22 @@ export function TransactionsPage() {
       >
         <Table
           toolbar={
-            <SearchInput
-              value={q}
-              onChange={(v) => {
-                setQ(v);
-                setPage(1);
-              }}
-              placeholder="Type, method, note"
-            />
+            <div className="flex w-full flex-wrap items-center justify-between gap-2">
+              <SearchInput
+                value={q}
+                onChange={(v) => {
+                  setQ(v);
+                  setPage(1);
+                }}
+                placeholder="Type, method, note"
+              />
+              <HubExportMenu
+                columns={exportColumns}
+                rows={rows}
+                filename={`transactions-${tab}`}
+                sheetName="Transactions"
+              />
+            </div>
           }
           footer={
             <Pagination

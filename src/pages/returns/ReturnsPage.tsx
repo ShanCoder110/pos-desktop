@@ -5,6 +5,7 @@ import {
   Button,
   Drawer,
   EmptyRow,
+  HubExportMenu,
   Pagination,
   SearchInput,
   Table,
@@ -12,6 +13,7 @@ import {
   THead,
   Th,
 } from "@/components/common";
+import type { TableExportColumn } from "@/utils/exportFile";
 import { useSalesHub } from "@/pages/sales/SalesLayout";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import type { ReturnRow } from "@/shared/domain/types";
@@ -43,11 +45,44 @@ export function ReturnsPage() {
   const pages = Math.max(1, Math.ceil(rows.length / DEFAULT_PAGE_SIZE));
   const shown = rows.slice((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE);
 
+  const exportColumns: TableExportColumn<ReturnRow>[] = [
+    { label: "When", value: (row) => row.createdAt },
+    { label: "Invoice", value: (row) => invoiceLabel(row.invoiceId) },
+    { label: "Customer", value: (row) => row.customerId || "Walk-in" },
+    { label: "Type", value: (row) => row.type },
+    { label: "Refund", value: (row) => row.refundAmount },
+    { label: "Reason", value: (row) => row.reason },
+  ];
+
   return (
     <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
-        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Invoice, customer, reason" />}
-        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
+        toolbar={
+          <div className="flex w-full flex-wrap items-center justify-between gap-2">
+            <SearchInput
+              value={q}
+              onChange={(v) => {
+                setQ(v);
+                setPage(1);
+              }}
+              placeholder="Invoice, customer, reason"
+            />
+            <HubExportMenu
+              columns={exportColumns}
+              rows={rows}
+              filename={`returns-${sectionKpi ?? "all"}`}
+              sheetName="Returns"
+            />
+          </div>
+        }
+        footer={
+          <Pagination
+            page={Math.min(page, pages)}
+            pages={pages}
+            total={rows.length}
+            onChange={setPage}
+          />
+        }
       >
         <THead>
           <tr>
@@ -82,10 +117,17 @@ export function ReturnsPage() {
         </tbody>
       </Table>
 
-      <Drawer open={Boolean(open)} title={open?.type ?? "Return"} onClose={() => setOpen(null)} footer={<Button onClick={() => setOpen(null)}>Close</Button>}>
+      <Drawer
+        open={Boolean(open)}
+        title={open?.type ?? "Return"}
+        onClose={() => setOpen(null)}
+        footer={<Button onClick={() => setOpen(null)}>Close</Button>}
+      >
         {open ? (
           <div className="ui-stack [display:grid] [gap:12px]">
-            <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">{open.notes}</p>
+            <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
+              {open.notes}
+            </p>
             <p className="text-[14px] font-extrabold tracking-tight text-ink">Coming back</p>
             <Table>
               <THead>
@@ -104,7 +146,15 @@ export function ReturnsPage() {
                     <Td>{item.lotId || "—"}</Td>
                     <Td numeric>{item.baseQuantity}</Td>
                     <Td>
-                      <Badge tone={item.condition === "GOOD" ? "ok" : item.condition === "DAMAGED" ? "danger" : "warn"}>
+                      <Badge
+                        tone={
+                          item.condition === "GOOD"
+                            ? "ok"
+                            : item.condition === "DAMAGED"
+                              ? "danger"
+                              : "warn"
+                        }
+                      >
                         {item.condition}
                       </Badge>
                     </Td>
@@ -138,7 +188,9 @@ export function ReturnsPage() {
                 </Table>
               </>
             ) : (
-              <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">No replacement line. Money out is a Transaction REFUND.</p>
+              <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
+                No replacement line. Money out is a Transaction REFUND.
+              </p>
             )}
           </div>
         ) : null}

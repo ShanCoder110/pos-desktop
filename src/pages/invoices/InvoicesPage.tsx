@@ -7,6 +7,7 @@ import {
   Button,
   Drawer,
   EmptyRow,
+  HubExportMenu,
   Pagination,
   SearchInput,
   Table,
@@ -14,7 +15,9 @@ import {
   THead,
   Th,
 } from "@/components/common";
+import { InvoiceReturnPanel } from "@/pages/invoices/InvoiceReturnPanel";
 import { useSalesHub } from "@/pages/sales/SalesLayout";
+import type { TableExportColumn } from "@/utils/exportFile";
 import type { InvoiceRow, PaymentStatus } from "@/shared/domain/types";
 import { money } from "@/utils/format";
 import { listAllInvoices } from "@/services/sales";
@@ -33,7 +36,7 @@ function payTone(s: PaymentStatus) {
 
 export function InvoicesPage() {
   const navigate = useNavigate();
-  const { sectionKpi, invoices: hubInvoices } = useSalesHub();
+  const { sectionKpi, invoices: hubInvoices, refreshHub } = useSalesHub();
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [branchNames, setBranchNames] = useState<Record<string, string>>({});
   const [customerNames, setCustomerNames] = useState<Record<string, string>>({});
@@ -102,18 +105,42 @@ export function InvoicesPage() {
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const shown = filtered.slice((page - 1) * PAGE, page * PAGE);
 
+  const exportColumns: TableExportColumn<InvoiceRow>[] = [
+    { label: "Number", value: (row) => row.invoiceNumber },
+    { label: "When", value: (row) => row.createdAt },
+    { label: "Branch", value: (row) => branchNames[row.branchId] ?? row.branchId },
+    {
+      label: "Customer",
+      value: (row) =>
+        row.customerId ? (customerNames[row.customerId] ?? row.customerId) : "Walk-in",
+    },
+    { label: "Total", value: (row) => row.total },
+    { label: "Paid", value: (row) => row.paidAmount },
+    { label: "Credit", value: (row) => row.creditAmount },
+    { label: "Payment", value: (row) => row.paymentStatus },
+    { label: "Status", value: (row) => row.status },
+  ];
+
   return (
     <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
         toolbar={
-          <SearchInput
-            value={q}
-            onChange={(v) => {
-              setQ(v);
-              setPage(1);
-            }}
-            placeholder="Search number or customer"
-          />
+          <div className="flex w-full flex-wrap items-center justify-between gap-2">
+            <SearchInput
+              value={q}
+              onChange={(v) => {
+                setQ(v);
+                setPage(1);
+              }}
+              placeholder="Search number or customer"
+            />
+            <HubExportMenu
+              columns={exportColumns}
+              rows={filtered}
+              filename={`invoices-${sectionKpi ?? "all"}`}
+              sheetName="Invoices"
+            />
+          </div>
         }
         footer={
           <Pagination
@@ -219,6 +246,9 @@ export function InvoicesPage() {
               ))}
             </tbody>
           </Table>
+        ) : null}
+        {open?.status === "COMPLETED" ? (
+          <InvoiceReturnPanel invoice={open} onSuccess={() => refreshHub()} />
         ) : null}
       </Drawer>
     </div>

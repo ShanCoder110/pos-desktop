@@ -24,6 +24,7 @@ import {
   productTotalStock,
 } from "@/utils/productStock";
 import { consumeLots } from "@/utils/lots";
+import { buildReceiptText, whatsAppShareUrl } from "@/utils/receiptShare";
 import { ensureCashSession, ensureSession } from "@/services/auth";
 import { listAllProducts, searchAllProducts } from "@/services/products";
 import { createMasterRecord } from "@/services/masters";
@@ -242,6 +243,7 @@ export function PosPage() {
   const [recentOpen, setRecentOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
   const [clearAfterPrint, setClearAfterPrint] = useState(false);
+  const [receiptInvoiceNo, setReceiptInvoiceNo] = useState("");
   const [splitPrint, setSplitPrint] = useState(false);
   const [toast, setToast] = useState("");
   const [clock, setClock] = useState(clockNow);
@@ -1106,6 +1108,7 @@ export function PosPage() {
           return sold ? { ...product, stock: Math.max(0, product.stock - sold) } : product;
         }),
       );
+      setReceiptInvoiceNo(invoice.invoiceNumber);
       setClearAfterPrint(true);
       setPrintOpen(true);
       showToast(
@@ -2399,13 +2402,17 @@ export function PosPage() {
                   showToast("Nothing to send");
                   return;
                 }
-                const text = encodeURIComponent(
-                  `*${settings.shopName}*\nTotal: ${money(t.total)}\nThank you`,
-                );
-                window.open(
-                  `https://wa.me/${displayCustomer.phone.replace(/\D/g, "")}?text=${text}`,
-                  "_blank",
-                );
+                const text = buildReceiptText({
+                  settings,
+                  customer: displayCustomer,
+                  lines: invoiceLines,
+                  total: t.total,
+                  paid: amountPaid,
+                  balanceBefore: customer.balance,
+                  balanceAfter,
+                  invoiceNumber: receiptInvoiceNo || undefined,
+                });
+                window.open(whatsAppShareUrl(displayCustomer.phone, text), "_blank", "noopener");
               }}
             >
               WhatsApp
@@ -2714,6 +2721,7 @@ export function PosPage() {
         balanceBefore={customer.balance}
         balanceAfter={balanceAfter}
         duplicate={false}
+        invoiceNumber={receiptInvoiceNo || undefined}
       />
     </>
   );

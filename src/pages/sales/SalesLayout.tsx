@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Ban, CheckCircle2, Clock, Gift, Package, Receipt, RotateCcw, Wallet } from "lucide-react";
 import { KpiCard, TabSheet, Tabs } from "@/components/common";
@@ -17,6 +17,7 @@ type HubCtx = {
   invoices: InvoiceRow[];
   returns: ReturnRow[];
   products: Product[];
+  refreshHub: () => void;
 };
 
 const SalesHubContext = createContext<HubCtx>({
@@ -25,6 +26,7 @@ const SalesHubContext = createContext<HubCtx>({
   invoices: [],
   returns: [],
   products: [],
+  refreshHub: () => undefined,
 });
 
 export function useSalesHub() {
@@ -278,12 +280,14 @@ function SalesHubKpis() {
 export function SalesLayout() {
   const { pathname } = useLocation();
   const [sectionKpi, setSectionKpi] = useState<string | null>(null);
+  const [hubTick, setHubTick] = useState(0);
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [returns, setReturns] = useState<ReturnRow[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const refreshHub = useCallback(() => setHubTick((tick) => tick + 1), []);
   const ctx = useMemo(
-    () => ({ sectionKpi, setSectionKpi, invoices, returns, products }),
-    [sectionKpi, invoices, returns, products],
+    () => ({ sectionKpi, setSectionKpi, invoices, returns, products, refreshHub }),
+    [sectionKpi, invoices, returns, products, refreshHub],
   );
 
   useEffect(() => {
@@ -304,7 +308,7 @@ export function SalesLayout() {
       setProducts(productRows);
     })();
     return () => controller.abort();
-  }, []);
+  }, [hubTick]);
 
   return (
     <SalesHubContext.Provider value={ctx}>

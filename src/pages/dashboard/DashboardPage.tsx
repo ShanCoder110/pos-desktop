@@ -153,6 +153,8 @@ export function DashboardPage() {
     [invoices, today],
   );
   const salesToday = todaySales || sumDay(invoices, today, (row) => row.total);
+  const invoiceTotalToday = sumDay(invoices, today, (row) => row.total);
+  const salesMismatch = todaySales > 0 && Math.abs(todaySales - invoiceTotalToday) > 0.02;
   const salesYesterday = sumDay(invoices, yesterday, (row) => row.total);
   const collectedToday = sumDay(invoices, today, (row) => row.paidAmount);
   const collectedYesterday = sumDay(invoices, yesterday, (row) => row.paidAmount);
@@ -230,6 +232,14 @@ export function DashboardPage() {
           {DASHBOARD_COPY.openPos}
         </Button>
       </PageHead>
+
+      {!loading.page && salesMismatch ? (
+        <p className="rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-ink">
+          Reconciliation: API today sales {money(todaySales)} vs invoices loaded{" "}
+          {money(invoiceTotalToday)} ({todayInvoices.length} bill
+          {todayInvoices.length === 1 ? "" : "s"}). Check branch filter or completed_at dates.
+        </p>
+      ) : null}
 
       <div className="ui-kpi-row grid shrink-0 grid-cols-4 gap-2.5">
         {loading.page ? (

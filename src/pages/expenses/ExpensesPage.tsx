@@ -6,6 +6,7 @@ import {
   Drawer,
   EmptyRow,
   Field,
+  HubExportMenu,
   KpiCard,
   PageHead,
   Pagination,
@@ -33,6 +34,7 @@ import {
   listExpenseCategories,
 } from "@/services/finance";
 import { listAllBranches, mapBranch } from "@/services/org";
+import type { TableExportColumn } from "@/utils/exportFile";
 
 const PAGE = 10;
 const EXPENSE_FORM_ID = "expense-form";
@@ -237,6 +239,15 @@ export function ExpensesPage() {
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const shown = filtered.slice((page - 1) * PAGE, page * PAGE);
 
+  const exportColumns: TableExportColumn<ExpenseRow>[] = [
+    { label: "Date", value: (row) => row.expenseDate },
+    { label: "Category", value: (row) => categoryName(row.categoryId) },
+    { label: "Description", value: (row) => row.description },
+    { label: "Branch", value: (row) => branchName(row.branchId) },
+    { label: "Method", value: (row) => row.paymentMethod },
+    { label: "Amount", value: (row) => row.amount },
+  ];
+
   async function saveExpense(values: {
     categoryId: string;
     branchId: string;
@@ -308,14 +319,22 @@ export function ExpensesPage() {
       >
         <Table
           toolbar={
-            <SearchInput
-              value={q}
-              onChange={(v) => {
-                setQ(v);
-                setPage(1);
-              }}
-              placeholder="Description or category"
-            />
+            <div className="flex w-full flex-wrap items-center justify-between gap-2">
+              <SearchInput
+                value={q}
+                onChange={(v) => {
+                  setQ(v);
+                  setPage(1);
+                }}
+                placeholder="Description or category"
+              />
+              <HubExportMenu
+                columns={exportColumns}
+                rows={filtered}
+                filename={`expenses-${tab}`}
+                sheetName="Expenses"
+              />
+            </div>
           }
           footer={
             <Pagination

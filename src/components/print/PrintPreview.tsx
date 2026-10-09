@@ -1,8 +1,16 @@
+import { useMemo, useRef } from "react";
 import { MessageCircle, Printer, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useSettings } from "@/shared/settings";
 import { money } from "@/utils/format";
 import type { Customer, InvoiceLine } from "@/shared/types";
+import {
+  buildReceiptText,
+  printReceiptHtml,
+  thermalLabel,
+  thermalWidthPx,
+  whatsAppShareUrl,
+} from "@/utils/receiptShare";
 
 export function PrintPreview({
   open,
@@ -14,6 +22,7 @@ export function PrintPreview({
   balanceBefore,
   balanceAfter,
   duplicate,
+  invoiceNumber,
 }: {
   open: boolean;
   onClose: () => void;
@@ -24,20 +33,59 @@ export function PrintPreview({
   balanceBefore: number;
   balanceAfter: number;
   duplicate?: boolean;
+  invoiceNumber?: string;
 }) {
   const { settings } = useSettings();
+  const slipRef = useRef<HTMLDivElement>(null);
+  const paper = settings.printerPaperWidth ?? settings.paperWidth;
+  const thermal = settings.printSize === "thermal";
+  const widthPx = thermal ? thermalWidthPx(paper) : 560;
+
+  const receiptText = useMemo(
+    () =>
+      buildReceiptText({
+        settings,
+        customer,
+        lines,
+        total,
+        paid,
+        balanceBefore,
+        balanceAfter,
+        invoiceNumber,
+      }),
+    [settings, customer, lines, total, paid, balanceBefore, balanceAfter, invoiceNumber],
+  );
+
   if (!open) return null;
 
   const hasPhone = Boolean(customer.phone);
-  const thermal = settings.printSize === "thermal";
+
+  function handlePrint() {
+    const node = slipRef.current;
+    if (!node) {
+      window.print();
+      return;
+    }
+    const html = `<!DOCTYPE html><html><head><title>Receipt</title><style>
+      @page { margin: 4mm; }
+      body { font-family: ui-monospace, Menlo, monospace; font-size: ${thermal ? 11 : 13}px; width: ${widthPx}px; }
+    </style></head><body>${node.innerHTML}</body></html>`;
+    printReceiptHtml(html);
+  }
+
+  function handleWhatsApp() {
+    if (!customer.phone) return;
+    window.open(whatsAppShareUrl(customer.phone, receiptText), "_blank", "noopener,noreferrer");
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/50 p-8 pt-10">
       <div className="flex gap-4">
         <div
+          ref={slipRef}
           className="relative bg-white text-slate-900 shadow-2xl"
           style={{
-            width: thermal ? 280 : 560,
+            width: widthPx,
             fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
             fontSize: thermal ? 11 : 13,
           }}
@@ -51,9 +99,12 @@ export function PrintPreview({
             <p className="text-center text-sm font-bold">
               {settings.receiptShopName || settings.shopName}
             </p>
-            <p className="text-center text-[10px] text-slate-500">Main counter · Lahore</p>
+            <p className="text-center text-[10px] text-slate-500">{settings.address}</p>
+            {invoiceNumber ? (
+              <p className="mt-1 text-center text-[10px] font-semibold">{invoiceNumber}</p>
+            ) : null}
             <p className="mt-2 text-center text-[10px]">
-              {duplicate ? "Duplicate" : "Original"} · A-1043
+              {duplicate ? "Duplicate" : "Original"} · {new Date().toLocaleString("en-GB")}
             </p>
             <div className="my-2 border-t border-dashed border-slate-400" />
             <p>Cust: {customer.name}</p>
@@ -106,12 +157,12 @@ export function PrintPreview({
             </Button>
           </div>
           <p className="text-[12px] text-slate-500">
-            {thermal ? "Thermal 80mm" : "A4"} · {duplicate ? "Duplicate" : "First print"}
+            {thermal ? thermalLabel(paper) : "A4"} · {duplicate ? "Duplicate" : "First print"}
           </p>
-          <Button variant="primary" icon={<Printer size={14} />}>
+          <Button variant="primary" icon={<Printer size={14} />} onClick={handlePrint}>
             Print
           </Button>
-          <Button disabled={!hasPhone} icon={<MessageCircle size={14} />}>
+          <Button disabled={!hasPhone} icon={<MessageCircle size={14} />} onClick={handleWhatsApp}>
             WhatsApp
           </Button>
           {!hasPhone ? (
@@ -119,6 +170,9 @@ export function PrintPreview({
               No phone on this customer. WhatsApp stays off.
             </p>
           ) : null}
+          <p className="text-[10px] text-slate-400">
+            If the printer is offline, use Print to open the system dialog or save as PDF.
+          </p>
         </div>
       </div>
     </div>
