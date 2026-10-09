@@ -1,4 +1,5 @@
 import type { Product, ProductSellUnit } from "@/shared/types";
+import { creditTierPrice } from "@/utils/salePricing";
 
 export function productSellUnits(product: Product): ProductSellUnit[] {
   const units = product.sellUnits ?? [];
@@ -35,7 +36,7 @@ export function resolveProductSellUnit(product: Product, unitId?: string) {
 
 export function defaultSellPrice(product: Product, unitId?: string) {
   const unit = resolveProductSellUnit(product, unitId);
-  return unit?.price ?? product.retail ?? 0;
+  return creditTierPrice(unit, "retail") || product.retail || 0;
 }
 
 export function unitStockHint(product: Product, unit?: ProductSellUnit) {

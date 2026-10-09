@@ -611,7 +611,7 @@ impl CreditRepository {
             let displayed = quantity(item.quantity);
             let prior = ReturnedQtyRow::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT COALESCE(SUM(sri.displayed_quantity), 0) AS returned FROM sale_return_items sri INNER JOIN sale_returns sr ON sr.id = sri.sale_return_id WHERE sri.invoice_item_id = ? AND sr.status = 'COMPLETED'",
+                "SELECT CAST(COALESCE(SUM(sri.displayed_quantity), 0) AS REAL) AS returned FROM sale_return_items sri INNER JOIN sale_returns sr ON sr.id = sri.sale_return_id WHERE sri.invoice_item_id = ? AND sr.status = 'COMPLETED'",
                 [invoice_item_id.into()],
             ))
             .one(transaction)

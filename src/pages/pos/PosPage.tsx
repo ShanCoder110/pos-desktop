@@ -7,6 +7,14 @@ import {
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { normalizeSellUnits, productSellUnits } from "@/pages/products/productQty";
+import {
+  displayToBaseQty,
+  resolveSellUnit,
+  cartLineTierPrices,
+  convertLineToUnit,
+  unitTierPrice,
+  unitsForProduct,
+} from "@/utils/salePricing";
 import { PrintPreview } from "@/components/print/PrintPreview";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { Skeleton } from "@/components/common/Skeleton";
@@ -158,7 +166,11 @@ function readHeldPayload(payload: unknown): HeldPayload | null {
     note: value.note ?? "",
   };
 }
-function listPrice(p: Product, mode: PriceMode) {
+function listPrice(p: Product, mode: PriceMode, unitId?: string) {
+  const tier = mode === "wholesale" ? "wholesale" : "retail";
+  const unit = resolveSellUnit(p, unitId);
+  const fromUnit = unitTierPrice(unit, tier);
+  if (fromUnit > 0) return fromUnit;
   return mode === "wholesale" ? p.wholesale : p.retail;
 }
 
@@ -206,6 +218,7 @@ export function PosPage() {
   const [hit, setHit] = useState(0);
   const [pending, setPending] = useState<Product | null>(null);
   const [sellUnit, setSellUnit] = useState<SellUnit>("base");
+  const [pendingProductUnitId, setPendingProductUnitId] = useState("");
   const [qtyInput, setQtyInput] = useState("1");
   const [priceMode, setPriceMode] = useState<PriceMode>("retail");
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -375,10 +388,9 @@ export function PosPage() {
       const units = sellUnitsFor(product);
       const unitRow = units.find((u) => u.id === item.productUnitId) ?? sellUnitOf(product, "base");
       if (!unitRow?.id) continue;
-      const packN = packOf(product);
-      const isPack = packN > 1 && unitRow.contains === packN;
-      const factor = isPack ? packN : 1;
-      const sellU = isPack ? "pack" : product.unit;
+      const packN = unitRow.contains > 1 ? unitRow.contains : packOf(product) || 1;
+      const sellU = unitRow.name || unitRow.symbol || product.unit;
+      const tierMin = unitTierPrice(unitRow, "minimum");
       lines.push(
         recompute({
           id: uid(),
@@ -390,7 +402,7 @@ export function PosPage() {
           sellUnit: sellU,
           packSize: packN || 1,
           priceMode: mode,
-          minPrice: +(product.min * factor).toFixed(2),
+          minPrice: tierMin || product.min,
           listPrice: item.unitPrice,
           unitPrice: item.unitPrice,
           qty: item.quantity,
@@ -585,12 +597,14 @@ export function PosPage() {
       showToast("Out of stock");
       return;
     }
+    const unit = resolveSellUnit(product);
     setPending(product);
+    setPendingProductUnitId(unit?.id ?? "");
     setSellUnit("base");
     setQuery(product.name);
     setMenuOpen(false);
     setQtyInput("1");
-    focusAfterSelect.current = packOf(product) ? "unit" : "qty";
+    focusAfterSelect.current = unitsForProduct(product).length > 1 ? "unit" : "qty";
   }
 
   useEffect(() => {
@@ -624,9 +638,12 @@ export function PosPage() {
       showToast("Quantity must be > 0");
       return;
     }
-    const packN = packOf(pending);
-    const isPack = sellUnit === "pack" && packN > 1;
-    const baseQty = isPack ? entered * packN : entered;
+    const productUnit = resolveSellUnit(pending, pendingProductUnitId);
+    if (!productUnit?.id) {
+      showToast("Select a sell unit first");
+      return;
+    }
+    const baseQty = displayToBaseQty(productUnit, entered);
     const left = cartStock(pending.id);
     if (baseQty > left + 0.0001) {
       showToast(`Only ${left} ${prettyUnit(pending.unit)} left`);
@@ -642,20 +659,18 @@ export function PosPage() {
       return;
     }
 
-    const sellU = isPack ? "pack" : pending.unit;
-    const factor = isPack ? packN : 1;
-    const productUnit = sellUnitOf(pending, isPack ? "pack" : "base");
-    if (!productUnit?.id) {
-      showToast("This product has no sell unit");
-      return;
-    }
-    const baseP = listPrice(pending, priceMode);
-    const sellPrice = +(baseP * factor).toFixed(2);
-    const minSell = +((pending.min || lot.minFloor) * factor).toFixed(2);
+    const tier = priceMode === "wholesale" ? "wholesale" : "retail";
+    const sellPrice = unitTierPrice(productUnit, tier);
+    const minSell = unitTierPrice(productUnit, "minimum") || lot.minFloor;
+    const sellU = productUnit.name || productUnit.symbol || pending.unit;
+    const packN = productUnit.contains > 1 ? productUnit.contains : packOf(pending) || 1;
 
     setCart((prev) => {
       const existing = prev.find(
-        (i) => i.productId === pending.id && i.sellUnit === sellU && i.priceMode === priceMode,
+        (i) =>
+          i.productId === pending.id &&
+          i.productUnitId === productUnit.id &&
+          i.priceMode === priceMode,
       );
       if (existing) {
         return prev.map((i) =>
@@ -774,37 +789,16 @@ export function PosPage() {
         const packN = packOf(p);
         if (!packN) return item;
         const wantPack = to === "pack";
-        const isPack = item.sellUnit !== item.baseUnit;
+        const isPack = item.sellUnit !== item.baseUnit && item.packSize > 1;
         if (wantPack === isPack) return item;
-        const f = isPack ? item.packSize : 1;
-        const pricePerBase = item.unitPrice / f;
-        const listPerBase = item.listPrice / f;
-        const minPerBase = item.minPrice / f;
-        const baseQty = item.baseQty;
-        if (wantPack) {
-          const productUnit = sellUnitOf(p, "pack");
-          if (!productUnit) return item;
-          return recompute({
-            ...item,
-            productUnitId: productUnit.id,
-            sellUnit: "pack",
-            packSize: packN,
-            qty: +(baseQty / packN).toFixed(3),
-            unitPrice: +(pricePerBase * packN).toFixed(2),
-            listPrice: +(listPerBase * packN).toFixed(2),
-            minPrice: +(minPerBase * packN).toFixed(2),
-          });
-        }
-        const productUnit = sellUnitOf(p, "base");
-        if (!productUnit) return item;
+        const target = sellUnitOf(p, to);
+        if (!target?.id) return item;
+        const converted = convertLineToUnit(p, item.baseQty, item.priceMode, target.id);
+        if (!converted) return item;
         return recompute({
           ...item,
-          productUnitId: productUnit.id,
-          sellUnit: item.baseUnit,
-          qty: +baseQty.toFixed(3),
-          unitPrice: +pricePerBase.toFixed(2),
-          listPrice: +listPerBase.toFixed(2),
-          minPrice: +minPerBase.toFixed(2),
+          ...converted,
+          lineDisc: 0,
         });
       }),
     );
@@ -816,14 +810,17 @@ export function PosPage() {
         if (item.id !== id) return item;
         const p = products.find((x) => x.id === item.productId);
         if (!p) return item;
-        const factor = item.sellUnit !== item.baseUnit ? item.packSize : 1;
-        const sell = +(listPrice(p, mode) * factor).toFixed(2);
+        const { listPrice: sell, minPrice: minSell } = cartLineTierPrices(
+          p,
+          item.productUnitId,
+          mode,
+        );
         return recompute({
           ...item,
           priceMode: mode,
           listPrice: sell,
           unitPrice: sell,
-          minPrice: +(p.min * factor).toFixed(2),
+          minPrice: minSell,
           lineDisc: 0,
         });
       }),
@@ -842,14 +839,17 @@ export function PosPage() {
       prev.map((item) => {
         const p = products.find((x) => x.id === item.productId);
         if (!p) return item;
-        const factor = item.sellUnit !== item.baseUnit ? item.packSize : 1;
-        const sell = +(listPrice(p, next) * factor).toFixed(2);
+        const { listPrice: sell, minPrice: minSell } = cartLineTierPrices(
+          p,
+          item.productUnitId,
+          next,
+        );
         return recompute({
           ...item,
           priceMode: next,
           listPrice: sell,
           unitPrice: sell,
-          minPrice: +(p.min * factor).toFixed(2),
+          minPrice: minSell,
           lineDisc: 0,
         });
       }),
@@ -1384,7 +1384,13 @@ export function PosPage() {
                       </span>
                       <span className="price [text-align:right]">
                         <span className="[display:block] [font-weight:700]">
-                          {money(listPrice(p, priceMode))}
+                          {money(
+                            listPrice(
+                              p,
+                              priceMode,
+                              pending?.id === p.id ? pendingProductUnitId : undefined,
+                            ),
+                          )}
                         </span>
                         <span className="[display:block] [font-size:9px] [font-weight:500] [color:var(--muted)] [line-height:1.2] [white-space:nowrap]">
                           {openLotPrices(p)}
@@ -1410,93 +1416,84 @@ export function PosPage() {
             </button>
 
             <div
-              className="price-mode [display:flex] [background:#fff] [border:1px_solid_#c7d2fe] [padding:3px] [border-radius:6px] [flex-shrink:0] [align-self:stretch]"
-              role="group"
-              aria-label="Price mode"
-            >
-              <button
-                type="button"
-                className={`mode-btn [border:0] [background:transparent] [color:var(--sub)] [padding:0_12px] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:13px] [transition:all_.15s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] ${priceMode === "retail" ? "is-active" : ""}`}
-                onClick={() => {
-                  setPriceMode("retail");
-                  showToast("Add as retail");
-                }}
-              >
-                Retail
-              </button>
-              <button
-                type="button"
-                id="btnWholesale"
-                className={`mode-btn [border:0] [background:transparent] [color:var(--sub)] [padding:0_12px] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:13px] [transition:all_.15s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] ${priceMode === "wholesale" ? "is-active" : ""}`}
-                onClick={() => {
-                  setPriceMode("wholesale");
-                  showToast("Add as wholesale");
-                }}
-              >
-                Wholesale
-              </button>
-            </div>
-
-            <div
               className={`unit-box [display:flex] [flex-direction:column] [justify-content:center] [background:#f0fdfa] [border:1px_solid_#99f6e4] [border-radius:6px] [padding:2px_6px_4px] [min-width:186px] [flex-shrink:0] ${unitFocused ? "is-focus" : ""}`}
               hidden={!pending}
             >
               <span className="qty-label [font-size:10px] [font-weight:700] [color:var(--gold)] [letter-spacing:.06em] [display:flex] [align-items:center] [justify-content:space-between]">
-                UNIT <kbd>← →</kbd>
+                UNIT FIRST <kbd>← →</kbd>
               </span>
-              <div className="unit-toggles [display:flex] [gap:4px]" id="unitToggles">
-                {pending ? (
-                  <>
-                    <button
-                      ref={unitBaseRef}
-                      type="button"
-                      className={`unit-tog [flex:1] [height:28px] [border:1px_solid_var(--line)] [background:#f8fafc] [border-radius:5px] [cursor:pointer] [font-size:12px] [font-weight:600] [color:var(--ink)] [white-space:nowrap] [padding:0_8px] ${sellUnit === "base" ? "is-active" : ""}`}
-                      tabIndex={sellUnit === "base" ? 0 : -1}
-                      disabled={!packOf(pending)}
-                      onClick={() => {
-                        setSellUnit("base");
-                        focusQty();
-                      }}
-                      onKeyDown={onUnitKey}
-                      onFocus={() => setUnitFocused(true)}
-                      onBlur={() => {
-                        window.setTimeout(() => {
-                          const active = document.activeElement;
-                          if (active !== unitBaseRef.current && active !== unitPackRef.current) {
-                            setUnitFocused(false);
-                          }
-                        }, 0);
-                      }}
-                    >
-                      {prettyUnit(pending.unit)}
-                    </button>
-                    {packOf(pending) ? (
+              <div
+                className="unit-toggles [display:flex] [flex-wrap:wrap] [gap:4px]"
+                id="unitToggles"
+              >
+                {pending
+                  ? unitsForProduct(pending).map((unit, index) => (
                       <button
-                        ref={unitPackRef}
+                        key={unit.id}
+                        ref={index === 0 ? unitBaseRef : index === 1 ? unitPackRef : undefined}
                         type="button"
-                        className={`unit-tog [flex:1] [height:28px] [border:1px_solid_var(--line)] [background:#f8fafc] [border-radius:5px] [cursor:pointer] [font-size:12px] [font-weight:600] [color:var(--ink)] [white-space:nowrap] [padding:0_8px] ${sellUnit === "pack" ? "is-active" : ""}`}
-                        tabIndex={sellUnit === "pack" ? 0 : -1}
+                        className={`unit-tog [flex:1] [min-width:72px] [height:28px] [border:1px_solid_var(--line)] [background:#f8fafc] [border-radius:5px] [cursor:pointer] [font-size:11px] [font-weight:600] [color:var(--ink)] [white-space:nowrap] [padding:0_8px] ${pendingProductUnitId === unit.id ? "is-active" : ""}`}
+                        tabIndex={pendingProductUnitId === unit.id ? 0 : -1}
                         onClick={() => {
-                          setSellUnit("pack");
-                          focusQty();
+                          setPendingProductUnitId(unit.id);
+                          if (unit.contains > 1 && unit.contains === packOf(pending)) {
+                            setSellUnit("pack");
+                          } else {
+                            setSellUnit("base");
+                          }
                         }}
                         onKeyDown={onUnitKey}
                         onFocus={() => setUnitFocused(true)}
-                        onBlur={() => {
-                          window.setTimeout(() => {
-                            const active = document.activeElement;
-                            if (active !== unitBaseRef.current && active !== unitPackRef.current) {
-                              setUnitFocused(false);
-                            }
-                          }, 0);
-                        }}
                       >
-                        Pack of {packOf(pending)}
+                        {unit.name || unit.symbol || prettyUnit(pending.unit)}
+                        {unit.contains > 1 ? ` ×${unit.contains}` : ""}
                       </button>
-                    ) : null}
-                  </>
-                ) : null}
+                    ))
+                  : null}
               </div>
+            </div>
+
+            <div
+              className="price-mode [display:flex] [background:#fff] [border:1px_solid_#c7d2fe] [padding:3px] [border-radius:6px] [flex-shrink:0] [align-self:stretch] [opacity:1]"
+              role="group"
+              aria-label="Price mode"
+              style={{ opacity: pending ? 1 : 0.45, pointerEvents: pending ? "auto" : "none" }}
+            >
+              <button
+                type="button"
+                className={`mode-btn [border:0] [background:transparent] [color:var(--sub)] [padding:0_10px] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [transition:all_.15s] [display:inline-flex] [flex-direction:column] [align-items:center] [justify-content:center] [gap:0] [min-width:72px] ${priceMode === "retail" ? "is-active" : ""}`}
+                disabled={!pending}
+                onClick={() => {
+                  setPriceMode("retail");
+                  showToast("Retail price for selected unit");
+                }}
+              >
+                <span>Retail</span>
+                {pending ? (
+                  <span className="[font-size:10px] [font-weight:700]">
+                    {money(unitTierPrice(resolveSellUnit(pending, pendingProductUnitId), "retail"))}
+                  </span>
+                ) : null}
+              </button>
+              <button
+                type="button"
+                id="btnWholesale"
+                className={`mode-btn [border:0] [background:transparent] [color:var(--sub)] [padding:0_10px] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [transition:all_.15s] [display:inline-flex] [flex-direction:column] [align-items:center] [justify-content:center] [gap:0] [min-width:72px] ${priceMode === "wholesale" ? "is-active" : ""}`}
+                disabled={!pending}
+                onClick={() => {
+                  setPriceMode("wholesale");
+                  showToast("Wholesale price for selected unit");
+                }}
+              >
+                <span>Wholesale</span>
+                {pending ? (
+                  <span className="[font-size:10px] [font-weight:700]">
+                    {money(
+                      unitTierPrice(resolveSellUnit(pending, pendingProductUnitId), "wholesale"),
+                    )}
+                  </span>
+                ) : null}
+              </button>
             </div>
 
             <div className="qty-box [display:flex] [flex-direction:column] [justify-content:center] [background:#fffbeb] [border:1px_solid_#fcd34d] [border-radius:6px] [padding:2px_8px_4px] [width:88px] [flex-shrink:0] [position:relative]">

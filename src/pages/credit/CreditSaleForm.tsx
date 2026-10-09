@@ -23,6 +23,7 @@ import { useSettings } from "@/shared/settings";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { cn, creditState, limitMoneyDraft, money } from "@/utils/format";
 import { productSellUnits, resolveProductSellUnit } from "@/pages/credit/creditSaleUtils";
+import { creditTierPrice, type SalePriceTier } from "@/utils/salePricing";
 import { formatStockQty } from "@/pages/products/productQty";
 
 type CreditPriceMode = "MINIMUM" | "WHOLESALE" | "RETAIL";
@@ -66,10 +67,9 @@ const PRICE_MODES: { id: CreditPriceMode; label: string }[] = [
 export const CREDIT_SALE_FORM_ID = "credit-sale-form";
 
 function priceFor(unit: ProductSellUnit | undefined, mode: CreditPriceMode) {
-  if (!unit) return 0;
-  if (mode === "MINIMUM") return unit.min;
-  if (mode === "WHOLESALE") return unit.wholesale;
-  return unit.price;
+  const tier: SalePriceTier =
+    mode === "MINIMUM" ? "minimum" : mode === "WHOLESALE" ? "wholesale" : "retail";
+  return creditTierPrice(unit, tier);
 }
 
 function availableInUnit(product: Product, unit: ProductSellUnit, usedBase: number) {
@@ -382,7 +382,30 @@ export function CreditSaleForm({
               </div>
             ) : null}
 
-            <div className="grid grid-cols-[110px_minmax(0,1fr)_120px] items-end gap-2">
+            <Field label="Price tier (for selected unit)">
+              <div className="grid grid-cols-3 gap-1 rounded-lg border border-line bg-paper p-1">
+                {PRICE_MODES.map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    className={cn(
+                      "flex min-h-[44px] flex-col items-center justify-center rounded-md border-0 px-2 text-[10px] font-bold",
+                      draft.priceMode === mode.id
+                        ? "bg-accent-bg text-accent-deep"
+                        : "bg-transparent text-muted hover:bg-bg",
+                    )}
+                    onClick={() => pickPriceMode(mode.id)}
+                  >
+                    <span>{mode.label}</span>
+                    <span className="text-[11px] tabular-nums">
+                      {money(priceFor(selectedUnit, mode.id))}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </Field>
+
+            <div className="grid grid-cols-[110px_minmax(0,1fr)] items-end gap-2">
               <Field label="Quantity">
                 <TextInput
                   inputRef={quantityRef}
@@ -400,26 +423,7 @@ export function CreditSaleForm({
                   }}
                 />
               </Field>
-              <Field label="Selling price">
-                <div className="grid h-[38px] grid-cols-3 gap-1 rounded-lg border border-line bg-paper p-1">
-                  {PRICE_MODES.map((mode) => (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      className={cn(
-                        "rounded-md border-0 px-2 text-[10px] font-bold",
-                        draft.priceMode === mode.id
-                          ? "bg-accent-bg text-accent-deep"
-                          : "bg-transparent text-muted hover:bg-bg",
-                      )}
-                      onClick={() => pickPriceMode(mode.id)}
-                    >
-                      {mode.label}
-                    </button>
-                  ))}
-                </div>
-              </Field>
-              <Field label="Price">
+              <Field label="Unit price">
                 <TextInput
                   inputMode="decimal"
                   maxLength={FIELD_LIMITS.moneyChars}
