@@ -1,6 +1,7 @@
 import { unitNameFromSymbol } from "@/shared/constants/units";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { money } from "@/utils/format";
+import { profitMarginPercent } from "@/utils/margin";
 
 export function roundMoney(n: number) {
   return Math.round(n * 100) / 100;
@@ -188,8 +189,7 @@ export function productUnitProfit(
 
 export function productMarginPct(product: Pick<Product, "cost" | "retail" | "unit" | "sellUnits">) {
   const { cost, retail } = productBasePricing(product);
-  if (cost <= 0) return 0;
-  return ((retail - cost) / cost) * 100;
+  return profitMarginPercent(retail, cost);
 }
 
 export function biggerUnit(units: ProductSellUnit[]) {

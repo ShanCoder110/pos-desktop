@@ -4,12 +4,9 @@ import {
   ArrowLeftRight,
   BarChart3,
   BookOpen,
-  Building2,
-  Factory,
   LayoutDashboard,
   Package,
   Receipt,
-  Trash2,
   Truck,
   Users,
   Wallet,
@@ -50,9 +47,6 @@ export const managementNav: { label: string; items: NavItem[] }[] = [
   {
     label: "OPERATIONS",
     items: [
-      { to: routes.trash, label: "Trash", icon: Trash2 },
-      { to: routes.shops, label: "Branches", icon: Building2 },
-      { to: routes.production, label: "Production", icon: Factory },
       { to: routes.expenses, label: "Expenses", icon: Wallet },
       { to: routes.transactions, label: "Transactions", icon: ArrowLeftRight },
     ],

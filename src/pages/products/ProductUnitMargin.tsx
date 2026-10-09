@@ -1,9 +1,10 @@
 import { PRODUCT_COPY } from "@/shared/constants/products";
 import { cn, money } from "@/utils/format";
+import { profitAmount, profitMarginPercent } from "@/utils/margin";
 
 export function ProductUnitMargin({ cost, retail }: { cost: number; retail: number }) {
-  const profit = retail - cost;
-  const pct = cost > 0 ? (profit / cost) * 100 : 0;
+  const profit = profitAmount(retail, cost);
+  const pct = profitMarginPercent(retail, cost);
   const healthy = profit >= 0;
 
   return (

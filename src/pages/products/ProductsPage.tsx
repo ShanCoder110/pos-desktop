@@ -106,6 +106,7 @@ import {
 } from "@/pages/products/productSalesStats";
 import { exportProductsCsv, exportProductsExcel, printProducts } from "@/utils/exportFile";
 import { money, shortError } from "@/utils/format";
+import { profitMarginPercent } from "@/utils/margin";
 import { ProductCostDisplay } from "@/pages/products/ProductCostDisplay";
 import { fifoCostForProduct, openLotStockValue } from "@/pages/products/productFifo";
 import { branchStockTooltip, productTotalStock } from "@/utils/productStock";
@@ -153,8 +154,7 @@ function UnitPrice({ row, field }: { row: Product; field: PriceField }) {
 function marginPct(row: Product, lots: ProductLotRow[]) {
   const cost = fifoCostForProduct(row, lots);
   const { retail } = productBasePricing(row);
-  if (cost <= 0) return 0;
-  return ((retail - cost) / cost) * 100;
+  return profitMarginPercent(retail, cost);
 }
 
 function unitProfit(row: Product, lots: ProductLotRow[]) {

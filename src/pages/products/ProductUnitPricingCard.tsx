@@ -9,6 +9,7 @@ import {
 import { PRODUCT_COPY, PRODUCT_UNIT_PRICE_TIERS } from "@/shared/constants/products";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { cn } from "@/utils/format";
+import { profitAmount, profitMarginPercent } from "@/utils/margin";
 
 function compactAmount(n: number) {
   const rounded = Math.round(n * 100) / 100;
@@ -36,8 +37,8 @@ function unitKindLabel(unit: ProductSellUnit, units: ProductSellUnit[]) {
 }
 
 function unitMargin(cost: number, retail: number) {
-  const profit = retail - cost;
-  const pct = cost > 0 ? (profit / cost) * 100 : 0;
+  const profit = profitAmount(retail, cost);
+  const pct = profitMarginPercent(retail, cost);
   return { profit, pct, healthy: profit >= 0 };
 }
 
