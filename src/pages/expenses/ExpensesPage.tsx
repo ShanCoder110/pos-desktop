@@ -26,7 +26,12 @@ import { useQueryTab } from "@/hooks/useQueryTab";
 import { assignApiError, fieldMessage, requiredTrim } from "@/utils/form";
 import { limitMoneyDraft, money, shortError } from "@/utils/format";
 import { ensureSession } from "@/services/auth";
-import { createExpense, listAllExpenses, listExpenseCategories } from "@/services/finance";
+import {
+  createExpense,
+  createExpenseCategory,
+  listAllExpenses,
+  listExpenseCategories,
+} from "@/services/finance";
 import { listAllBranches, mapBranch } from "@/services/org";
 
 const PAGE = 10;
@@ -202,8 +207,16 @@ export function ExpensesPage() {
           .then((rows) => rows.map(mapBranch))
           .catch(() => []),
       ]);
+      let expenseCategories = categories;
+      if (expenseCategories.length === 0) {
+        try {
+          expenseCategories = [await createExpenseCategory("General")];
+        } catch {
+          expenseCategories = [];
+        }
+      }
       setRows(expenseRows);
-      setExpenseCategories(categories);
+      setExpenseCategories(expenseCategories);
       setBranches(branchRows);
     })();
     return () => controller.abort();
@@ -232,6 +245,9 @@ export function ExpensesPage() {
     description: string;
   }) {
     if (!edit) return;
+    if (!values.categoryId.trim()) {
+      throw new Error("Select a category");
+    }
     const created = await createExpense({
       categoryId: values.categoryId,
       amount: Number(values.amount),
