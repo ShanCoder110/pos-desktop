@@ -29,6 +29,9 @@ docs/
 # Local SQLite for `npm run api` / `npm run db:*`
 data/
 
+# Accidental ts-rs default output — real types live in src/types/generated/
+src-tauri/bindings/
+
 # Secrets / machine config — never commit (see `.env.example`)
 .env
 .env.local
