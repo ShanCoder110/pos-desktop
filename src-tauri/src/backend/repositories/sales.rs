@@ -546,7 +546,7 @@ impl SalesRepository {
         let consumptions = ConsumptionRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
             "SELECT branch_id, product_id, product_lot_id, base_quantity, CAST(unit_cost AS REAL) AS unit_cost FROM lot_consumptions WHERE reference_type = ? AND reference_id = ?",
-            [REFERENCE_INVOICE.into(), invoice_id.to_string().into()],
+            [REFERENCE_INVOICE.into(), invoice_id.into()],
         ))
         .all(transaction)
         .await?;

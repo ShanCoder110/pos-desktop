@@ -27,6 +27,8 @@
     "check": "npm run types:check && npm run format:check && npm run lint && npm run check:rust",
     "test": "vitest run",
     "test:pricing": "vitest run src/utils/salePricing.test.ts src/utils/margin.test.ts && node scripts/pricing-integration.mjs && node scripts/pricing-api-suite.mjs",
+    "test:pricing:matrix": "node scripts/pricing-edge-matrix.mjs",
+    "test:pricing:ui": "node scripts/pricing-edge-ui.mjs",
     "test:watch": "vitest",
     "prepare": "husky"
   },

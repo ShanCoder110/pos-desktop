@@ -8,9 +8,9 @@ use crate::backend::{
     constants::{
         ERROR_CLAIM_NOT_FOUND, ERROR_CUSTOMER_NOT_FOUND, ERROR_INSUFFICIENT_STOCK,
         ERROR_INVOICE_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND, ERROR_RETURN_EXCEEDS_SOLD,
-        ERROR_RETURN_NOT_FOUND, LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LOT_SOURCE_RETURN,
-        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED, REFERENCE_RETURN,
-        STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN,
+        ERROR_RETURN_NOT_FOUND, LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LEDGER_RETURN,
+        LOT_SOURCE_RETURN, PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED,
+        REFERENCE_RETURN, STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN,
     },
     context::RequestContext,
     dto::{
@@ -642,7 +642,7 @@ impl CreditRepository {
                 transaction
                     .execute_raw(Statement::from_sql_and_values(
                         DbBackend::Sqlite,
-                        "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, NULL, NULL, NULL, ?, ?, 0, 0, ?, 0, ?, NULL, ?, 1, NULL, ?, ?, ?)",
+                        "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, 0, ?, 0, ?, NULL, ?, 1, NULL, ?, ?, ?)",
                         [
                             damaged_lot.into(),
                             meta.product_id.into(),
@@ -881,6 +881,42 @@ impl CreditRepository {
                 ],
             ))
             .await?;
+
+        if refund_total > Decimal::ZERO {
+            if let Some(customer_id) = invoice.customer_id {
+                let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "SELECT CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
+                    [customer_id.into()],
+                ))
+                .one(transaction)
+                .await?
+                .map(|row| row.balance_after)
+                .unwrap_or(Decimal::ZERO);
+                let refund = money_value(refund_total);
+                let balance_after = previous - refund;
+                transaction
+                    .execute_raw(Statement::from_sql_and_values(
+                        DbBackend::Sqlite,
+                        "INSERT INTO customer_ledger_entries (id, customer_id, branch_id, type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?, ?, ?, ?)",
+                        [
+                            Uuid::new_v4().into(),
+                            customer_id.into(),
+                            invoice.branch_id.into(),
+                            LEDGER_RETURN.into(),
+                            invoice_id.into(),
+                            return_id.into(),
+                            refund.into(),
+                            balance_after.into(),
+                            format!("Return {return_id}").into(),
+                            now.into(),
+                            context.user_id.into(),
+                            now.into(),
+                        ],
+                    ))
+                    .await?;
+            }
+        }
 
         let _ = ERROR_RETURN_NOT_FOUND;
         Ok(return_id)

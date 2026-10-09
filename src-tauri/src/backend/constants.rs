@@ -244,6 +244,7 @@ pub const LEDGER_OPENING_BALANCE: &str = "OPENING_BALANCE";
 pub const LEDGER_PREVIOUS_BALANCE_NOTE: &str = "Opening balance";
 pub const LEDGER_PAYMENT_MADE: &str = "PAYMENT_MADE";
 pub const LEDGER_PAYMENT_RECEIVED: &str = "PAYMENT_RECEIVED";
+pub const LEDGER_RETURN: &str = "RETURN";
 pub const LEDGER_SALARY: &str = "SALARY";
 pub const LEDGER_COMMISSION: &str = "COMMISSION";
 pub const ERROR_DUPLICATE_SUPPLIER_PHONE: &str = "This phone is already used by another supplier.";
