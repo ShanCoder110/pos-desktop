@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rust_decimal::Decimal;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbBackend, FromQueryResult, Statement};
 use uuid::Uuid;
@@ -6,6 +8,7 @@ use crate::backend::{
     constants::ERROR_INSUFFICIENT_STOCK,
     context::RequestContext,
     errors::AppError,
+    qty::{stock_conflict, RequestedLine, FACTOR_DIVIDE},
     util::{money_value, now_utc},
 };
 
@@ -307,4 +310,89 @@ async fn consume_lots(
         remaining,
         first_movement_id,
     })
+}
+
+pub struct StockDemand {
+    pub product_id: Uuid,
+    pub product_name: String,
+    pub displayed: Decimal,
+    pub unit_name: String,
+    pub factor: Decimal,
+    pub direction: String,
+    pub base_qty: Decimal,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct AvailableRow {
+    total: f64,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct BaseNameRow {
+    display_name: String,
+}
+
+pub async fn ensure_demand_in_stock(
+    db: &impl ConnectionTrait,
+    demands: &[StockDemand],
+) -> Result<(), AppError> {
+    let mut groups: HashMap<Uuid, Vec<usize>> = HashMap::new();
+    for (index, demand) in demands.iter().enumerate() {
+        groups.entry(demand.product_id).or_default().push(index);
+    }
+    for (product_id, indexes) in groups {
+        let available = AvailableRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT CAST(COALESCE(SUM(bl.remaining_base_quantity), 0) AS REAL) AS total FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = ? AND pl.deleted_at IS NULL AND bl.remaining_base_quantity > 0",
+            [product_id.into()],
+        ))
+        .one(db)
+        .await?
+        .map(|row| Decimal::from_f64_retain(row.total).unwrap_or(Decimal::ZERO))
+        .unwrap_or(Decimal::ZERO);
+        let base_name = BaseNameRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT display_name FROM product_units WHERE product_id = ? AND is_base = 1 AND deleted_at IS NULL LIMIT 1",
+            [product_id.into()],
+        ))
+        .one(db)
+        .await?
+        .map(|row| row.display_name)
+        .unwrap_or_else(|| "base".to_owned());
+        let lines: Vec<RequestedLine> = indexes
+            .iter()
+            .map(|&index| RequestedLine {
+                displayed: demands[index].displayed,
+                unit_name: &demands[index].unit_name,
+                base_qty: demands[index].base_qty,
+            })
+            .collect();
+        let other = indexes
+            .iter()
+            .map(|&index| &demands[index])
+            .find(|demand| demand.direction == FACTOR_DIVIDE)
+            .or_else(|| {
+                indexes
+                    .iter()
+                    .map(|&index| &demands[index])
+                    .find(|demand| demand.unit_name != base_name)
+            });
+        let other_unit = other.map(|demand| {
+            (
+                demand.unit_name.as_str(),
+                demand.factor,
+                demand.direction.as_str(),
+            )
+        });
+        if let Some(message) = stock_conflict(
+            &demands[indexes[0]].product_name,
+            &base_name,
+            other_unit,
+            available,
+            &lines,
+        ) {
+            return Err(AppError::Conflict(message));
+        }
+    }
+    Ok(())
 }

@@ -1,6 +1,11 @@
 import type { Product, ProductSellUnit } from "@/shared/types";
-import { normalizeSellUnits } from "@/pages/products/productQty";
+import { inventoryPerSellUnit, normalizeSellUnits } from "@/pages/products/productQty";
 import { productSellUnits as creditUnits } from "@/pages/credit/creditSaleUtils";
+import {
+  defaultTransactionUnit,
+  displayedToStockQuantity,
+  stockToDisplayedQuantity,
+} from "@/utils/unitConversion";
 
 export type SalePriceTier = "retail" | "wholesale" | "minimum";
 
@@ -15,11 +20,7 @@ export function resolveSellUnit(product: Product, unitId?: string): ProductSellU
     const hit = units.find((u) => u.id === unitId);
     if (hit) return hit;
   }
-  return (
-    units.find((u) => u.isBase || u.kind === "base") ??
-    units.find((u) => u.contains === 1) ??
-    units[0]
-  );
+  return defaultTransactionUnit(product, units);
 }
 
 /** Selling price for one displayed unit at the given tier (uses product_units row, not base×factor). */
@@ -43,9 +44,29 @@ export function creditTierPrice(unit: ProductSellUnit | undefined, tier: SalePri
   return unitTierPrice(unit, tier);
 }
 
+/** Stock units consumed by one displayed unit. */
+export function stockPerUnit(unit: ProductSellUnit): number {
+  return inventoryPerSellUnit(unit);
+}
+
+function round6(value: number) {
+  return Math.round(value * 1e6) / 1e6;
+}
+
+/** Base (stock) qty for a displayed qty. Uses the containment saved on that unit. */
+export function toBaseQty(product: Product, unitId: string, qty: number): number {
+  const unit = resolveSellUnit(product, unitId);
+  if (!unit) return round6(qty);
+  return displayToBaseQty(unit, qty);
+}
+
 export function displayToBaseQty(unit: ProductSellUnit, displayQty: number): number {
-  const factor = unit.contains > 0 ? unit.contains : 1;
-  return +(displayQty * factor).toFixed(3);
+  return round6(displayedToStockQuantity(unit, displayQty));
+}
+
+/** Positive balance is an advance. paidNow is money kept, not change handed back. */
+export function balanceAfterSale(currentBalance: number, billTotal: number, paidNow: number) {
+  return +(currentBalance - billTotal + paidNow).toFixed(2);
 }
 
 export function lineTotal(displayQty: number, unitPrice: number): number {
@@ -92,17 +113,16 @@ export function convertLineToUnit(
 } | null {
   const target = resolveSellUnit(product, targetUnitId);
   if (!target?.id) return null;
-  const factor = target.contains > 0 ? target.contains : 1;
   const tier = priceMode === "wholesale" ? "wholesale" : "retail";
   const listPrice = unitTierPrice(target, tier);
   const minPrice = unitTierPrice(target, "minimum");
   return {
     productUnitId: target.id,
-    qty: +(baseQty / factor).toFixed(3),
+    qty: +stockToDisplayedQuantity(target, baseQty).toFixed(4),
     listPrice,
     unitPrice: listPrice,
     minPrice,
     sellUnit: target.name || target.symbol || product.unit,
-    packSize: factor,
+    packSize: stockPerUnit(target),
   };
 }

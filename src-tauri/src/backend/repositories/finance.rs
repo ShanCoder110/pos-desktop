@@ -363,14 +363,12 @@ impl FinanceRepository {
         database: &DatabaseConnection,
         branch_id: Uuid,
     ) -> Result<DashboardReportResponse, AppError> {
-        let today = now_utc().date_naive().to_string();
         let today_sales = DecimalRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT CAST(COALESCE(SUM(total), 0) AS REAL) AS value FROM invoices WHERE branch_id = ? AND status = ? AND deleted_at IS NULL AND date(completed_at) = ?",
+            "SELECT CAST(COALESCE(SUM(total), 0) AS REAL) AS value FROM invoices WHERE branch_id = ? AND status = ? AND deleted_at IS NULL AND date(completed_at, '+5 hours') = date('now', '+5 hours')",
             [
                 branch_id.into(),
                 INVOICE_STATUS_COMPLETED.into(),
-                today.into(),
             ],
         ))
         .one(database)

@@ -2,11 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
-  ChevronDown,
-  ChevronRight,
   CreditCard,
   History,
-  Package,
   Pencil,
   Plus,
   Receipt,
@@ -42,12 +39,7 @@ import {
   creditBalanceAdjustNote,
   type CreditCustomerEditValues,
 } from "@/pages/credit/CreditCustomerEditForm";
-import {
-  calculateInvoiceGrossProfit,
-  calculateInvoiceProfitHold,
-  calculateInvoiceRealizedProfit,
-  summarizeCreditInvoices,
-} from "@/pages/credit/creditProfitUtils";
+import { summarizeCreditInvoices } from "@/pages/credit/creditProfitUtils";
 import { ensureSession } from "@/services/auth";
 import {
   adjustCustomerBalance,
@@ -73,6 +65,7 @@ import {
   creditState,
   formatTableDateTime,
   limitMoneyDraft,
+  ledgerNoteText,
   money,
   shortError,
 } from "@/utils/format";
@@ -117,7 +110,6 @@ export function CreditCustomerPage() {
   const [creditInvoices, setCreditInvoices] = useState<InvoiceRow[]>([]);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerRow[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [expandedInvoiceIds, setExpandedInvoiceIds] = useState<Record<string, boolean>>({});
   const requestedTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState<DetailTab>(
     requestedTab === "invoices" || requestedTab === "ledger" ? requestedTab : "credit-sales",
@@ -160,9 +152,6 @@ export function CreditCustomerPage() {
       setCreditInvoices(credits);
       setProducts(productRows);
       setLedgerEntries(ledgerData.entries.map(mapLedgerEntry));
-      const expanded: Record<string, boolean> = {};
-      for (const inv of credits) expanded[inv.id] = true;
-      setExpandedInvoiceIds(expanded);
     },
     [customerId],
   );
@@ -196,10 +185,23 @@ export function CreditCustomerPage() {
 
   const balance = useMemo(() => creditState(customer?.currentBalance ?? 0), [customer]);
   const summary = useMemo(() => summarizeCreditInvoices(creditInvoices), [creditInvoices]);
-
-  function toggleInvoiceExpand(invoiceId: string) {
-    setExpandedInvoiceIds((prev) => ({ ...prev, [invoiceId]: !prev[invoiceId] }));
-  }
+  const creditSaleLines = useMemo(
+    () =>
+      creditInvoices.flatMap((inv) =>
+        inv.items.map((item) => ({
+          id: item.id,
+          date: inv.createdAt,
+          productName: item.productName || "Product",
+          sku: item.sku,
+          quantity: item.quantity,
+          unitName: item.unitName,
+          unitPrice: item.unitPrice,
+          total: item.total,
+          grossProfit: item.grossProfit,
+        })),
+      ),
+    [creditInvoices],
+  );
 
   async function saveCreditSale(lines: CreditSaleLine[], notes: string) {
     if (!customer) return;
@@ -372,15 +374,15 @@ export function CreditCustomerPage() {
           tone={balance.tone === "neutral" ? "info" : balance.tone}
         />
         <KpiCard
-          label="Credit invoiced"
+          label={CREDIT_COPY.creditSold}
           value={money(summary.totalInvoiced)}
-          hint={`${summary.invoiceCount} credit sale(s)`}
+          hint={`${creditSaleLines.length} ${CREDIT_COPY.creditSoldHint}`}
           tone="warn"
         />
         <KpiCard
-          label="Paid on invoices"
+          label={CREDIT_COPY.paidOnCredit}
           value={money(summary.totalPaid)}
-          hint="Collected against credit"
+          hint={CREDIT_COPY.paidOnCreditHint}
           tone="ok"
         />
         <KpiCard
@@ -401,150 +403,47 @@ export function CreditCustomerPage() {
         }
       >
         {activeTab === "credit-sales" ? (
-          <div className="space-y-4">
-            {loading ? (
-              <p className="p-4 text-center text-sm text-muted">Loading credit sales…</p>
-            ) : creditInvoices.length === 0 ? (
-              <Table>
-                <THead>
-                  <tr>
-                    <Th>Invoice</Th>
-                    <Th>Date</Th>
-                    <Th>Total</Th>
-                    <Th>Paid</Th>
-                    <Th>Credit</Th>
-                    <Th>Status</Th>
+          <Table>
+            <THead>
+              <tr>
+                <Th>Date</Th>
+                <Th>Product</Th>
+                <Th>Quantity</Th>
+                <Th>Unit price</Th>
+                <Th>Line total</Th>
+                <Th>Gross profit</Th>
+              </tr>
+            </THead>
+            <tbody>
+              {loading ? (
+                <EmptyRow cols={6} text="Loading credit sales…" />
+              ) : creditSaleLines.length === 0 ? (
+                <EmptyRow cols={6} text={CREDIT_COPY.noCreditSales} />
+              ) : (
+                creditSaleLines.map((line) => (
+                  <tr key={line.id}>
+                    <Td>{formatTableDateTime(line.date)}</Td>
+                    <Td>
+                      <div className="font-medium text-ink">{line.productName}</div>
+                      {line.sku ? (
+                        <div className="text-[11px] text-muted">SKU: {line.sku}</div>
+                      ) : null}
+                    </Td>
+                    <Td numeric>
+                      {line.quantity} {line.unitName}
+                    </Td>
+                    <Td numeric>{money(line.unitPrice)}</Td>
+                    <Td numeric className="font-semibold text-ink">
+                      {money(line.total)}
+                    </Td>
+                    <Td numeric className="text-muted">
+                      {line.grossProfit !== undefined ? money(line.grossProfit) : "—"}
+                    </Td>
                   </tr>
-                </THead>
-                <tbody>
-                  <EmptyRow cols={6} text={CREDIT_COPY.noCreditSales} />
-                </tbody>
-              </Table>
-            ) : (
-              creditInvoices.map((inv) => {
-                const isExpanded = Boolean(expandedInvoiceIds[inv.id]);
-                const grossProfit = calculateInvoiceGrossProfit(inv);
-                const profitHold = calculateInvoiceProfitHold(inv);
-                const realizedProfit = calculateInvoiceRealizedProfit(inv);
-                return (
-                  <div
-                    key={inv.id}
-                    className="overflow-hidden rounded-lg border border-line bg-paper shadow-sm"
-                  >
-                    <div
-                      className="flex cursor-pointer flex-wrap items-center justify-between gap-3 border-b border-line bg-[var(--surface)] p-3 hover:bg-[var(--surface-hover)]"
-                      onClick={() => toggleInvoiceExpand(inv.id)}
-                    >
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          className="text-muted hover:text-ink"
-                          aria-label="Toggle"
-                        >
-                          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                        </button>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <strong className="text-[13px] font-semibold text-ink">
-                              Invoice #{inv.invoiceNumber}
-                            </strong>
-                            <Badge
-                              tone={
-                                inv.paymentStatus === "PAID"
-                                  ? "ok"
-                                  : inv.paymentStatus === "PARTIAL"
-                                    ? "info"
-                                    : "warn"
-                              }
-                            >
-                              {inv.paymentStatus}
-                            </Badge>
-                          </div>
-                          <span className="text-[11px] text-muted">
-                            {formatTableDateTime(inv.createdAt)}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4 text-[12px]">
-                        <div>
-                          <span className="text-muted">Total: </span>
-                          <strong className="text-ink">{money(inv.total)}</strong>
-                        </div>
-                        <div>
-                          <span className="text-muted">Paid: </span>
-                          <span className="text-[var(--ok)]">{money(inv.paidAmount)}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted">Still owes: </span>
-                          <strong className="text-[var(--danger)]">
-                            {money(inv.creditAmount)}
-                          </strong>
-                        </div>
-                        <div className="rounded bg-[var(--warn-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--warn-text)]">
-                          Profit on hold: {money(profitHold)}
-                        </div>
-                      </div>
-                    </div>
-                    {isExpanded ? (
-                      <div className="p-3">
-                        <div className="mb-2 flex items-center justify-between text-[12px] font-medium text-muted">
-                          <span className="flex items-center gap-1.5">
-                            <Package size={14} /> Products taken on credit
-                          </span>
-                          <span>
-                            {inv.items.length} item(s) · Gross profit {money(grossProfit)} ·
-                            Realized {money(realizedProfit)}
-                          </span>
-                        </div>
-                        <Table>
-                          <THead>
-                            <tr>
-                              <Th>Product</Th>
-                              <Th>Quantity</Th>
-                              <Th>Unit price</Th>
-                              <Th>Line total</Th>
-                              <Th>Gross profit</Th>
-                            </tr>
-                          </THead>
-                          <tbody>
-                            {inv.items.length === 0 ? (
-                              <EmptyRow cols={5} text="No product lines on this invoice." />
-                            ) : (
-                              inv.items.map((item) => (
-                                <tr key={item.id}>
-                                  <Td>
-                                    <div className="font-medium text-ink">
-                                      {item.productName || "Product"}
-                                    </div>
-                                    {item.sku ? (
-                                      <div className="text-[11px] text-muted">SKU: {item.sku}</div>
-                                    ) : null}
-                                  </Td>
-                                  <Td numeric>
-                                    {item.quantity} {item.unitName}
-                                  </Td>
-                                  <Td numeric>{money(item.unitPrice)}</Td>
-                                  <Td numeric className="font-semibold text-ink">
-                                    {money(item.total)}
-                                  </Td>
-                                  <Td numeric className="text-muted">
-                                    {item.grossProfit !== undefined ? money(item.grossProfit) : "—"}
-                                  </Td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </Table>
-                        {inv.notes ? (
-                          <p className="mt-2 text-[12px] italic text-muted">Notes: {inv.notes}</p>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })
-            )}
-          </div>
+                ))
+              )}
+            </tbody>
+          </Table>
         ) : activeTab === "invoices" ? (
           <div>
             <div className="mb-2 flex items-center justify-between text-[12px] text-muted">
@@ -657,7 +556,7 @@ export function CreditCustomerPage() {
                           {lineState.text}
                         </Td>
                         <Td className="text-muted">
-                          {line.notes || (line.invoiceId ? `Invoice ${line.invoiceId}` : "—")}
+                          {ledgerNoteText(line.notes)}
                         </Td>
                       </tr>
                     );
@@ -716,7 +615,7 @@ export function CreditCustomerPage() {
           onSubmit={handlePaySubmit(handleRecordPayment)}
         >
           <p className="ui-note [font-size:12px] [color:var(--muted)] [line-height:1.45]">
-            Payment reduces the customer balance and knocks off open credit invoices in FIFO order.
+            {CREDIT_COPY.paymentNote}
           </p>
           <Field label="Amount" error={fieldMessage(payErrors, "amount")}>
             <Controller

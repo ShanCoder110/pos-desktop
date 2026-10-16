@@ -103,6 +103,8 @@ export interface ProductSellUnit {
   kind?: "base" | "bigger" | "smaller" | "pack" | "small";
   isBase?: boolean;
   isDefault?: boolean;
+  /** divide: stock unit contains this many of this unit. multiply: this unit contains this many stock units. */
+  factorDirection?: "multiply" | "divide";
   contains: number;
   cost: number;
   min: number;

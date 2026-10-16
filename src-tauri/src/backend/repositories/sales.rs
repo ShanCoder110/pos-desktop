@@ -19,7 +19,11 @@ use crate::backend::{
         InvoicePaymentResponse, InvoiceResponse, PageQuery, VoidRequest,
     },
     errors::AppError,
-    repositories::stock_allocation::{allocate_fifo_with_branch_fallback, StockAllocationOptions},
+    qty::to_base_qty,
+    repositories::stock_allocation::{
+        allocate_fifo_with_branch_fallback, ensure_demand_in_stock, StockAllocationOptions,
+        StockDemand,
+    },
     util::{money_value, now_utc, parse_optional_uuid, parse_uuid, quantity, trimmed},
 };
 
@@ -39,6 +43,7 @@ struct ProductUnitRow {
     sku: String,
     unit_display_name: String,
     conversion_to_base: Decimal,
+    factor_direction: String,
     minimum_price: Decimal,
 }
 
@@ -189,12 +194,13 @@ impl SalesRepository {
 
         let mut subtotal = Decimal::ZERO;
         let mut prepared_items = Vec::new();
+        let mut demands = Vec::new();
         for item in &request.items {
             let product_id = parse_uuid(&item.product_id, "items.productId")?;
             let product_unit_id = parse_uuid(&item.product_unit_id, "items.productUnitId")?;
             let row = ProductUnitRow::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT p.name AS product_name, p.sku, pu.display_name AS unit_display_name, pu.conversion_to_base, pu.minimum_price FROM products p JOIN product_units pu ON pu.product_id = p.id WHERE p.id = ? AND pu.id = ? AND p.deleted_at IS NULL AND pu.deleted_at IS NULL LIMIT 1",
+                "SELECT p.name AS product_name, p.sku, pu.display_name AS unit_display_name, pu.conversion_to_base, pu.factor_direction, pu.minimum_price FROM products p JOIN product_units pu ON pu.product_id = p.id WHERE p.id = ? AND pu.id = ? AND p.deleted_at IS NULL AND pu.deleted_at IS NULL LIMIT 1",
                 [product_id.into(), product_unit_id.into()],
             ))
             .one(transaction)
@@ -202,8 +208,13 @@ impl SalesRepository {
             .ok_or(AppError::NotFound(crate::backend::constants::ERROR_PRODUCT_NOT_FOUND))?;
 
             let displayed = quantity(item.quantity);
-            let conversion = quantity(row.conversion_to_base);
-            let base_quantity = quantity(displayed * conversion);
+            let base_quantity =
+                to_base_qty(displayed, row.conversion_to_base, &row.factor_direction);
+            let conversion = if displayed.is_zero() {
+                quantity(row.conversion_to_base)
+            } else {
+                quantity(base_quantity / displayed)
+            };
             let unit_price = money_value(item.unit_price);
             let line_discount = money_value(item.discount);
             let line_tax = money_value(item.tax);
@@ -214,6 +225,15 @@ impl SalesRepository {
             }
             let authorized_by = parse_optional_uuid(item.authorized_by.as_deref(), "authorizedBy")?;
             subtotal += line_total;
+            demands.push(StockDemand {
+                product_id,
+                product_name: row.product_name.clone(),
+                displayed,
+                unit_name: row.unit_display_name.clone(),
+                factor: row.conversion_to_base,
+                direction: row.factor_direction.clone(),
+                base_qty: base_quantity,
+            });
             prepared_items.push(PreparedItem {
                 product_id,
                 product_unit_id,
@@ -233,6 +253,8 @@ impl SalesRepository {
                 line_total,
             });
         }
+
+        ensure_demand_in_stock(transaction, &demands).await?;
 
         let discount = money_value(request.discount);
         let tax = money_value(request.tax);
@@ -277,7 +299,7 @@ impl SalesRepository {
                     invoice_id.into(),
                     context.branch_id.into(),
                     customer_id.into(),
-                    invoice_number.into(),
+                    invoice_number.clone().into(),
                     INVOICE_STATUS_COMPLETED.into(),
                     payment_status.into(),
                     subtotal.into(),
@@ -437,7 +459,7 @@ impl SalesRepository {
                             invoice_id.into(),
                             credit_amount.into(),
                             balance_after.into(),
-                            format!("Credit sale {invoice_id}").into(),
+                            format!("Sale {invoice_number}").into(),
                             now.into(),
                             context.user_id.into(),
                             now.into(),

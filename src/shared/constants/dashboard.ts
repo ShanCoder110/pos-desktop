@@ -33,14 +33,22 @@ export type DashboardDelta = {
   direction: "up" | "down" | "flat" | "new";
 };
 
+const BUSINESS_ZONE = "Asia/Karachi";
+
+export function businessDayKey(value: string | Date) {
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: BUSINESS_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
 export function isSameCalendarDay(iso: string, day = new Date()) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return false;
-  return (
-    date.getFullYear() === day.getFullYear() &&
-    date.getMonth() === day.getMonth() &&
-    date.getDate() === day.getDate()
-  );
+  const left = businessDayKey(iso);
+  return left !== "" && left === businessDayKey(day);
 }
 
 export function addDays(date: Date, days: number) {

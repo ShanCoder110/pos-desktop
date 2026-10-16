@@ -223,8 +223,30 @@ impl ProductService {
         active.update(&transaction).await?;
 
         if let Some(sell_units) = request.sell_units {
+            let previous = ProductRepository::list_units(&transaction, id).await?;
+            if let Some(new_stock) = sell_units.iter().find(|unit| unit.is_base) {
+                let new_unit_id = parse_uuid(&new_stock.unit_id, "sellUnits.unitId")?;
+                if let Some(old) = previous
+                    .iter()
+                    .find(|row| row.unit_id == new_unit_id && !row.is_base)
+                {
+                    let per_new = crate::backend::qty::to_base_qty(
+                        Decimal::ONE,
+                        old.conversion_to_base,
+                        &old.factor_direction,
+                    );
+                    if per_new > Decimal::ZERO && per_new != Decimal::ONE {
+                        ProductRepository::rescale_inventory_for_base_change(
+                            &transaction,
+                            id,
+                            per_new,
+                        )
+                        .await?;
+                    }
+                }
+            }
             let mut units = sell_units;
-            units.sort_by(|left, right| right.contains.cmp(&left.contains));
+            units.sort_by(|left, right| right.is_base.cmp(&left.is_base));
             let models = units
                 .into_iter()
                 .enumerate()
@@ -337,6 +359,23 @@ async fn insert_opening_stock(
     Ok(())
 }
 
+fn factor_direction(unit: &ProductUnitInput) -> Result<String, AppError> {
+    match unit
+        .factor_direction
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        None => Ok(crate::backend::qty::FACTOR_MULTIPLY.to_owned()),
+        Some(crate::backend::qty::FACTOR_MULTIPLY) | Some(crate::backend::qty::FACTOR_DIVIDE) => {
+            Ok(unit.factor_direction.as_deref().unwrap().trim().to_owned())
+        }
+        Some(_) => Err(AppError::Validation(
+            "factorDirection must be multiply or divide.".into(),
+        )),
+    }
+}
+
 fn unit_active_model(
     product_id: Uuid,
     unit: ProductUnitInput,
@@ -351,6 +390,7 @@ fn unit_active_model(
         unit_id: Set(parse_uuid(&unit.unit_id, "sellUnits.unitId")?),
         display_name: Set(unit.name.trim().to_owned()),
         conversion_to_base: Set(unit.contains),
+        factor_direction: Set(factor_direction(&unit)?),
         cost_reference: Set(Some(unit.cost)),
         minimum_price: Set(unit.min),
         wholesale_price: Set(unit.wholesale),
@@ -497,6 +537,7 @@ mod tests {
                 wholesale: Decimal::ZERO,
                 price: Decimal::ZERO,
                 barcode: None,
+                factor_direction: None,
                 is_base: true,
                 is_default: true,
             }],
@@ -577,6 +618,7 @@ mod tests {
                 wholesale: Decimal::new(14, 0),
                 price: Decimal::new(16, 0),
                 barcode: None,
+                factor_direction: None,
                 is_base: true,
                 is_default: true,
             }],
@@ -672,6 +714,7 @@ mod tests {
                     wholesale: Decimal::new(14, 0),
                     price: Decimal::new(16, 0),
                     barcode: None,
+                    factor_direction: None,
                     is_base: true,
                     is_default: true,
                 }],
@@ -713,6 +756,7 @@ mod tests {
                     wholesale: Decimal::new(15, 0),
                     price: Decimal::new(17, 0),
                     barcode: None,
+                    factor_direction: None,
                     is_base: true,
                     is_default: true,
                 }]),
@@ -748,6 +792,7 @@ mod tests {
                     wholesale: Decimal::new(16, 0),
                     price: Decimal::new(18, 0),
                     barcode: None,
+                    factor_direction: None,
                     is_base: true,
                     is_default: true,
                 }]),

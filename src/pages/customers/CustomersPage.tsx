@@ -63,6 +63,7 @@ import {
   balanceInputDraft,
   cn,
   formatEntityRef,
+  ledgerNoteText,
   limitMoneyDraft,
   money,
   shortError,
@@ -1370,7 +1371,7 @@ export function CustomersPage() {
                               </div>
                             </Td>
                           ) : null}
-                          {showLedger("notes") ? <Td>{row.notes || "—"}</Td> : null}
+                          {showLedger("notes") ? <Td>{ledgerNoteText(row.notes)}</Td> : null}
                         </tr>
                       ))
                     : null}

@@ -20,6 +20,7 @@ use crate::backend::{
         SupplierLedgerListQuery, SupplierPaymentRequest, SupplierPaymentResponse,
     },
     errors::AppError,
+    qty::to_base_qty,
     repositories::SequenceRepository,
     util::{money_value, now_utc, parse_date, parse_uuid, quantity, trimmed},
 };
@@ -67,6 +68,7 @@ struct PoItemRow {
 struct UnitRow {
     display_name: String,
     conversion_to_base: Decimal,
+    factor_direction: String,
     minimum_price: Decimal,
     wholesale_price: Decimal,
     retail_price: Decimal,
@@ -226,7 +228,7 @@ impl PurchasingRepository {
             let unit = load_unit(transaction, product_id, unit_id).await?;
             let qty = quantity(item.quantity);
             let cost = money_value(item.unit_cost);
-            let base_qty = quantity(qty * unit.conversion_to_base);
+            let base_qty = to_base_qty(qty, unit.conversion_to_base, &unit.factor_direction);
             let line_total = money_value(cost * qty);
             subtotal += line_total;
             prepared.push((
@@ -365,7 +367,8 @@ impl PurchasingRepository {
                         .clone();
                     let unit = load_unit(transaction, item.product_id, item.unit_id).await?;
                     let displayed = quantity(input.quantity);
-                    let base_qty = quantity(displayed * unit.conversion_to_base);
+                    let base_qty =
+                        to_base_qty(displayed, unit.conversion_to_base, &unit.factor_direction);
                     let remaining =
                         quantity(item.ordered_base_quantity - item.received_base_quantity);
                     if base_qty > remaining {
@@ -392,10 +395,20 @@ impl PurchasingRepository {
         let mut prepared_lines = Vec::new();
         for (item, base_qty, expiry) in receive_plan {
             let unit = load_unit(transaction, item.product_id, item.unit_id).await?;
-            let cost_per_base = money_value(item.expected_unit_cost / unit.conversion_to_base);
+            let per_one = to_base_qty(
+                Decimal::ONE,
+                unit.conversion_to_base,
+                &unit.factor_direction,
+            );
+            let per_one = if per_one.is_zero() {
+                Decimal::ONE
+            } else {
+                per_one
+            };
+            let cost_per_base = money_value(item.expected_unit_cost / per_one);
             let line_total = money_value(cost_per_base * base_qty);
             subtotal += line_total;
-            let displayed = quantity(base_qty / unit.conversion_to_base);
+            let displayed = quantity(base_qty / per_one);
             prepared_lines.push(PreparedReceive {
                 po_item_id: item.id,
                 product_id: item.product_id,
@@ -1275,7 +1288,7 @@ async fn load_unit(
     unit_id: Uuid,
 ) -> Result<UnitRow, AppError> {
     const UNIT_SELECT: &str =
-        "SELECT display_name, conversion_to_base, minimum_price, wholesale_price, retail_price FROM product_units WHERE product_id = ? AND deleted_at IS NULL";
+        "SELECT display_name, conversion_to_base, factor_direction, minimum_price, wholesale_price, retail_price FROM product_units WHERE product_id = ? AND deleted_at IS NULL";
 
     if let Some(row) = UnitRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,

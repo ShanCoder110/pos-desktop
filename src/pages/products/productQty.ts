@@ -1,7 +1,8 @@
-import { unitNameFromSymbol } from "@/shared/constants/units";
+import { symbolFromUnitName, unitNameFromSymbol } from "@/shared/constants/units";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { money } from "@/utils/format";
 import { profitMarginPercent } from "@/utils/margin";
+import { displayedToStockQuantity, stockQuantityPerUnit } from "@/utils/unitConversion";
 
 export function roundMoney(n: number) {
   return Math.round(n * 100) / 100;
@@ -47,6 +48,11 @@ export function emptyPrices() {
 /** Length (and similar) symbols are usually subdivisions of a pack/roll — not aggregations. */
 const SUBDIVISION_SYMBOLS = new Set(["m", "gaz", "ft", "g"]);
 
+export function isSubdivisionSymbol(symbol?: string) {
+  const s = symbol?.trim().toLowerCase();
+  return !!s && SUBDIVISION_SYMBOLS.has(s);
+}
+
 export function isBiggerSymbol(symbol?: string) {
   const s = symbol?.trim().toLowerCase();
   if (!s) return false;
@@ -58,15 +64,44 @@ export function extraKind(symbol?: string): "bigger" | "smaller" {
   return isBiggerSymbol(symbol) ? "bigger" : "smaller";
 }
 
-/** How many canonical inventory units equal one of this sell unit. Stable across base changes. */
+/** Empty row for "+ Add unit" — user picks the unit and types the factor. */
+export function suggestedExtraUnit(_units: ProductSellUnit[]): ProductSellUnit {
+  return {
+    id: crypto.randomUUID(),
+    name: "",
+    symbol: "",
+    kind: "bigger",
+    contains: 0,
+    factorDirection: "multiply",
+    ...emptyPrices(),
+    barcode: "",
+    priceManual: {},
+    isBase: false,
+    isDefault: false,
+  };
+}
+
+/** Stored contains. Subdivision rows store "how many of me in 1 stock unit" (90 gaz in 1 roll). */
 export function conversionFactor(unit: ProductSellUnit): number {
   return unit.contains > 0 ? unit.contains : 1;
+}
+
+/** How many stock units one of this sell unit equals. 1 gaz = 1/90 roll; 1 pack = 12 pieces. */
+export function inventoryPerSellUnit(unit: ProductSellUnit): number {
+  if (!unit.factorDirection && conversionFactor(unit) > 1 && isSubdivisionSymbol(unit.symbol)) {
+    return 1 / conversionFactor(unit);
+  }
+  return stockQuantityPerUnit(unit);
 }
 
 /** Inventory / accounting anchor — smallest conversion factor (usually 1). */
 export function canonicalUnit(units: ProductSellUnit[]): ProductSellUnit | undefined {
   if (!units.length) return undefined;
-  return [...units].sort((a, b) => conversionFactor(a) - conversionFactor(b))[0];
+  return (
+    units.find((unit) => unit.isBase) ??
+    units.find((unit) => Math.abs(inventoryPerSellUnit(unit) - 1) < 1e-9) ??
+    [...units].sort((left, right) => inventoryPerSellUnit(left) - inventoryPerSellUnit(right))[0]
+  );
 }
 
 /**
@@ -82,7 +117,7 @@ export function preferredUnit(units: ProductSellUnit[]): ProductSellUnit | undef
 }
 
 export function baseUnit(units: ProductSellUnit[]) {
-  return preferredUnit(units);
+  return canonicalUnit(units);
 }
 
 /**
@@ -96,25 +131,38 @@ export function normalizeSellUnits(units: ProductSellUnit[]): ProductSellUnit[] 
     ...u,
     barcode: u.barcode ?? "",
     priceManual: u.priceManual ?? {},
-    contains: u.contains > 0 ? u.contains : 1,
+    contains: Number.isFinite(u.contains) ? u.contains : 0,
   }));
   const min = Math.min(...enriched.map((u) => conversionFactor(u)));
-  const scale = min > 0 ? min : 1;
-  const preferredId =
-    enriched.find((u) => u.isDefault)?.id ??
-    enriched.find((u) => u.isBase || u.kind === "base")?.id ??
+  const hasStockUnit = enriched.some((unit) => Math.abs(conversionFactor(unit) - 1) < 1e-6);
+  const scale = hasStockUnit ? 1 : min > 0 ? min : 1;
+  const inventoryId =
+    enriched.find((unit) => unit.isBase)?.id ??
+    enriched.find((unit) => Math.abs(inventoryPerSellUnit(unit) - 1) < 1e-9)?.id ??
     enriched.find((u) => Math.abs(conversionFactor(u) - scale) < 1e-9)?.id ??
     enriched[0]?.id;
+  const preferredId = enriched.find((u) => u.isDefault)?.id ?? inventoryId;
 
   return enriched.map((u) => {
-    const contains = roundStockQty(conversionFactor(u) / scale);
+    const isInventory = u.id === inventoryId;
     const isPreferred = u.id === preferredId;
+    const contains = isInventory
+      ? 1
+      : u.contains > 0
+        ? roundStockQty(conversionFactor(u) / scale)
+        : 0;
     return {
       ...u,
       contains,
-      isBase: isPreferred,
+      isBase: isInventory,
       isDefault: isPreferred,
-      kind: (isPreferred ? "base" : contains > 1 ? "bigger" : "smaller") as ProductSellUnit["kind"],
+      kind: (isInventory
+        ? "base"
+        : contains <= 0
+          ? (u.kind ?? "bigger")
+          : inventoryPerSellUnit({ ...u, contains }) > 1
+            ? "bigger"
+            : "smaller") as ProductSellUnit["kind"],
     };
   });
 }
@@ -148,10 +196,10 @@ export function deriveFromSource(
   };
 }
 
-/** Scale prices between two units using stable canonical conversion factors. */
+/** Scale prices between two units. 1 gaz = stock price / 90, 1 pack = piece price × 12. */
 export function derivePricesBetween(source: ProductSellUnit, target: ProductSellUnit) {
-  const from = conversionFactor(source);
-  const to = conversionFactor(target);
+  const from = inventoryPerSellUnit(source);
+  const to = inventoryPerSellUnit(target);
   if (!from) return emptyPrices();
   const n = to / from;
   return {
@@ -196,7 +244,7 @@ export function biggerUnit(units: ProductSellUnit[]) {
   const extras = units
     .filter((u) => {
       const preferred = preferredUnit(units);
-      return preferred?.id !== u.id && conversionFactor(u) > 1;
+      return preferred?.id !== u.id && inventoryPerSellUnit(u) > 1;
     })
     .sort((a, b) => conversionFactor(b) - conversionFactor(a));
   return extras[0];
@@ -209,6 +257,7 @@ export function extraUnits(units: ProductSellUnit[]) {
 
 export function unitKind(unit: ProductSellUnit): "base" | "bigger" | "smaller" {
   if (unit.isBase || unit.kind === "base") return "base";
+  if (isSubdivisionSymbol(unit.symbol) && unit.contains > 1) return "smaller";
   if (unit.kind === "pack" || unit.kind === "bigger") return "bigger";
   if (unit.kind === "small" || unit.kind === "smaller") return "smaller";
   if (conversionFactor(unit) > 1) return "bigger";
@@ -257,9 +306,9 @@ export function productSellUnits(product: Product): ProductSellUnit[] {
   return qtyUnits(packSellUnits(product));
 }
 
-/** Display order: biggest → smallest by canonical conversion factor. */
+/** Display order: biggest → smallest by how much stock one unit represents. */
 export function qtyUnits(units: ProductSellUnit[]) {
-  return [...units].sort((a, b) => conversionFactor(b) - conversionFactor(a));
+  return [...units].sort((a, b) => inventoryPerSellUnit(b) - inventoryPerSellUnit(a));
 }
 
 export function roundStockQty(n: number) {
@@ -273,12 +322,12 @@ function roundQty(n: number) {
 /** Qty of `unit` → canonical inventory qty. */
 export function toBaseQty(units: ProductSellUnit[], unit: ProductSellUnit, qty: number) {
   void units;
-  return qty * conversionFactor(unit);
+  return displayedToStockQuantity(unit, qty);
 }
 
 export function unitConversionToBase(units: ProductSellUnit[], unit: ProductSellUnit): number {
   void units;
-  return conversionFactor(unit);
+  return inventoryPerSellUnit(unit);
 }
 
 /** @deprecated Base change must not rescale qty — kept as no-op identity for callers. */
@@ -290,9 +339,9 @@ export function unitInStock(units: ProductSellUnit[], stockSymbol: string, unit:
   if (unit.symbol === stockSymbol) return 1;
   const stockUnit =
     units.find((u) => u.symbol === stockSymbol) ?? canonicalUnit(units) ?? preferredUnit(units);
-  if (!stockUnit) return conversionFactor(unit);
-  const perStock = conversionFactor(stockUnit);
-  return perStock ? conversionFactor(unit) / perStock : conversionFactor(unit);
+  if (!stockUnit) return inventoryPerSellUnit(unit);
+  const perStock = inventoryPerSellUnit(stockUnit);
+  return perStock ? inventoryPerSellUnit(unit) / perStock : inventoryPerSellUnit(unit);
 }
 
 export function partsToStock(
@@ -331,7 +380,7 @@ export function splitStockQty(units: ProductSellUnit[], stockSymbol: string, sto
 export function formatMixedQty(product: Product, stockQty: number) {
   const units = productSellUnits(product);
   const parts = splitStockQty(units, product.unit, stockQty);
-  const bits = units
+  const bits = qtyUnits(units)
     .map((u) => {
       const n = parts[u.id];
       if (!n) return null;
@@ -560,26 +609,184 @@ export function deriveAll(units: ProductSellUnit[]) {
 }
 
 /**
- * Switch UI preferred base only. Never touches contains, prices, or stock.
+ * Preferred / "Base unit" badge only — does not touch contains, factorDirection, or prices.
+ * Inventory (Lots) stays on the canonical stock unit.
  */
-export function applyBaseUnitChange(units: ProductSellUnit[], nextId: string): ProductSellUnit[] {
+export function setPreferredUnit(units: ProductSellUnit[], nextId: string): ProductSellUnit[] {
   if (!units.some((unit) => unit.id === nextId)) return units;
   return units.map((unit) => {
-    const isPreferred = unit.id === nextId;
+    const preferred = unit.id === nextId;
     return {
       ...unit,
-      isBase: isPreferred,
-      isDefault: isPreferred,
-      kind: (isPreferred
-        ? "base"
-        : conversionFactor(unit) > 1
-          ? "bigger"
-          : "smaller") as ProductSellUnit["kind"],
+      isDefault: preferred,
+      kind: unit.isBase ? ("base" as const) : unit.kind,
     };
   });
 }
 
-/** Label for conversion field: always "{canonical} in 1 {this unit}". */
+/**
+ * Rewrite factors so `nextId` becomes the inventory (factor 1) unit.
+ * Prefer `setPreferredUnit` for the UI "Set as base" button.
+ */
+export function applyBaseUnitChange(units: ProductSellUnit[], nextId: string): ProductSellUnit[] {
+  const next = units.find((unit) => unit.id === nextId);
+  if (!next) return units;
+  const perNew = inventoryPerSellUnit(next);
+  if (!(perNew > 0)) return units;
+  return units.map((unit) => {
+    if (unit.id === nextId) {
+      return {
+        ...unit,
+        contains: 1,
+        factorDirection: "multiply",
+        isBase: true,
+        isDefault: true,
+        kind: "base",
+      };
+    }
+    const ratio = inventoryPerSellUnit(unit) / perNew;
+    const inside = ratio < 1;
+    return {
+      ...unit,
+      contains: Math.round((inside ? 1 / ratio : ratio) * 1e6) / 1e6,
+      factorDirection: inside ? "divide" : "multiply",
+      isBase: false,
+      isDefault: false,
+      kind: inside ? "smaller" : "bigger",
+    };
+  });
+}
+
+/**
+ * Typed factor direction.
+ * - subdivision (gaz/m/…) + N>1 → divide ("1 Roll contains N Gaz")
+ * - N<1 → multiply ("1 Gaz = 0.011111 Roll")
+ * - pack/box + N>1 → multiply ("1 Pack contains N Piece")
+ */
+export function factorDirectionForContains(
+  current: ProductSellUnit["factorDirection"],
+  contains: number,
+  symbol?: string,
+): "multiply" | "divide" {
+  if (contains > 0 && contains < 1) return "multiply";
+  if (isSubdivisionSymbol(symbol) && contains > 1) return "divide";
+  if (contains > 1 && current === "divide") return "divide";
+  return "multiply";
+}
+
+/** Direction used for labels/prices when the row omitted it. */
+export function resolvedFactorDirection(unit: ProductSellUnit): "multiply" | "divide" {
+  if (unit.factorDirection === "divide" || unit.factorDirection === "multiply") {
+    return unit.factorDirection;
+  }
+  if (isSubdivisionSymbol(unit.symbol) && conversionFactor(unit) > 1) return "divide";
+  return "multiply";
+}
+
+/** Lot cost is per stock unit. Multiply by this when `nextId` becomes the stock unit. */
+export function baseChangeCostFactor(units: ProductSellUnit[], nextId: string) {
+  const next = units.find((unit) => unit.id === nextId);
+  const stock = canonicalUnit(units) ?? preferredUnit(units);
+  if (!next || !stock || next.id === stock.id) return 1;
+  const perStock = inventoryPerSellUnit(stock) || 1;
+  const factor = inventoryPerSellUnit(next) / perStock;
+  return factor > 0 ? factor : 1;
+}
+
+function namesUnit(unit: ProductSellUnit, symbol: string) {
+  const needle = symbol.trim().toLowerCase();
+  if (!needle) return false;
+  const sym = (unit.symbol ?? "").trim().toLowerCase();
+  const name = (unit.name ?? "").trim().toLowerCase();
+  const label = unitLabel(symbol).trim().toLowerCase();
+  return sym === needle || name === needle || name === label || sym === label;
+}
+
+/** Base-unit dropdown. Picking a unit that already has a card makes that card preferred only. */
+export function assignBaseSymbol(units: ProductSellUnit[], symbol: string): ProductSellUnit[] {
+  const preferred = preferredUnit(units);
+  if (!preferred || !symbol.trim()) return units;
+  const existing = units.find((unit) => unit.id !== preferred.id && namesUnit(unit, symbol));
+  if (existing) return setPreferredUnit(units, existing.id);
+  return setPreferredUnit(
+    units.map((row) =>
+      row.id === preferred.id
+        ? { ...row, symbol, name: unitLabel(symbol), kind: "base" as const }
+        : row,
+    ),
+    preferred.id,
+  );
+}
+
+export type SellUnitsValidationError =
+  "unitNameRequired" | "unitNameDuplicate" | "unitFactorInvalid" | "unitBaseRequired";
+
+/** Positive factors, unique names, exactly one preferred base. */
+export function validateSellUnits(units: ProductSellUnit[]): SellUnitsValidationError | null {
+  const list = qtyUnits(units);
+  if (!list.length) return "unitBaseRequired";
+  const defaults = list.filter((unit) => unit.isDefault);
+  if (defaults.length !== 1 && !preferredUnit(list)) return "unitBaseRequired";
+  if (defaults.length > 1) return "unitBaseRequired";
+  const stock = stockUnitForLabel(list) ?? canonicalUnit(list);
+  const seen = new Set<string>();
+  for (const unit of list) {
+    const name = (unit.name || unitLabel(unit.symbol || "")).trim().toLowerCase();
+    if (!name) return "unitNameRequired";
+    if (seen.has(name)) return "unitNameDuplicate";
+    seen.add(name);
+    if (stock && unit.id !== stock.id && !(unit.contains > 0)) return "unitFactorInvalid";
+  }
+  return null;
+}
+
+export function sellUnitOptionValue(
+  row: ProductSellUnit,
+  masters: { symbol: string; name: string }[],
+) {
+  const match = masters.find((unit) => namesUnit(row, unit.symbol) || namesUnit(row, unit.name));
+  if (match) return match.symbol;
+  const named = symbolFromUnitName(row.name || row.symbol || "");
+  const byName = masters.find((unit) => unit.symbol.toLowerCase() === named.toLowerCase());
+  if (byName && named.toLowerCase() !== "pc") return byName.symbol;
+  if (byName && (row.symbol || row.name || "").trim().toLowerCase() === "pc") return byName.symbol;
+  return row.symbol || row.name || "";
+}
+
+export function sellUnitOptions(
+  row: ProductSellUnit,
+  units: ProductSellUnit[],
+  masters: { symbol: string; name: string }[],
+) {
+  const value = sellUnitOptionValue(row, masters);
+  const options = masters
+    .filter((unit, index, all) => {
+      const key = unit.name.trim().toLowerCase();
+      if (all.findIndex((item) => item.name.trim().toLowerCase() === key) !== index) return false;
+      const taken = units.some(
+        (other) =>
+          other.id !== row.id && (namesUnit(other, unit.symbol) || namesUnit(other, unit.name)),
+      );
+      const mine = namesUnit(row, unit.symbol) || namesUnit(row, unit.name);
+      return !taken || mine;
+    })
+    .map((unit) => ({ value: unit.symbol, label: unit.name }));
+  if (value && !options.some((option) => option.value === value)) {
+    options.unshift({ value, label: row.name || unitLabel(value) || value });
+  }
+  return options;
+}
+
+function stockUnitForLabel(unitsList: ProductSellUnit[]) {
+  return (
+    unitsList.find(
+      (unit) =>
+        resolvedFactorDirection(unit) !== "divide" && Math.abs(conversionFactor(unit) - 1) < 1e-6,
+    ) ?? canonicalUnit(unitsList)
+  );
+}
+
+/** Stable sentence. Subdivision always reads as "1 Roll contains", never "1 Gaz contains". */
 export function containsLabel(
   baseOrUnits: ProductSellUnit | ProductSellUnit[] | undefined,
   packOrRow?: ProductSellUnit,
@@ -590,11 +797,23 @@ export function containsLabel(
     : ([baseOrUnits, packOrRow, maybeRow].filter(Boolean) as ProductSellUnit[]);
   const row = Array.isArray(baseOrUnits) ? packOrRow : maybeRow;
   if (!row) return "Contains";
-  const canon = canonicalUnit(unitsList);
-  if (!canon || canon.id === row.id) return "Contains";
-  const canonName = canon.name || unitLabel(canon.symbol || "") || "unit";
+  const stock = stockUnitForLabel(unitsList);
+  if (!stock || stock.id === row.id) return "Stock unit";
+  const stockName = stock.name || unitLabel(stock.symbol || "") || "unit";
   const rowName = row.name || unitLabel(row.symbol || "") || "unit";
-  return `${canonName} in 1 ${rowName}`;
+  if (resolvedFactorDirection(row) === "divide") return `1 ${stockName} contains`;
+  return `1 ${rowName} contains`;
+}
+
+/** One-line check under the factor field: "1 Roll = 7 Gaz". */
+export function containsRelationHint(unitsList: ProductSellUnit[], row: ProductSellUnit) {
+  const stock = stockUnitForLabel(unitsList);
+  if (!stock || stock.id === row.id || !(row.contains > 0)) return "";
+  const n = formatStockQty(row.contains);
+  const stockName = stock.name || unitLabel(stock.symbol || "") || "unit";
+  const rowName = row.name || unitLabel(row.symbol || "") || "unit";
+  if (resolvedFactorDirection(row) === "divide") return `1 ${stockName} = ${n} ${rowName}`;
+  return `1 ${rowName} = ${n} ${stockName}`;
 }
 
 export function qtyBreakdown(
@@ -639,21 +858,25 @@ export function displayQtyBreakdown(
   }
 
   const parts = splitStockQty(units, product.unit, stockQty);
-  const rows: { id: string; name: string; qty: number }[] = [];
-
+  const rows: { id: string; name: string; qty: number }[] = [
+    {
+      id: stockUnitObj.id,
+      name: stockUnitObj.name || unitLabel(stockUnitObj.symbol || product.unit),
+      qty: stockQty,
+    },
+  ];
   for (const u of list) {
-    const name = u.name || unitLabel(u.symbol || product.unit);
+    if (u.id === stockUnitObj.id) continue;
     const splitQty = parts[u.id] ?? 0;
-    const qty =
-      u.id === stockUnitObj.id
-        ? splitQty
-        : splitQty > 0
-          ? splitQty
-          : qtyInUnit(units, product.unit, u, stockQty);
-    if (qty > 0) rows.push({ id: u.id, name, qty });
+    if (splitQty > 0) {
+      rows.push({
+        id: u.id,
+        name: u.name || unitLabel(u.symbol || product.unit),
+        qty: splitQty,
+      });
+    }
   }
-
-  return rows.length ? rows : [{ id: stockUnitObj.id, name: unitLabel(product.unit), qty: 0 }];
+  return rows;
 }
 
 /** Exact stock-unit total plus physical split in smaller units (branch stock panels). */

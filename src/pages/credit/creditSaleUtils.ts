@@ -1,10 +1,16 @@
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { creditTierPrice } from "@/utils/salePricing";
+import {
+  defaultTransactionUnit,
+  sortUnitsLargestFirst,
+  stockQuantityPerUnit,
+  stockToDisplayedQuantity,
+} from "@/utils/unitConversion";
 
 export function productSellUnits(product: Product): ProductSellUnit[] {
   const units = product.sellUnits ?? [];
   if (units.length) {
-    return [...units].sort((a, b) => (b.contains || 1) - (a.contains || 1));
+    return sortUnitsLargestFirst(units);
   }
   return [
     {
@@ -27,11 +33,7 @@ export function resolveProductSellUnit(product: Product, unitId?: string) {
     const matched = units.find((unit) => unit.id === unitId);
     if (matched) return matched;
   }
-  return (
-    units.find((unit) => unit.id === product.baseUnitId) ??
-    units.find((unit) => unit.kind === "base" || unit.contains === 1 || unit.isBase) ??
-    units[0]
-  );
+  return defaultTransactionUnit(product, units);
 }
 
 export function defaultSellPrice(product: Product, unitId?: string) {
@@ -41,9 +43,9 @@ export function defaultSellPrice(product: Product, unitId?: string) {
 
 export function unitStockHint(product: Product, unit?: ProductSellUnit) {
   const stock = product.stock ?? product.totalStock ?? 0;
-  if (!unit || !unit.contains || unit.contains === 1) {
+  if (!unit || stockQuantityPerUnit(unit) === 1) {
     return `${stock} ${product.unit || "units"} in stock`;
   }
-  const inUnit = stock / unit.contains;
+  const inUnit = stockToDisplayedQuantity(unit, stock);
   return `${stock} base · ~${Number.isFinite(inUnit) ? inUnit.toFixed(2) : "0"} ${unit.name || "units"}`;
 }

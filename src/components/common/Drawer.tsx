@@ -33,6 +33,7 @@ export function Drawer({
   wide,
   form,
   dim = true,
+  closeOnBackdrop = true,
   stackLevel = 0,
   onBack,
   className,
@@ -47,6 +48,8 @@ export function Drawer({
   wide?: boolean;
   form?: boolean;
   dim?: boolean;
+  /** Keep unsaved forms open when the backdrop is clicked. */
+  closeOnBackdrop?: boolean;
   /** Nested drawers use a higher z-index and optional back navigation. */
   stackLevel?: number;
   onBack?: () => void;
@@ -115,7 +118,7 @@ export function Drawer({
       <div
         className={cn("ui-drawer-back", !dim && "is-clear", leaving && "is-leaving")}
         style={backStyle}
-        onClick={leaving ? undefined : onClose}
+        onClick={leaving || !closeOnBackdrop ? undefined : onClose}
         aria-hidden="true"
       />
       <aside

@@ -397,6 +397,7 @@ export function ReordersPage() {
       >
         <THead>
           <tr>
+            <Th>PO</Th>
             <Th>Product</Th>
             <Th>Supplier</Th>
             <Th>{REORDER_COPY.cityColumn}</Th>
@@ -432,6 +433,7 @@ export function ReordersPage() {
                     openDetail(row);
                   }}
                 >
+                  <Td>{row.orderNumber}</Td>
                   <Td>{item ? productName(item.productId) : "—"}</Td>
                   <Td>{supplierLabel(row.supplierId, suppliers)}</Td>
                   <Td>{supplierCityName(row.supplierId, suppliers) || "—"}</Td>

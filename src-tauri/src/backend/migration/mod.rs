@@ -14,6 +14,8 @@ mod m20260921_000011_cities;
 mod m20260921_000012_purchase_order_statuses;
 mod m20260921_000013_purchase_order_fk_repair;
 mod m20261003_000014_customer_credit_book;
+mod m20261015_000015_unit_factor_direction;
+mod m20261015_000016_restore_qa_customer;
 
 pub struct Migrator;
 
@@ -35,6 +37,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260921_000012_purchase_order_statuses::Migration),
             Box::new(m20260921_000013_purchase_order_fk_repair::Migration),
             Box::new(m20261003_000014_customer_credit_book::Migration),
+            Box::new(m20261015_000015_unit_factor_direction::Migration),
+            Box::new(m20261015_000016_restore_qa_customer::Migration),
         ]
     }
 }

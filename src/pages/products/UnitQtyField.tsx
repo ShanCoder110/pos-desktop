@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { TextInput } from "@/components/common";
+import { TextInput, UnitSegmentedControl } from "@/components/common";
 import {
   displayQtyFromStock,
   productSellUnits,
@@ -9,10 +9,11 @@ import {
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { cn } from "@/utils/format";
+import { defaultTransactionUnit } from "@/utils/unitConversion";
 
 export function defaultSellUnit(product: Product): ProductSellUnit | undefined {
   const units = productSellUnits(product);
-  return units.find((unit) => unit.symbol === product.unit) ?? units[0];
+  return defaultTransactionUnit(product, units);
 }
 
 export function productUnitOptions(product: Product) {
@@ -35,7 +36,7 @@ export function useProductUnitQty(product?: Product, preferredUnitId?: string) {
     const pick =
       next.find((unit) => unit.id === preferredUnitId) ?? defaultSellUnit(product) ?? next[0];
     setUnitId(pick?.id ?? "");
-  }, [product?.id, preferredUnitId]);
+  }, [product, preferredUnitId]);
 
   const selectedUnit =
     units.find((unit) => unit.id === unitId) ?? (product ? defaultSellUnit(product) : undefined);
@@ -63,23 +64,15 @@ export function UnitQtySwitch({
   return (
     <div className={cn("unit-qty-switch", className)}>
       <span className="unit-qty-switch-label">Enter in</span>
-      <div className="unit-qty-switch-options" role="group" aria-label="Quantity unit">
-        {units.map((unit) => {
-          const name = unit.name || unitLabel(unit.symbol || product.unit);
-          const on = unit.id === active.id;
-          return (
-            <button
-              key={unit.id}
-              type="button"
-              className={cn("unit-qty-switch-btn", on && "is-on")}
-              aria-pressed={on}
-              onClick={() => onUnitIdChange(unit.id)}
-            >
-              {name}
-            </button>
-          );
-        })}
-      </div>
+      <UnitSegmentedControl
+        units={units.map((unit) => ({
+          id: unit.id,
+          label: unit.name || unitLabel(unit.symbol || product.unit),
+        }))}
+        value={active.id}
+        onChange={onUnitIdChange}
+        className="unit-qty-switch-options"
+      />
     </div>
   );
 }

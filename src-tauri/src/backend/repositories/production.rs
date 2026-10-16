@@ -17,6 +17,7 @@ use crate::backend::{
         ProductionMaterialResponse, ProductionResponse,
     },
     errors::AppError,
+    qty::to_base_qty,
     repositories::SequenceRepository,
     util::{money_value, now_utc, parse_uuid, quantity, trimmed},
 };
@@ -62,11 +63,13 @@ struct MaterialRow {
     actual_fifo_cost: Decimal,
     waste_cost: Decimal,
     conversion_to_base: Option<Decimal>,
+    factor_direction: Option<String>,
 }
 
 #[derive(Debug, FromQueryResult)]
 struct UnitRow {
     conversion_to_base: Decimal,
+    factor_direction: String,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -197,7 +200,7 @@ impl ProductionRepository {
                 let unit_id = parse_uuid(&material.component_unit_id, "materials.componentUnitId")?;
                 let unit = UnitRow::find_by_statement(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
-                    "SELECT conversion_to_base FROM product_units WHERE id = ? AND product_id = ? AND deleted_at IS NULL LIMIT 1",
+                    "SELECT conversion_to_base, factor_direction FROM product_units WHERE id = ? AND product_id = ? AND deleted_at IS NULL LIMIT 1",
                     [unit_id.into(), product_id.into()],
                 ))
                 .one(transaction)
@@ -208,7 +211,7 @@ impl ProductionRepository {
                     product_id,
                     unit_id,
                     qty,
-                    quantity(qty * unit.conversion_to_base),
+                    to_base_qty(qty, unit.conversion_to_base, &unit.factor_direction),
                 ));
             }
             out
@@ -270,7 +273,7 @@ impl ProductionRepository {
         let now = now_utc();
         let materials = MaterialRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT pm.id, pm.component_product_id, pm.component_unit_id, pm.expected_quantity, pm.expected_base_quantity, pm.actual_quantity, pm.actual_base_quantity, pm.waste_base_quantity, pm.actual_fifo_cost, pm.waste_cost, pu.conversion_to_base FROM production_materials pm JOIN product_units pu ON pu.id = pm.component_unit_id WHERE pm.production_job_id = ?",
+            "SELECT pm.id, pm.component_product_id, pm.component_unit_id, pm.expected_quantity, pm.expected_base_quantity, pm.actual_quantity, pm.actual_base_quantity, pm.waste_base_quantity, pm.actual_fifo_cost, pm.waste_cost, pu.conversion_to_base, pu.factor_direction FROM production_materials pm JOIN product_units pu ON pu.id = pm.component_unit_id WHERE pm.production_job_id = ?",
             [id.into()],
         ))
         .all(transaction)
@@ -301,7 +304,8 @@ impl ProductionRepository {
                 )
             };
             let conversion = material.conversion_to_base.unwrap_or(Decimal::ONE);
-            let actual_base = quantity(actual_qty * conversion);
+            let direction = material.factor_direction.as_deref().unwrap_or("multiply");
+            let actual_base = to_base_qty(actual_qty, conversion, direction);
             let consume = quantity(actual_base + waste_base);
             let (fifo_cost, _) = allocate_fifo(
                 transaction,
@@ -583,7 +587,7 @@ async fn hydrate(
 ) -> Result<ProductionResponse, AppError> {
     let materials = MaterialRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        "SELECT id, component_product_id, component_unit_id, expected_quantity, expected_base_quantity, actual_quantity, actual_base_quantity, waste_base_quantity, actual_fifo_cost, waste_cost, NULL AS conversion_to_base FROM production_materials WHERE production_job_id = ?",
+        "SELECT id, component_product_id, component_unit_id, expected_quantity, expected_base_quantity, actual_quantity, actual_base_quantity, waste_base_quantity, actual_fifo_cost, waste_cost, NULL AS conversion_to_base, NULL AS factor_direction FROM production_materials WHERE production_job_id = ?",
         [row.id.into()],
     ))
     .all(database)

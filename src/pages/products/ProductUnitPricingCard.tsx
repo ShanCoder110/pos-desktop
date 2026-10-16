@@ -1,9 +1,11 @@
 import {
   baseUnit,
+  canonicalUnit,
   formatStockQty,
   priceFromStock,
   productSellUnits,
   qtyUnits,
+  resolvedFactorDirection,
   unitLabel,
 } from "@/pages/products/productQty";
 import { PRODUCT_COPY, PRODUCT_UNIT_PRICE_TIERS } from "@/shared/constants/products";
@@ -30,10 +32,18 @@ function signedRs(n: number) {
 }
 
 function unitKindLabel(unit: ProductSellUnit, units: ProductSellUnit[]) {
-  const base = baseUnit(units);
-  if (!base || unit.id === base.id || unit.contains <= 1) return "Base unit";
-  const parent = base.name || unitLabel(base.symbol ?? "");
-  return `${formatStockQty(unit.contains)} per ${parent}`;
+  const stock =
+    units.find(
+      (row) => resolvedFactorDirection(row) !== "divide" && Math.abs(row.contains - 1) < 1e-6,
+    ) ??
+    canonicalUnit(units) ??
+    baseUnit(units);
+  if (!stock || unit.id === stock.id) return "Stock unit";
+  const stockName = stock.name || unitLabel(stock.symbol ?? "");
+  const name = unit.name || unitLabel(unit.symbol ?? "");
+  const n = formatStockQty(unit.contains);
+  if (resolvedFactorDirection(unit) === "divide") return `1 ${stockName} = ${n} ${name}`;
+  return `1 ${name} = ${n} ${stockName}`;
 }
 
 function unitMargin(cost: number, retail: number) {

@@ -19,6 +19,14 @@ export function money(n: number) {
   return `Rs ${moneyNum(n)}`;
 }
 
+const LEDGER_UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+/** Ledger notes should name the invoice, not a raw id. */
+export function ledgerNoteText(notes?: string | null) {
+  const text = (notes ?? "").replace(LEDGER_UUID, "").replace(/\s+/g, " ").trim();
+  return text || "—";
+}
+
 export function signedMoney(n: number) {
   if (n === 0) return money(0);
   return n < 0 ? `−${money(-n)}` : money(n);

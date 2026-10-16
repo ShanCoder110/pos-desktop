@@ -2829,8 +2829,33 @@ input[type="number"]::-webkit-outer-spin-button {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.product-small-card.is-base .product-small-top {
-  grid-template-columns: minmax(0, 1.2fr) minmax(100px, 0.95fr) minmax(118px, auto) 36px;
+.product-unit-inventory-pill {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--muted) 10%, var(--paper));
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.product-unit-factor-suffix {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  max-width: 4.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-small-card .field-wrap.has-end .field-input {
+  padding-right: 52px;
 }
 
 .product-stock-unit-btn {
@@ -3469,6 +3494,12 @@ html[data-theme="dark"] .pos-workspace .disc-mode {
   background: #323438;
   color: #e6e7ea;
   border-color: #5c6168;
+}
+
+html[data-theme="dark"] .pos-workspace .unit-tog.is-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 
 html[data-theme="dark"] .pos-workspace .head-btn:hover,

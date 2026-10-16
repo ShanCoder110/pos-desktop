@@ -3,7 +3,9 @@ import type { Product, ProductSellUnit } from "@/shared/types";
 import {
   cartLineTierPrices,
   convertLineToUnit,
+  balanceAfterSale,
   displayToBaseQty,
+  toBaseQty,
   lineProfit,
   lineTotal,
   posTierPrice,
@@ -96,10 +98,45 @@ describe("conversions", () => {
   });
 });
 
+describe("balanceAfterSale", () => {
+  it("subtracts the bill once", () => {
+    expect(balanceAfterSale(330, 15, 0)).toBe(315);
+    expect(balanceAfterSale(-1170, 15, 0)).toBe(-1185);
+    expect(balanceAfterSale(10, 15, 0)).toBe(-5);
+  });
+});
+
+describe("toBaseQty", () => {
+  it("divides when the stock unit contains the other unit", () => {
+    const gaz: ProductSellUnit = {
+      ...piece,
+      id: "u-gaz",
+      name: "Gaz",
+      contains: 90,
+      factorDirection: "divide",
+      isBase: false,
+    };
+    const roll = { ...product, sellUnits: [{ ...piece, name: "Roll" }, gaz] };
+    expect(toBaseQty(roll, "u-gaz", 1)).toBe(0.011111);
+    expect(toBaseQty(roll, "u-gaz", 90)).toBe(1);
+    expect(toBaseQty(roll, "u-gaz", 450)).toBe(5);
+    expect(toBaseQty(roll, "u-gaz", 451)).toBe(5.011111);
+    expect(toBaseQty(roll, "u-piece", 1) + toBaseQty(roll, "u-gaz", 45)).toBe(1.5);
+  });
+});
+
 describe("resolveSellUnit", () => {
   it("resolves by id and falls back to base", () => {
     expect(resolveSellUnit(product, "u-carton")?.name).toBe("Carton");
     expect(resolveSellUnit(product, undefined)?.id).toBe("u-piece");
+  });
+
+  it("uses the user-selected default sale unit before the inventory unit", () => {
+    const withDefault = {
+      ...product,
+      sellUnits: [piece, { ...pack, isDefault: true }],
+    };
+    expect(resolveSellUnit(withDefault)?.id).toBe("u-pack");
   });
 });
 
@@ -139,5 +176,22 @@ describe("cartLineTierPrices", () => {
     const toPack = convertLineToUnit(product, 24, "wholesale", "u-pack");
     expect(toPack?.qty).toBe(2);
     expect(toPack?.listPrice).toBe(1140);
+  });
+
+  it("preserves stock when switching from a roll to a subdivision", () => {
+    const roll = { ...piece, id: "u-roll", name: "Roll", symbol: "roll" };
+    const gaz = {
+      ...piece,
+      id: "u-gaz",
+      name: "Gaz",
+      symbol: "gaz",
+      contains: 90,
+      factorDirection: "divide" as const,
+      isBase: false,
+      kind: "smaller" as const,
+    };
+    const wire = { ...product, unit: "roll", sellUnits: [roll, gaz] };
+    expect(convertLineToUnit(wire, 1, "retail", "u-gaz")?.qty).toBe(90);
+    expect(convertLineToUnit(wire, 0.5, "retail", "u-gaz")?.qty).toBe(45);
   });
 });

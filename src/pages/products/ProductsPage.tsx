@@ -56,6 +56,7 @@ import { ProductForm } from "@/pages/products/ProductForm";
 import { useDebounce } from "@/hooks/useDebounce";
 import { blankProduct } from "@/pages/products/productLots";
 import {
+  formatMixedQty,
   formatStockQty,
   isLinearStockUnit,
   priceBreakdown,
@@ -764,6 +765,22 @@ export function ProductsPage() {
   }, [filtered, settings.shopName, setActions]);
 
   const isNew = !edit || !rows.some((r) => r.id === edit.id);
+  const hasProductDraft = Boolean(
+    edit &&
+    (!isNew ||
+      edit.name.trim() ||
+      edit.category ||
+      edit.supplierId ||
+      edit.stock > 0 ||
+      (edit.minimumStock ?? 0) > 0 ||
+      edit.cost > 0 ||
+      edit.min > 0 ||
+      edit.wholesale > 0 ||
+      edit.retail > 0 ||
+      edit.isManufactured ||
+      edit.warrantyEnabled ||
+      (edit.sellUnits?.length ?? 0) > 1),
+  );
 
   return (
     <div
@@ -1196,6 +1213,9 @@ export function ProductsPage() {
                           <span>
                             {formatStockQty(productTotalStock(row))} {unitLabel(row.unit)}
                           </span>
+                          <span className="text-[11px] text-muted">
+                            {formatMixedQty(row, productTotalStock(row))}
+                          </span>
                           {(row.branchStock?.length ?? 0) > 1 ? (
                             <small className="text-muted">
                               {row.branchStock?.filter((entry) => entry.quantity > 0).length ?? 0}{" "}
@@ -1320,6 +1340,7 @@ export function ProductsPage() {
         size="lg"
         form
         dim={false}
+        closeOnBackdrop={!hasProductDraft}
         title={isNew ? "Add Product" : "Edit Product"}
         subtitle={
           <p className="product-keys [display:flex] [flex-wrap:wrap] [gap:8px_12px] [margin:0] [font-size:11px] [color:var(--muted)]">

@@ -43,6 +43,9 @@ pub struct ProductUnitInput {
     #[validate(custom(function = "non_negative_decimal"))]
     pub price: Decimal,
     pub barcode: Option<String>,
+    /// `divide`: this many of the unit fit in 1 stock unit. `multiply`: 1 of this unit is that many stock units.
+    #[serde(default)]
+    pub factor_direction: Option<String>,
     #[serde(default)]
     pub is_base: bool,
     #[serde(default)]
@@ -138,6 +141,7 @@ pub struct ProductSellUnitResponse {
     pub barcode: String,
     pub is_base: bool,
     pub is_default: bool,
+    pub factor_direction: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -251,6 +255,7 @@ mod tests {
                 wholesale: Decimal::new(12, 0),
                 price: Decimal::new(15, 0),
                 barcode: None,
+                factor_direction: None,
                 is_base: true,
                 is_default: true,
             }],

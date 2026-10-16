@@ -16,6 +16,7 @@ use crate::backend::{
         RepairPartResponse, RepairResponse,
     },
     errors::AppError,
+    qty::to_base_qty,
     util::{money_value, now_utc, parse_optional_uuid, parse_uuid, quantity, trimmed},
 };
 
@@ -72,6 +73,7 @@ struct PartRow {
 #[derive(Debug, FromQueryResult)]
 struct UnitRow {
     conversion_to_base: Decimal,
+    factor_direction: String,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -226,14 +228,14 @@ impl RepairRepository {
             let product_unit_id = parse_uuid(&part.product_unit_id, "parts.productUnitId")?;
             let unit = UnitRow::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT conversion_to_base FROM product_units WHERE id = ? AND product_id = ? AND deleted_at IS NULL LIMIT 1",
+                "SELECT conversion_to_base, factor_direction FROM product_units WHERE id = ? AND product_id = ? AND deleted_at IS NULL LIMIT 1",
                 [product_unit_id.into(), product_id.into()],
             ))
             .one(transaction)
             .await?
             .ok_or(AppError::NotFound(ERROR_PRODUCT_NOT_FOUND))?;
             let displayed = quantity(part.quantity);
-            let base_qty = quantity(displayed * unit.conversion_to_base);
+            let base_qty = to_base_qty(displayed, unit.conversion_to_base, &unit.factor_direction);
             let waste = quantity(part.waste_base_quantity);
             let consume = quantity(base_qty + waste);
             let selling = money_value(part.selling_price);

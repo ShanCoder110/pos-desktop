@@ -8,7 +8,10 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { normalizeSellUnits, productSellUnits } from "@/pages/products/productQty";
 import {
+  balanceAfterSale,
   displayToBaseQty,
+  stockPerUnit,
+  toBaseQty,
   resolveSellUnit,
   cartLineTierPrices,
   convertLineToUnit,
@@ -18,11 +21,12 @@ import {
 import { PrintPreview } from "@/components/print/PrintPreview";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { Skeleton } from "@/components/common/Skeleton";
+import { UnitSegmentedControl } from "@/components/common/UnitSegmentedControl";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useSettings } from "@/shared/settings";
 import { routes } from "@/shared/constants/routes";
 import { MIN_PRODUCT_SEARCH_LENGTH } from "@/shared/constants/api";
-import type { Customer, HeldBill, InvoiceLine, Product } from "@/shared/types";
+import type { Customer, HeldBill, InvoiceLine, Product, ProductSellUnit } from "@/shared/types";
 import { moneyNum } from "@/utils/format";
 import {
   posStockCompact,
@@ -112,8 +116,25 @@ function num(v: string | number) {
 function money(n: number) {
   return moneyNum(n);
 }
+function cashTaken(invoice: { paidAmount?: number; payments?: unknown[] }) {
+  const payments = invoice.payments ?? [];
+  if (payments.length) {
+    return payments.reduce<number>((sum, row) => {
+      const payment = row as {
+        paymentMethod?: string;
+        amount?: number;
+        changeAmount?: number;
+        status?: string;
+      };
+      if (payment.paymentMethod !== "CASH" || payment.status === "VOIDED") return sum;
+      return sum + (payment.amount ?? 0) - (payment.changeAmount ?? 0);
+    }, 0);
+  }
+  return invoice.paidAmount ?? 0;
+}
+
 function qtyStr(n: number) {
-  const x = +Number(n).toFixed(3);
+  const x = +Number(n).toFixed(4);
   return Number.isInteger(x) ? String(x) : String(x);
 }
 function prettyUnit(u: string) {
@@ -144,6 +165,7 @@ function sellUnitOf(product: Product, sellUnit: SellUnit) {
     );
   }
   return (
+    units.find((unit) => unit.isDefault) ??
     units.find((unit) => unit.isBase || unit.kind === "base") ??
     units.find((unit) => unit.contains === 1)
   );
@@ -181,12 +203,21 @@ function clockNow() {
   return new Date().toLocaleTimeString("en-GB", { hour12: false });
 }
 
+const POS_SEARCH_ROW_PX = 44;
+const POS_SEARCH_HEAD_PX = 29;
+const POS_RECENT_LIMIT = 5;
+const POS_SEARCH_MAX_PX = 380;
+
+function productRecencyStamp(p: Product) {
+  return p.updatedAt ?? p.createdAt ?? "";
+}
+
 function recompute(item: CartLine): CartLine {
   const qty = Math.max(0.001, num(item.qty));
   const unitPrice = Math.max(0, num(item.unitPrice));
   const packSize = item.packSize || 1;
-  const isPack = item.sellUnit !== item.baseUnit && packSize > 1;
-  const baseQty = +(qty * (isPack ? packSize : 1)).toFixed(3);
+  const factor = item.sellUnit !== item.baseUnit ? packSize || 1 : 1;
+  const baseQty = +(qty * factor).toFixed(6);
   const cut = Math.max(0, item.listPrice - unitPrice);
   return {
     ...item,
@@ -206,8 +237,7 @@ export function PosPage() {
   const { settings } = useSettings();
   const searchRef = useRef<HTMLInputElement>(null);
   const qtyRef = useRef<HTMLInputElement>(null);
-  const unitBaseRef = useRef<HTMLButtonElement>(null);
-  const unitPackRef = useRef<HTMLButtonElement>(null);
+  const unitBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const focusAfterSelect = useRef<"unit" | "qty" | null>(null);
   const [unitFocused, setUnitFocused] = useState(false);
   const fnRef = useRef<Record<string, () => void>>({});
@@ -215,6 +245,7 @@ export function PosPage() {
   const [query, setQuery] = useState("");
   const debounced = useDebounce(query, 280);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [recentProductIds, setRecentProductIds] = useState<string[]>([]);
   const [hit, setHit] = useState(0);
   const [pending, setPending] = useState<Product | null>(null);
   const [sellUnit, setSellUnit] = useState<SellUnit>("base");
@@ -246,7 +277,7 @@ export function PosPage() {
   const [note, setNote] = useState("");
   const [holds, setHolds] = useState<PosHeldBill[]>([]);
   const [invoices, setInvoices] = useState<
-    { id: string; no: string; total: number; at: string; customer: string }[]
+    { id: string; no: string; total: number; cash: number; credit: number; at: string; customer: string }[]
   >([]);
   const [billsTip, setBillsTip] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -257,6 +288,15 @@ export function PosPage() {
   const [printOpen, setPrintOpen] = useState(false);
   const [clearAfterPrint, setClearAfterPrint] = useState(false);
   const [receiptInvoiceNo, setReceiptInvoiceNo] = useState("");
+  const [receiptSnap, setReceiptSnap] = useState<{
+    lines: InvoiceLine[];
+    total: number;
+    paid: number;
+    balanceBefore: number;
+    balanceAfter: number;
+    customer: Customer;
+    invoiceNumber?: string;
+  } | null>(null);
   const [splitPrint, setSplitPrint] = useState(false);
   const [toast, setToast] = useState("");
   const [clock, setClock] = useState(clockNow);
@@ -342,6 +382,8 @@ export function PosPage() {
           id: invoice.id,
           no: invoice.invoiceNumber,
           total: invoice.total,
+          cash: cashTaken(invoice),
+          credit: invoice.creditAmount ?? 0,
           at: new Date(invoice.createdAt).toLocaleString(),
           customer: customerRows.find((row) => row.id === invoice.customerId)?.name ?? "Walk-in",
         })),
@@ -388,7 +430,7 @@ export function PosPage() {
       const units = sellUnitsFor(product);
       const unitRow = units.find((u) => u.id === item.productUnitId) ?? sellUnitOf(product, "base");
       if (!unitRow?.id) continue;
-      const packN = unitRow.contains > 1 ? unitRow.contains : packOf(product) || 1;
+      const packN = stockPerUnit(unitRow);
       const sellU = unitRow.name || unitRow.symbol || product.unit;
       const tierMin = unitTierPrice(unitRow, "minimum");
       lines.push(
@@ -455,16 +497,35 @@ export function PosPage() {
       }
     : customer;
 
+  const searchBrowse = !debounced.trim();
   const results = useMemo(() => {
     const q = debounced.trim().toLowerCase();
-    if (!q) return products.slice(0, 12);
-    return products.filter(
-      (p) =>
-        (p.name ?? "").toLowerCase().includes(q) ||
-        (p.sku ?? "").toLowerCase().includes(q) ||
-        (p.barcode ?? "").toLowerCase().includes(q),
-    );
-  }, [debounced, products]);
+    if (!q) {
+      const recent = recentProductIds
+        .map((id) => products.find((p) => p.id === id))
+        .filter((p): p is Product => Boolean(p))
+        .slice(0, POS_RECENT_LIMIT);
+      const seen = new Set(recent.map((p) => p.id));
+      const fill = [...products]
+        .sort((a, b) => productRecencyStamp(b).localeCompare(productRecencyStamp(a)))
+        .filter((p) => !seen.has(p.id))
+        .slice(0, POS_RECENT_LIMIT - recent.length);
+      return [...recent, ...fill];
+    }
+    return products
+      .filter(
+        (p) =>
+          (p.name ?? "").toLowerCase().includes(q) ||
+          (p.sku ?? "").toLowerCase().includes(q) ||
+          (p.barcode ?? "").toLowerCase().includes(q),
+      )
+      .slice(0, 40);
+  }, [debounced, products, recentProductIds]);
+
+  const searchPanelHeight = Math.min(
+    POS_SEARCH_MAX_PX,
+    (searchBrowse ? POS_SEARCH_HEAD_PX : 0) + results.length * POS_SEARCH_ROW_PX,
+  );
 
   useEffect(() => {
     setHit(0);
@@ -476,26 +537,38 @@ export function PosPage() {
     return customers.filter((c) => c.name.toLowerCase().includes(q) || c.phone.includes(q));
   }, [custQ, customers]);
 
-  function cartStock(productId: string, exceptId?: string) {
-    const held = cart
-      .filter((x) => x.productId === productId && x.id !== exceptId)
-      .reduce((s, x) => s + x.baseQty, 0);
+  function cartHeldBase(productId: string, exceptId?: string) {
     const product = products.find((p) => p.id === productId);
-    const pool = product ? productSellableQty(product, sessionBranchId) : 0;
-    return +(pool - held).toFixed(3);
+    return cart
+      .filter((x) => x.productId === productId && x.id !== exceptId)
+      .reduce(
+        (s, x) => s + (product ? toBaseQty(product, x.productUnitId, x.qty) : x.baseQty),
+        0,
+      );
+  }
+
+  function stockLeft(productId: string, exceptId?: string) {
+    const product = products.find((p) => p.id === productId);
+    const held = cartHeldBase(productId, exceptId);
+    if (!product) return { here: 0, total: 0 };
+    const total = Math.max(0, productSellableQty(product, sessionBranchId) - held);
+    const here = Math.max(0, productBranchStock(product, sessionBranchId) - held);
+    return { here, total };
+  }
+
+  function cartStock(productId: string, exceptId?: string) {
+    return +stockLeft(productId, exceptId).total.toFixed(6);
   }
 
   function cartStockCompact(productId: string, exceptId?: string) {
-    const held = cart
-      .filter((x) => x.productId === productId && x.id !== exceptId)
-      .reduce((s, x) => s + x.baseQty, 0);
     const product = products.find((p) => p.id === productId);
     if (!product) return "0";
-    const total = Math.max(0, productTotalStock(product) - held);
-    const here = Math.max(0, productBranchStock(product, sessionBranchId) - held);
+    const { here, total } = stockLeft(productId, exceptId);
     if (!sessionBranchId || here === total) return qtyStr(total);
     return `${qtyStr(here)} · ${qtyStr(total)}`;
   }
+
+  const cartOverStock = cart.some((item) => cartStock(item.productId, item.id) < -0.0001);
 
   function totals() {
     const gross = cart.reduce((s, i) => s + i.listPrice * i.qty, 0);
@@ -523,14 +596,14 @@ export function PosPage() {
         : num(cashAmt) + num(onlineAmt);
   const unpaid = +Math.max(0, t.total - amountPaid).toFixed(2);
   const extra = +Math.max(0, amountPaid - t.total).toFixed(2);
-  const creditUsed = Math.max(0, Math.min(Math.max(0, customer.balance), t.total));
-  // our balance: negative = owes, positive = advance
+  const appliedPaid = returnChange ? Math.min(amountPaid, t.total) : amountPaid;
   const balanceAfter = customer.isWalking
     ? 0
-    : customer.balance - creditUsed + (returnChange ? 0 : extra) - unpaid;
+    : balanceAfterSale(customer.balance, t.total, appliedPaid);
 
   const paymentOk = (() => {
     if (!cart.length) return false;
+    if (cartOverStock) return false;
     if (customer.isWalking) return amountPaid >= t.total - 0.001;
     return true;
   })();
@@ -543,27 +616,48 @@ export function PosPage() {
     });
   }
 
+  function focusPendingUnitButton() {
+    if (!pending) return;
+    const id =
+      pendingProductUnitId || resolveSellUnit(pending, pendingProductUnitId)?.id || "";
+    if (!id) return;
+    unitBtnRefs.current[id]?.focus();
+  }
+
   function focusUnitBar() {
-    if (!pending || !packOf(pending)) {
+    if (!pending || unitsForProduct(pending).length <= 1) {
       focusQty();
       return;
     }
     setUnitFocused(true);
-    window.requestAnimationFrame(() => {
-      const btn = sellUnit === "pack" ? unitPackRef.current : unitBaseRef.current;
-      btn?.focus();
-    });
+    window.requestAnimationFrame(() => focusPendingUnitButton());
   }
 
   function togglePendingUnit(stay = true) {
     if (!pending || !packOf(pending)) return;
-    setSellUnit((u) => (u === "pack" ? "base" : "pack"));
-    if (stay) setUnitFocused(true);
-    else focusQty();
+    const next: SellUnit = sellUnit === "pack" ? "base" : "pack";
+    setSellUnit(next);
+    const unit = sellUnitOf(pending, next);
+    if (unit?.id) setPendingProductUnitId(unit.id);
+    if (stay) {
+      setUnitFocused(true);
+      window.requestAnimationFrame(() => focusPendingUnitButton());
+    } else focusQty();
+  }
+
+  function selectPendingUnit(unit: ProductSellUnit) {
+    if (!pending) return;
+    setPendingProductUnitId(unit.id);
+    const packN = packOf(pending);
+    if (unit.contains > 1 && packN > 1 && unit.contains === packN) setSellUnit("pack");
+    else setSellUnit("base");
+    setUnitFocused(true);
   }
 
   function onUnitKey(e: ReactKeyboardEvent) {
-    if (!pending || !packOf(pending)) return;
+    if (!pending) return;
+    const units = unitsForProduct(pending);
+    if (units.length <= 1) return;
     const k = e.key;
     if (
       k === "ArrowLeft" ||
@@ -576,7 +670,16 @@ export function PosPage() {
     ) {
       e.preventDefault();
       e.stopPropagation();
-      togglePendingUnit(true);
+      if (packOf(pending)) togglePendingUnit(true);
+      else {
+        const idx = Math.max(
+          0,
+          units.findIndex((u) => u.id === pendingProductUnitId),
+        );
+        const delta =
+          k === "ArrowLeft" || k === "ArrowUp" ? -1 : k === "ArrowRight" || k === "ArrowDown" ? 1 : 1;
+        selectPendingUnit(units[(idx + delta + units.length) % units.length]);
+      }
     } else if (k === "Enter" || (k === "Tab" && !e.shiftKey)) {
       e.preventDefault();
       e.stopPropagation();
@@ -601,6 +704,9 @@ export function PosPage() {
     setPending(product);
     setPendingProductUnitId(unit?.id ?? "");
     setSellUnit("base");
+    setRecentProductIds((ids) =>
+      [product.id, ...ids.filter((id) => id !== product.id)].slice(0, POS_RECENT_LIMIT),
+    );
     setQuery(product.name);
     setMenuOpen(false);
     setQtyInput("1");
@@ -614,7 +720,7 @@ export function PosPage() {
     window.requestAnimationFrame(() => {
       if (want === "unit") {
         setUnitFocused(true);
-        unitBaseRef.current?.focus();
+        focusPendingUnitButton();
       } else {
         focusQty();
       }
@@ -622,11 +728,9 @@ export function PosPage() {
   }, [pending]);
 
   useEffect(() => {
-    if (!unitFocused || !pending || !packOf(pending)) return;
-    window.requestAnimationFrame(() => {
-      (sellUnit === "pack" ? unitPackRef.current : unitBaseRef.current)?.focus();
-    });
-  }, [sellUnit, unitFocused, pending]);
+    if (!unitFocused || !pending) return;
+    window.requestAnimationFrame(() => focusPendingUnitButton());
+  }, [pendingProductUnitId, unitFocused, pending]);
 
   function addPendingToCart(supplierId?: string) {
     if (!pending) {
@@ -663,7 +767,7 @@ export function PosPage() {
     const sellPrice = unitTierPrice(productUnit, tier);
     const minSell = unitTierPrice(productUnit, "minimum") || lot.minFloor;
     const sellU = productUnit.name || productUnit.symbol || pending.unit;
-    const packN = productUnit.contains > 1 ? productUnit.contains : packOf(pending) || 1;
+    const packN = stockPerUnit(productUnit);
 
     setCart((prev) => {
       const existing = prev.find(
@@ -978,7 +1082,7 @@ export function PosPage() {
 
   function setPay(method: PayMethod) {
     setPayMethod(method);
-    if (method === "cash") setReceived(t.total || received);
+    if (method === "cash" && customer.isWalking) setReceived(t.total || received);
     if (method === "online") {
       setOnlineAmt(t.total || onlineAmt);
       setCashAmt(0);
@@ -1003,9 +1107,36 @@ export function PosPage() {
     if (roundAmt > 0) showToast(`${money(roundAmt)} added to bill discount`);
   }
 
+  function openReceipt(invoiceNumber = receiptInvoiceNo) {
+    setReceiptSnap({
+      lines: cart.map((item) => ({
+        id: item.id,
+        productId: item.productId,
+        name: item.name,
+        qty: item.qty,
+        unit: item.sellUnit,
+        price: item.unitPrice,
+        minFloor: item.minPrice,
+        lotsNote: item.lotsNote,
+      })),
+      total: t.total,
+      paid: amountPaid,
+      balanceBefore: customer.balance,
+      balanceAfter,
+      customer: displayCustomer,
+      invoiceNumber: invoiceNumber || undefined,
+    });
+    if (invoiceNumber) setReceiptInvoiceNo(invoiceNumber);
+    setPrintOpen(true);
+  }
+
   async function completeSale() {
     if (!cart.length) {
       showToast("Cart is empty");
+      return;
+    }
+    if (cartOverStock) {
+      showToast("Cart exceeds available stock");
       return;
     }
     if (!paymentOk) {
@@ -1095,6 +1226,8 @@ export function PosPage() {
           id: invoice.id,
           no: invoice.invoiceNumber,
           total: invoice.total,
+          cash: cashTaken(invoice),
+          credit: invoice.creditAmount ?? 0,
           at: new Date(invoice.createdAt).toLocaleString(),
           customer: displayCustomer.name,
         },
@@ -1105,12 +1238,23 @@ export function PosPage() {
           const sold = cart
             .filter((item) => item.productId === product.id)
             .reduce((sum, item) => sum + item.baseQty, 0);
-          return sold ? { ...product, stock: Math.max(0, product.stock - sold) } : product;
+          if (!sold) return product;
+          const nextStock = Math.max(0, (product.totalStock ?? product.stock) - sold);
+          return {
+            ...product,
+            stock: Math.max(0, product.stock - sold),
+            totalStock: nextStock,
+            branchStock: product.branchStock?.map((row) =>
+              row.branchId === sessionBranchId
+                ? { ...row, quantity: Math.max(0, row.quantity - sold) }
+                : row,
+            ),
+          };
         }),
       );
       setReceiptInvoiceNo(invoice.invoiceNumber);
       setClearAfterPrint(true);
-      setPrintOpen(true);
+      openReceipt(invoice.invoiceNumber);
       showToast(
         wasEditing
           ? `Invoice ${invoice.invoiceNumber} updated`
@@ -1169,7 +1313,7 @@ export function PosPage() {
       F7: () => applyExact(),
       F8: () => document.getElementById("billDiscount")?.focus(),
       F9: () => {
-        if (cart.length) setPrintOpen(true);
+        if (cart.length) openReceipt();
         else showToast("Nothing to print");
       },
       F10: () => {
@@ -1213,8 +1357,9 @@ export function PosPage() {
   }, [printOpen, holdsOpen, recentOpen, askSupplier, addCustomerOpen]);
 
   useEffect(() => {
-    if (payMethod === "cash" && t.total && received === 0) setReceived(t.total);
-  }, [t.total, payMethod]); // eslint-disable-line
+    if (payMethod !== "cash" || !t.total || !customer.isWalking) return;
+    if (received === 0 || received < t.total - 0.001) setReceived(t.total);
+  }, [t.total, payMethod, customer.isWalking]); // eslint-disable-line
 
   const invoiceLines: InvoiceLine[] = cart.map((c) => ({
     id: c.id,
@@ -1237,31 +1382,54 @@ export function PosPage() {
 
   const qtyHint = (() => {
     if (!pending) return null;
-    const left = cartStock(pending.id);
-    const packN = packOf(pending);
-    const isPack = sellUnit === "pack" && packN > 1;
+    const { here, total: left } = stockLeft(pending.id);
+    const pendingUnit = resolveSellUnit(pending, pendingProductUnitId);
+    const perStock =
+      pendingUnit && pendingUnit.contains > 1 && stockPerUnit(pendingUnit) < 1
+        ? pendingUnit.contains
+        : 0;
+    const factor = perStock > 1 ? 1 : pendingUnit ? stockPerUnit(pendingUnit) : packOf(pending) || 1;
+    const isPack = perStock <= 1 && factor > 1;
     const entered = num(qtyInput);
-    const need = isPack ? entered * packN : entered;
+    const need = perStock > 1 ? entered / perStock : isPack ? entered * factor : entered;
     const over = need > left + 0.0001;
     const low = left < 10;
-    if (isPack) {
-      const packsLeft = Math.floor(left / packN + 1e-9);
-      const rem = +(left - packsLeft * packN).toFixed(3);
+    const stockUnit = prettyUnit(pending.unit);
+    if (perStock > 1 && pendingUnit) {
+      const unitName = pendingUnit.name || pendingUnit.symbol || stockUnit;
+      const avail = left * perStock;
       return {
         cls: over ? "is-over" : low ? "is-low" : "",
         lines: [
-          `Left ${qtyStr(packsLeft)} Pack${rem > 0 ? ` + ${qtyStr(rem)} ${prettyUnit(pending.unit)}` : ""}`,
+          `Left ${qtyStr(avail)} ${unitName}`,
+          `1 ${stockUnit} = ${qtyStr(perStock)} ${unitName}`,
           entered > 0
-            ? `${qtyStr(entered)} Pack = ${qtyStr(entered * packN)} ${prettyUnit(pending.unit)}`
+            ? `${qtyStr(entered)} ${unitName} = ${qtyStr(entered / perStock)} ${stockUnit}`
             : "",
         ].filter(Boolean),
       };
     }
+    if (isPack) {
+      const packsLeft = Math.floor(left / factor + 1e-9);
+      const rem = +(left - packsLeft * factor).toFixed(3);
+      const packLabel = pendingUnit?.name || pendingUnit?.symbol || "Pack";
+      return {
+        cls: over ? "is-over" : low ? "is-low" : "",
+        lines: [
+          `Left ${qtyStr(packsLeft)} ${packLabel}${rem > 0 ? ` + ${qtyStr(rem)} ${stockUnit}` : ""}`,
+          entered > 0
+            ? `${qtyStr(entered)} ${packLabel} = ${qtyStr(entered * factor)} ${stockUnit}`
+            : "",
+        ].filter(Boolean),
+      };
+    }
+    const stockLine =
+      !sessionBranchId || here === left
+        ? `Left ${qtyStr(left)} ${stockUnit}`
+        : `Here ${qtyStr(here)} · Total ${qtyStr(left)} ${stockUnit}`;
     return {
       cls: over ? "is-over" : low ? "is-low" : "",
-      lines: [
-        `Here ${qtyStr(Math.max(0, productBranchStock(pending, sessionBranchId)))} · Total ${qtyStr(left)} ${prettyUnit(pending.unit)}`,
-      ],
+      lines: [stockLine],
     };
   })();
 
@@ -1327,6 +1495,9 @@ export function PosPage() {
                   setPending(null);
                   setMenuOpen(true);
                 }}
+                onFocus={() => {
+                  if (!pending) setMenuOpen(true);
+                }}
                 onClick={() => {
                   if (!pending) setMenuOpen(true);
                 }}
@@ -1348,9 +1519,15 @@ export function PosPage() {
                 }}
               />
               <div
-                className="search-results [position:absolute] [left:0] [right:0] [top:calc(100%_+_2px)] [background:#fff] [border:1px_solid_var(--line)] [border-radius:8px] [box-shadow:var(--shadow)] [z-index:20] [height:380px] [overflow-x:hidden] [overflow-y:auto] [scrollbar-width:none] [-ms-overflow-style:none]"
-                hidden={!menuOpen || !results.length}
+                className="search-results [position:absolute] [left:0] [right:0] [top:calc(100%_+_2px)] [background:#fff] [border:1px_solid_var(--line)] [border-radius:8px] [box-shadow:var(--shadow)] [z-index:20] [overflow-x:hidden] [overflow-y:auto] [scrollbar-width:none] [-ms-overflow-style:none]"
+                style={{ maxHeight: POS_SEARCH_MAX_PX, height: searchPanelHeight }}
+                hidden={!menuOpen || !results.length || Boolean(pending)}
               >
+                {searchBrowse ? (
+                  <div className="search-head">
+                    Recent · last {Math.min(POS_RECENT_LIMIT, results.length)}
+                  </div>
+                ) : null}
                 {results.map((p, i) => {
                   const left = cartStock(p.id);
                   return (
@@ -1422,35 +1599,25 @@ export function PosPage() {
               <span className="qty-label [font-size:10px] [font-weight:700] [color:var(--gold)] [letter-spacing:.06em] [display:flex] [align-items:center] [justify-content:space-between]">
                 UNIT FIRST <kbd>← →</kbd>
               </span>
-              <div
-                className="unit-toggles [display:flex] [flex-wrap:wrap] [gap:4px]"
-                id="unitToggles"
-              >
-                {pending
-                  ? unitsForProduct(pending).map((unit, index) => (
-                      <button
-                        key={unit.id}
-                        ref={index === 0 ? unitBaseRef : index === 1 ? unitPackRef : undefined}
-                        type="button"
-                        className={`unit-tog [flex:1] [min-width:72px] [height:28px] [border:1px_solid_var(--line)] [background:#f8fafc] [border-radius:5px] [cursor:pointer] [font-size:11px] [font-weight:600] [color:var(--ink)] [white-space:nowrap] [padding:0_8px] ${pendingProductUnitId === unit.id ? "is-active" : ""}`}
-                        tabIndex={pendingProductUnitId === unit.id ? 0 : -1}
-                        onClick={() => {
-                          setPendingProductUnitId(unit.id);
-                          if (unit.contains > 1 && unit.contains === packOf(pending)) {
-                            setSellUnit("pack");
-                          } else {
-                            setSellUnit("base");
-                          }
-                        }}
-                        onKeyDown={onUnitKey}
-                        onFocus={() => setUnitFocused(true)}
-                      >
-                        {unit.name || unit.symbol || prettyUnit(pending.unit)}
-                        {unit.contains > 1 ? ` ×${unit.contains}` : ""}
-                      </button>
-                    ))
-                  : null}
-              </div>
+              {pending ? (
+                <UnitSegmentedControl
+                  units={unitsForProduct(pending).map((unit) => ({
+                    id: unit.id,
+                    label: `${unit.name || unit.symbol || prettyUnit(pending.unit)}${unit.contains > 1 && stockPerUnit(unit) > 1 ? ` ×${unit.contains}` : ""}`,
+                  }))}
+                  value={pendingProductUnitId}
+                  onChange={(unitId) => {
+                    const unit = unitsForProduct(pending).find((row) => row.id === unitId);
+                    if (unit) selectPendingUnit(unit);
+                  }}
+                  onButtonRef={(unitId, element) => {
+                    unitBtnRefs.current[unitId] = element;
+                  }}
+                  onKeyDown={(event) => onUnitKey(event)}
+                  className="unit-toggles border-0 bg-transparent p-0"
+                  compact
+                />
+              ) : null}
             </div>
 
             <div
@@ -1463,36 +1630,18 @@ export function PosPage() {
                 type="button"
                 className={`mode-btn [border:0] [background:transparent] [color:var(--sub)] [padding:0_10px] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [transition:all_.15s] [display:inline-flex] [flex-direction:column] [align-items:center] [justify-content:center] [gap:0] [min-width:72px] ${priceMode === "retail" ? "is-active" : ""}`}
                 disabled={!pending}
-                onClick={() => {
-                  setPriceMode("retail");
-                  showToast("Retail price for selected unit");
-                }}
+                onClick={() => setPriceMode("retail")}
               >
                 <span>Retail</span>
-                {pending ? (
-                  <span className="[font-size:10px] [font-weight:700]">
-                    {money(unitTierPrice(resolveSellUnit(pending, pendingProductUnitId), "retail"))}
-                  </span>
-                ) : null}
               </button>
               <button
                 type="button"
                 id="btnWholesale"
                 className={`mode-btn [border:0] [background:transparent] [color:var(--sub)] [padding:0_10px] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [transition:all_.15s] [display:inline-flex] [flex-direction:column] [align-items:center] [justify-content:center] [gap:0] [min-width:72px] ${priceMode === "wholesale" ? "is-active" : ""}`}
                 disabled={!pending}
-                onClick={() => {
-                  setPriceMode("wholesale");
-                  showToast("Wholesale price for selected unit");
-                }}
+                onClick={() => setPriceMode("wholesale")}
               >
                 <span>Wholesale</span>
-                {pending ? (
-                  <span className="[font-size:10px] [font-weight:700]">
-                    {money(
-                      unitTierPrice(resolveSellUnit(pending, pendingProductUnitId), "wholesale"),
-                    )}
-                  </span>
-                ) : null}
               </button>
             </div>
 
@@ -1581,7 +1730,9 @@ export function PosPage() {
                 <span className="today-stats [display:flex] [align-items:center] [gap:8px] [font-family:var(--mono)] [font-size:11px] [color:#cbd5e1] [font-weight:500]">
                   <span>Today {invoices.length} bills</span>
                   <span id="todayCash">
-                    Cash {money(invoices.reduce((s, i) => s + i.total, 0))}
+                    Cash {money(invoices.reduce((s, i) => s + i.cash, 0))}
+                    {" · "}
+                    Credit {money(invoices.reduce((s, i) => s + i.credit, 0))}
                   </span>
                 </span>
                 <button
@@ -1979,6 +2130,7 @@ export function PosPage() {
                       const c = custHits[custHit];
                       if (c) {
                         setCustomerId(c.id);
+                        if (!c.isWalking) setReceived(0);
                         setCustQ(c.isWalking ? "" : c.name);
                         setCustOpen(false);
                         if (c.isWalking) {
@@ -2018,6 +2170,7 @@ export function PosPage() {
                   onMouseDown={(e) => {
                     e.preventDefault();
                     setCustomerId(c.id);
+                    if (!c.isWalking) setReceived(0);
                     setCustQ(c.isWalking ? "" : c.name);
                     setCustOpen(false);
                     if (c.isWalking) {
@@ -2303,11 +2456,13 @@ export function PosPage() {
             >
               {cart.length === 0
                 ? ""
-                : paymentOk
-                  ? "Ready to complete"
-                  : customer.isWalking
-                    ? "Pay in full required"
-                    : "Partial ok for account"}
+                : cartOverStock
+                  ? "Reduce qty — not enough stock"
+                  : paymentOk
+                    ? "Ready to complete"
+                    : customer.isWalking
+                      ? "Pay in full required"
+                      : "Partial ok for account"}
             </div>
           </div>
 
@@ -2359,7 +2514,7 @@ export function PosPage() {
                 type="button"
                 className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print-ur"
                 onClick={() => {
-                  if (cart.length) setPrintOpen(true);
+                  if (cart.length) openReceipt();
                   else showToast("Nothing to print");
                 }}
               >
@@ -2369,7 +2524,7 @@ export function PosPage() {
                 type="button"
                 className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print"
                 onClick={() => {
-                  if (cart.length) setPrintOpen(true);
+                  if (cart.length) openReceipt();
                   else showToast("Nothing to print");
                 }}
               >
@@ -2380,7 +2535,7 @@ export function PosPage() {
               type="button"
               className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-preview"
               onClick={() => {
-                if (cart.length) setPrintOpen(true);
+                if (cart.length) openReceipt();
                 else showToast("Nothing to preview");
               }}
             >
@@ -2706,19 +2861,20 @@ export function PosPage() {
         open={printOpen}
         onClose={() => {
           setPrintOpen(false);
+          setReceiptSnap(null);
           if (clearAfterPrint) {
             setClearAfterPrint(false);
             newBill(true);
           }
         }}
-        customer={displayCustomer}
-        lines={invoiceLines}
-        total={t.total}
-        paid={amountPaid}
-        balanceBefore={customer.balance}
-        balanceAfter={balanceAfter}
+        customer={receiptSnap?.customer ?? displayCustomer}
+        lines={receiptSnap?.lines ?? invoiceLines}
+        total={receiptSnap?.total ?? t.total}
+        paid={receiptSnap?.paid ?? amountPaid}
+        balanceBefore={receiptSnap?.balanceBefore ?? customer.balance}
+        balanceAfter={receiptSnap?.balanceAfter ?? balanceAfter}
         duplicate={false}
-        invoiceNumber={receiptInvoiceNo || undefined}
+        invoiceNumber={receiptSnap?.invoiceNumber ?? (receiptInvoiceNo || undefined)}
       />
     </>
   );

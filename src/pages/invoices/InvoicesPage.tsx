@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Eye, Pencil } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { businessDayKey } from "@/shared/constants/dashboard";
 import { routes } from "@/shared/constants/routes";
 import {
   Badge,
   Button,
+  toaster,
   Drawer,
   EmptyRow,
   HubExportMenu,
@@ -20,7 +22,7 @@ import { useSalesHub } from "@/pages/sales/SalesLayout";
 import type { TableExportColumn } from "@/utils/exportFile";
 import type { InvoiceRow, PaymentStatus } from "@/shared/domain/types";
 import { money } from "@/utils/format";
-import { listAllInvoices } from "@/services/sales";
+import { listAllInvoices, voidInvoice } from "@/services/sales";
 import { isAbortError } from "@/utils/async";
 import { listAllBranches } from "@/services/org";
 import { listMasterRecords } from "@/services/masters";
@@ -112,7 +114,7 @@ export function InvoicesPage() {
     {
       label: "Customer",
       value: (row) =>
-        row.customerId ? (customerNames[row.customerId] ?? row.customerId) : "Walk-in",
+        row.customerId ? (customerNames[row.customerId] ?? "Customer") : "Walk-in",
     },
     { label: "Total", value: (row) => row.total },
     { label: "Paid", value: (row) => row.paidAmount },
@@ -170,10 +172,10 @@ export function InvoicesPage() {
           {shown.map((row) => (
             <tr key={row.id}>
               <Td>{row.invoiceNumber}</Td>
-              <Td>{row.createdAt}</Td>
+              <Td>{businessDayKey(row.createdAt) || row.createdAt}</Td>
               <Td>{branchNames[row.branchId] ?? row.branchId}</Td>
               <Td>
-                {row.customerId ? (customerNames[row.customerId] ?? row.customerId) : "Walk-in"}
+                {row.customerId ? (customerNames[row.customerId] ?? "Customer") : "Walk-in"}
               </Td>
               <Td numeric>{money(row.total)}</Td>
               <Td numeric>{money(row.paidAmount)}</Td>
@@ -200,6 +202,25 @@ export function InvoicesPage() {
         onClose={() => setOpen(null)}
         footer={
           <div className="flex w-full flex-wrap justify-end gap-2">
+            {open?.status === "COMPLETED" ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const id = open.id;
+                  void voidInvoice(id, "Void")
+                    .then(() => {
+                      toaster.success("Invoice voided");
+                      setOpen(null);
+                      refreshHub();
+                    })
+                    .catch((error) =>
+                      toaster.error(error instanceof Error ? error.message : "Could not void"),
+                    );
+                }}
+              >
+                Void
+              </Button>
+            ) : null}
             {open?.status === "COMPLETED" ? (
               <Button
                 variant="outline"

@@ -86,7 +86,7 @@ export function TopBar() {
             onChange={setBranchId}
             options={branches.map((branch) => ({
               value: branch.id,
-              label: branch.isMain ? "Main Branch" : branch.name,
+              label: branch.name || "Branch",
             }))}
             searchable={false}
             clearable={false}

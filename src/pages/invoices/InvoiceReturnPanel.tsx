@@ -30,6 +30,7 @@ export function InvoiceReturnPanel({
   const [reason, setReason] = useState("Customer return");
   const [lines, setLines] = useState<LineDraft[]>([]);
   const [loading, setLoading] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -54,7 +55,8 @@ export function InvoiceReturnPanel({
           })),
         );
       })
-      .catch(() => {
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         setLines(
           invoice.items.map((item) => ({
             invoiceItemId: item.id,
@@ -68,7 +70,7 @@ export function InvoiceReturnPanel({
         );
       });
     return () => controller.abort();
-  }, [invoice]);
+  }, [invoice, reload]);
 
   const itemsToSubmit = useMemo(() => {
     return lines
@@ -111,6 +113,18 @@ export function InvoiceReturnPanel({
         items: payloadItems,
       });
       toaster.success("Return recorded");
+      setLines((prev) =>
+        prev.map((line) => {
+          const submitted = payloadItems.find((item) => item.invoiceItemId === line.invoiceItemId);
+          if (!submitted) return line;
+          return {
+            ...line,
+            alreadyReturned: line.alreadyReturned + submitted.quantity,
+            returnQty: "",
+          };
+        }),
+      );
+      setReload((value) => value + 1);
       onSuccess?.();
     } catch (error) {
       toaster.error(error instanceof Error ? error.message : "Could not record return");
@@ -203,7 +217,12 @@ export function InvoiceReturnPanel({
       </div>
       <Button
         variant="primary"
-        disabled={loading || !payloadItems.length || hasError}
+        disabled={
+          loading ||
+          hasError ||
+          !payloadItems.length ||
+          lines.every((line) => line.soldQty - line.alreadyReturned <= 0.0001)
+        }
         onClick={() => void submit()}
       >
         {loading ? "Saving…" : "Submit return"}

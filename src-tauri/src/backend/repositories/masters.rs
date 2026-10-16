@@ -250,6 +250,58 @@ impl MasterRepository {
         Self::find(database, kind, id).await
     }
 
+    pub async fn customer_history_message(
+        database: &DatabaseConnection,
+        id: Uuid,
+    ) -> Result<Option<String>, AppError> {
+        #[derive(Debug, FromQueryResult)]
+        struct HistoryRow {
+            invoices: i64,
+            ledger: i64,
+            payments: i64,
+            returns: i64,
+            balance: f64,
+        }
+        let row = HistoryRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT (SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND deleted_at IS NULL) AS invoices, (SELECT COUNT(*) FROM customer_ledger_entries WHERE customer_id = ?) AS ledger, (SELECT COUNT(*) FROM payments WHERE customer_id = ?) AS payments, (SELECT COUNT(*) FROM sale_returns WHERE customer_id = ?) AS returns, COALESCE((SELECT balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1), 0) AS balance",
+            [id.into(), id.into(), id.into(), id.into(), id.into()],
+        ))
+        .one(database)
+        .await?
+        .ok_or_else(|| AppError::Internal("Customer history query failed.".into()))?;
+        if row.invoices == 0
+            && row.ledger == 0
+            && row.payments == 0
+            && row.returns == 0
+            && row.balance.abs() < 0.000001
+        {
+            return Ok(None);
+        }
+        let mut parts = Vec::new();
+        if row.invoices > 0 {
+            parts.push(format!("{} invoices", row.invoices));
+        }
+        if row.payments > 0 {
+            parts.push(format!("{} payments", row.payments));
+        }
+        if row.returns > 0 {
+            parts.push(format!("{} returns", row.returns));
+        }
+        if row.ledger > 0 {
+            parts.push(format!("{} ledger lines", row.ledger));
+        }
+        if row.balance.abs() >= 0.000001 {
+            let amount = (row.balance.abs() * 100.0).round() / 100.0;
+            let label = if row.balance < 0.0 { "Advance" } else { "Owes" };
+            parts.push(format!("{label} Rs {amount}"));
+        }
+        Ok(Some(format!(
+            "Cannot delete this customer: {}.",
+            parts.join(", ")
+        )))
+    }
+
     pub async fn soft_delete(
         database: &DatabaseConnection,
         kind: MasterKind,

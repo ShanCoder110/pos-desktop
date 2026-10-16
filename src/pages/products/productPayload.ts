@@ -1,6 +1,7 @@
 import {
   canonicalUnit,
   conversionFactor,
+  isSubdivisionSymbol,
   preferredUnit,
   qtyUnits,
   unitLabel,
@@ -56,6 +57,10 @@ function mapSellUnits(product: Product, units: UnitRow[]) {
       unitId: unitIdForSymbol(unit.symbol ?? inventorySymbol, units, baseUnitId),
       name: unit.name || unitLabel(unit.symbol ?? inventorySymbol),
       contains: isInventory ? 1 : conversionFactor(unit),
+      factorDirection: isInventory
+        ? "multiply"
+        : unit.factorDirection ??
+          (isSubdivisionSymbol(unit.symbol) && conversionFactor(unit) > 1 ? "divide" : "multiply"),
       cost: unit.cost,
       min: unit.min,
       wholesale: unit.wholesale,
@@ -99,7 +104,12 @@ export function buildCreateProductPayload(
     if (product.warrantyNote?.trim()) payload.warrantyNote = product.warrantyNote.trim();
   }
 
-  const receivedDate = new Date().toISOString().slice(0, 10);
+  const receivedDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Karachi",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
   const openingRows = (product.branchStock ?? [])
     .filter((row) => row.quantity > 0)
     .map((row) => ({

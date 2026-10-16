@@ -7,10 +7,10 @@ use uuid::Uuid;
 use crate::backend::{
     constants::{
         ERROR_CLAIM_NOT_FOUND, ERROR_CUSTOMER_NOT_FOUND, ERROR_INSUFFICIENT_STOCK,
-        ERROR_INVOICE_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND, ERROR_RETURN_EXCEEDS_SOLD,
-        ERROR_RETURN_NOT_FOUND, LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LEDGER_RETURN,
-        LOT_SOURCE_RETURN, PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED,
-        REFERENCE_RETURN, STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN,
+        ERROR_INVOICE_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND, ERROR_RETURN_NOT_FOUND,
+        LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LEDGER_RETURN, LOT_SOURCE_RETURN,
+        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED, REFERENCE_RETURN,
+        STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN,
     },
     context::RequestContext,
     dto::{
@@ -79,6 +79,8 @@ struct CustomerLedgerListRow {
 struct InvoiceMeta {
     branch_id: Uuid,
     customer_id: Option<Uuid>,
+    invoice_number: String,
+    credit_amount: Decimal,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -98,6 +100,7 @@ struct ReturnedQtyRow {
 struct UnitMeta {
     display_name: String,
     conversion_to_base: Decimal,
+    factor_direction: String,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -567,7 +570,7 @@ impl CreditRepository {
         let invoice_id = parse_uuid(&request.invoice_id, "invoiceId")?;
         let invoice = InvoiceMeta::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT branch_id, customer_id FROM invoices WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+            "SELECT branch_id, customer_id, invoice_number, CAST(credit_amount AS REAL) AS credit_amount FROM invoices WHERE id = ? AND deleted_at IS NULL LIMIT 1",
             [invoice_id.into()],
         ))
         .one(transaction)
@@ -618,8 +621,13 @@ impl CreditRepository {
             .await?
             .map(|row| row.returned)
             .unwrap_or(Decimal::ZERO);
-            if displayed + prior > meta.displayed_quantity + Decimal::new(1, 6) {
-                return Err(AppError::Validation(ERROR_RETURN_EXCEEDS_SOLD.into()));
+            let remaining = quantity(meta.displayed_quantity - prior);
+            if displayed > remaining + Decimal::new(1, 6) {
+                return Err(AppError::Conflict(format!(
+                    "Only {} {} can still be returned.",
+                    crate::backend::qty::format_qty(remaining),
+                    meta.unit_name
+                )));
             }
             let base_qty = quantity(displayed * meta.conversion_to_base);
             let condition = item.condition.trim().to_uppercase();
@@ -631,10 +639,43 @@ impl CreditRepository {
                 "NO_RESTOCK"
             };
             let track_damaged = condition == "DAMAGED";
-            let original_lot = parse_optional_uuid(
+            let mut original_lot = parse_optional_uuid(
                 item.original_product_lot_id.as_deref(),
                 "originalProductLotId",
             )?;
+            let mut restore_cost = Decimal::ZERO;
+            if original_lot.is_none() {
+                #[derive(Debug, FromQueryResult)]
+                struct UsedLot {
+                    product_lot_id: Uuid,
+                    unit_cost: f64,
+                    base_quantity: f64,
+                }
+                let used = UsedLot::find_by_statement(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "SELECT product_lot_id, CAST(unit_cost AS REAL) AS unit_cost, CAST(base_quantity AS REAL) AS base_quantity FROM lot_consumptions WHERE reference_type = ? AND reference_id = ? AND product_id = ?",
+                    [
+                        crate::backend::constants::REFERENCE_INVOICE.into(),
+                        invoice_id.into(),
+                        meta.product_id.into(),
+                    ],
+                ))
+                .all(transaction)
+                .await?;
+                if let Some(first) = used.first() {
+                    original_lot = Some(first.product_lot_id);
+                    let weight: f64 = used.iter().map(|row| row.base_quantity).sum();
+                    let cost = if weight > 0.0 {
+                        used.iter()
+                            .map(|row| row.unit_cost * row.base_quantity)
+                            .sum::<f64>()
+                            / weight
+                    } else {
+                        first.unit_cost
+                    };
+                    restore_cost = Decimal::from_f64_retain(cost).unwrap_or(Decimal::ZERO);
+                }
+            }
             let mut movement_id: Option<Uuid> = None;
 
             if track_damaged {
@@ -704,7 +745,7 @@ impl CreditRepository {
                     transaction
                         .execute_raw(Statement::from_sql_and_values(
                             DbBackend::Sqlite,
-                            "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, 0, ?, NULL, ?, 1, NULL, ?, ?, ?)",
+                            "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, NULL, ?, 1, NULL, ?, ?, ?)",
                             [
                                 new_lot.into(),
                                 meta.product_id.into(),
@@ -712,6 +753,7 @@ impl CreditRepository {
                                 LOT_SOURCE_RETURN.into(),
                                 base_qty.into(),
                                 base_qty.into(),
+                                restore_cost.into(),
                                 now.date_naive().into(),
                                 context.user_id.into(),
                                 context.device_id.into(),
@@ -829,14 +871,18 @@ impl CreditRepository {
                     parse_uuid(&replacement.product_unit_id, "replacements.productUnitId")?;
                 let unit = UnitMeta::find_by_statement(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
-                    "SELECT display_name, conversion_to_base FROM product_units WHERE id = ? AND product_id = ? AND deleted_at IS NULL LIMIT 1",
+                    "SELECT display_name, conversion_to_base, factor_direction FROM product_units WHERE id = ? AND product_id = ? AND deleted_at IS NULL LIMIT 1",
                     [product_unit_id.into(), product_id.into()],
                 ))
                 .one(transaction)
                 .await?
                 .ok_or(AppError::NotFound(ERROR_PRODUCT_NOT_FOUND))?;
                 let displayed = quantity(replacement.quantity);
-                let base_qty = quantity(displayed * unit.conversion_to_base);
+                let base_qty = crate::backend::qty::to_base_qty(
+                    displayed,
+                    unit.conversion_to_base,
+                    &unit.factor_direction,
+                );
                 let unit_price = money_value(replacement.unit_price);
                 let movement_id = allocate_fifo(
                     transaction,
@@ -882,7 +928,10 @@ impl CreditRepository {
             ))
             .await?;
 
-        if refund_total > Decimal::ZERO {
+        // Cash already left the drawer. Only the unpaid part of the invoice
+        // belongs on the customer balance, or a cash refund also becomes advance.
+        let ledger_refund = refund_total.min(invoice.credit_amount);
+        if ledger_refund > Decimal::ZERO {
             if let Some(customer_id) = invoice.customer_id {
                 let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
@@ -893,7 +942,7 @@ impl CreditRepository {
                 .await?
                 .map(|row| row.balance_after)
                 .unwrap_or(Decimal::ZERO);
-                let refund = money_value(refund_total);
+                let refund = money_value(ledger_refund);
                 let balance_after = previous - refund;
                 transaction
                     .execute_raw(Statement::from_sql_and_values(
@@ -908,7 +957,7 @@ impl CreditRepository {
                             return_id.into(),
                             refund.into(),
                             balance_after.into(),
-                            format!("Return {return_id}").into(),
+                            format!("Return {}", invoice.invoice_number).into(),
                             now.into(),
                             context.user_id.into(),
                             now.into(),

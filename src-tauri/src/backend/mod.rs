@@ -8,6 +8,7 @@ pub mod errors;
 pub mod extract;
 pub mod handlers;
 pub mod migration;
+pub mod qty;
 pub mod repositories;
 pub mod security;
 pub mod server;

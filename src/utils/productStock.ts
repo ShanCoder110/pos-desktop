@@ -1,4 +1,4 @@
-import { branchQtyBreakdown, formatStockQty, unitLabel } from "@/pages/products/productQty";
+import { formatMixedQty, formatStockQty, unitLabel } from "@/pages/products/productQty";
 import type { Product } from "@/shared/types";
 
 export type ProductBranchStock = {
@@ -25,13 +25,10 @@ export function productBranchStock(product: Product, branchId?: string) {
 }
 
 function formatBranchQty(product: Product, qty: number) {
-  const { exact, parts } = branchQtyBreakdown(product, qty);
-  if (!parts.length) return `${formatStockQty(exact.qty)} ${exact.name}`;
-  const bits = [
-    `${formatStockQty(exact.qty)} ${exact.name}`,
-    ...parts.map((part) => `${formatStockQty(part.qty)} ${part.name}`),
-  ];
-  return bits.join(" / ");
+  const exact = `${formatStockQty(qty)} ${unitLabel(product.unit)}`;
+  const mixed = formatMixedQty(product, qty);
+  if (!mixed || mixed === exact || mixed === `0 ${unitLabel(product.unit)}`) return exact;
+  return `${exact} · ${mixed}`;
 }
 
 export function branchStockTooltip(product: Product) {

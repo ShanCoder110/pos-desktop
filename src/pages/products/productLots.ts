@@ -68,7 +68,12 @@ export function openingLot(product: Product, lots: ProductLotRow[]): ProductLotR
     originalQuantity: qty,
     remainingQuantity: qty,
     damagedQuantity: 0,
-    receivedAt: new Date().toISOString().slice(0, 10),
+    receivedAt: new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Karachi",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date()),
     expiryDate: null,
     createdBy: "u1",
   };
