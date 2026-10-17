@@ -21,7 +21,7 @@ use crate::backend::{
     },
     errors::AppError,
     qty::to_base_qty,
-    repositories::SequenceRepository,
+    repositories::{LedgerEntryInput, LedgerParty, LedgerRepository, SequenceRepository},
     util::{money_value, now_utc, parse_date, parse_uuid, quantity, trimmed},
 };
 
@@ -72,11 +72,6 @@ struct UnitRow {
     minimum_price: Decimal,
     wholesale_price: Decimal,
     retail_price: Decimal,
-}
-
-#[derive(Debug, FromQueryResult)]
-struct BalanceRow {
-    balance_after: Decimal,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -560,36 +555,28 @@ impl PurchasingRepository {
                 .await?;
         }
 
-        let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1",
-            [header.supplier_id.into()],
-        ))
-        .one(transaction)
-        .await?
-        .map(|row| row.balance_after)
-        .unwrap_or(Decimal::ZERO);
-        let balance_after = previous + total;
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "INSERT INTO supplier_ledger_entries (id, supplier_id, branch_id, type, purchase_order_id, goods_receipt_id, money_transaction_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?, ?, ?)",
-                [
-                    Uuid::new_v4().into(),
-                    header.supplier_id.into(),
-                    header.branch_id.into(),
-                    LEDGER_PURCHASE.into(),
-                    po_id.into(),
-                    receipt_id.into(),
-                    total.into(),
-                    balance_after.into(),
-                    format!("Goods receipt {receipt_id}").into(),
-                    now.into(),
-                    context.user_id.into(),
-                    now.into(),
-                ],
-            ))
-            .await?;
+        let note = format!("Goods receipt {receipt_id}");
+        LedgerRepository::post_entry(
+            transaction,
+            LedgerEntryInput {
+                id: None,
+                party: LedgerParty::Supplier(header.supplier_id),
+                branch_id: header.branch_id,
+                entry_type: LEDGER_PURCHASE,
+                debit: total,
+                credit: Decimal::ZERO,
+                notes: Some(&note),
+                occurred_at: now,
+                created_by: context.user_id,
+                purchase_order_id: Some(po_id),
+                goods_receipt_id: Some(receipt_id),
+                money_transaction_id: None,
+                invoice_id: None,
+                payment_id: None,
+                return_id: None,
+            },
+        )
+        .await?;
 
         let remaining = CountRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
@@ -1005,24 +992,17 @@ impl PurchasingRepository {
         }
         let money_id = Uuid::new_v4();
         let ledger_id = Uuid::new_v4();
-        let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1",
-            [supplier_id.into()],
-        ))
-        .one(transaction)
-        .await?
-        .map(|row| row.balance_after)
-        .unwrap_or(Decimal::ZERO);
+        let previous =
+            LedgerRepository::current_balance(transaction, LedgerParty::Supplier(supplier_id))
+                .await?;
         // Positive balance = we owe supplier (pay out). Negative = advance (receive back).
         let paying_out = previous >= Decimal::ZERO;
-        let (direction, entry_type, debit, credit, balance_after) = if paying_out {
+        let (direction, entry_type, debit, credit) = if paying_out {
             (
                 PAYMENT_DIRECTION_OUT,
                 LEDGER_PAYMENT_MADE,
                 Decimal::ZERO,
                 amount,
-                previous - amount,
             )
         } else {
             (
@@ -1030,9 +1010,14 @@ impl PurchasingRepository {
                 LEDGER_PAYMENT_RECEIVED,
                 amount,
                 Decimal::ZERO,
-                previous + amount,
             )
         };
+        let ledger_note = trimmed(&request.notes).unwrap_or_else(|| {
+            format!(
+                "Supplier payment {}",
+                request.reference_number.as_deref().unwrap_or("")
+            )
+        });
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
@@ -1053,28 +1038,27 @@ impl PurchasingRepository {
                 ],
             ))
             .await?;
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "INSERT INTO supplier_ledger_entries (id, supplier_id, branch_id, type, purchase_order_id, goods_receipt_id, money_transaction_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    ledger_id.into(),
-                    supplier_id.into(),
-                    context.branch_id.into(),
-                    entry_type.into(),
-                    money_id.into(),
-                    debit.into(),
-                    credit.into(),
-                    balance_after.into(),
-                    trimmed(&request.notes)
-                        .unwrap_or_else(|| format!("Supplier payment {}", request.reference_number.as_deref().unwrap_or("")))
-                        .into(),
-                    now.into(),
-                    context.user_id.into(),
-                    now.into(),
-                ],
-            ))
-            .await?;
+        let balance_after = LedgerRepository::post_entry(
+            transaction,
+            LedgerEntryInput {
+                id: Some(ledger_id),
+                party: LedgerParty::Supplier(supplier_id),
+                branch_id: context.branch_id,
+                entry_type,
+                debit,
+                credit,
+                notes: Some(&ledger_note),
+                occurred_at: now,
+                created_by: context.user_id,
+                purchase_order_id: None,
+                goods_receipt_id: None,
+                money_transaction_id: Some(money_id),
+                invoice_id: None,
+                payment_id: None,
+                return_id: None,
+            },
+        )
+        .await?;
         let _ = ERROR_PO_NOT_FOUND;
         Ok(SupplierPaymentResponse {
             id: ledger_id.to_string(),

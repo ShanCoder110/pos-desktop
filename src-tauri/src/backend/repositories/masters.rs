@@ -266,7 +266,7 @@ impl MasterRepository {
         }
         let row = HistoryRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT (SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND deleted_at IS NULL) AS invoices, (SELECT COUNT(*) FROM customer_ledger_entries WHERE customer_id = ?) AS ledger, (SELECT COUNT(*) FROM payments WHERE customer_id = ?) AS payments, (SELECT COUNT(*) FROM sale_returns WHERE customer_id = ?) AS returns, COALESCE((SELECT balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1), 0) AS balance",
+            "SELECT (SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND deleted_at IS NULL) AS invoices, (SELECT COUNT(*) FROM customer_ledger_entries WHERE customer_id = ?) AS ledger, (SELECT COUNT(*) FROM payments WHERE customer_id = ?) AS payments, (SELECT COUNT(*) FROM sale_returns WHERE customer_id = ?) AS returns, COALESCE((SELECT balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1), 0) AS balance",
             [id.into(), id.into(), id.into(), id.into(), id.into()],
         ))
         .one(database)
@@ -426,8 +426,8 @@ fn conditions(kind: MasterKind, query: &PageQuery) -> (String, Vec<sea_orm::Valu
     (parts.join(" AND "), values)
 }
 
-const SUPPLIER_BALANCE_SQL: &str = "COALESCE((SELECT sle.balance_after FROM supplier_ledger_entries sle WHERE sle.supplier_id = suppliers.id ORDER BY sle.occurred_at DESC, sle.created_at DESC LIMIT 1), 0)";
-const CUSTOMER_BALANCE_SQL: &str = "COALESCE((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id ORDER BY cle.occurred_at DESC, cle.created_at DESC LIMIT 1), 0)";
+const SUPPLIER_BALANCE_SQL: &str = "COALESCE((SELECT sle.balance_after FROM supplier_ledger_entries sle WHERE sle.supplier_id = suppliers.id ORDER BY sle.occurred_at DESC, sle.created_at DESC, sle.rowid DESC LIMIT 1), 0)";
+const CUSTOMER_BALANCE_SQL: &str = "COALESCE((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id ORDER BY cle.occurred_at DESC, cle.created_at DESC, cle.rowid DESC LIMIT 1), 0)";
 
 fn push_like(
     parts: &mut Vec<String>,

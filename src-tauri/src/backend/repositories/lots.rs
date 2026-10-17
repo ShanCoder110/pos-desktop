@@ -18,7 +18,10 @@ use crate::backend::{
         ReceiveLotRequest, SupplierPaymentRequest, TransferItemInput, UpdateLotRequest,
     },
     errors::AppError,
-    repositories::{PurchasingRepository, SequenceRepository, TransferRepository},
+    repositories::{
+        LedgerEntryInput, LedgerParty, LedgerRepository, PurchasingRepository, SequenceRepository,
+        TransferRepository,
+    },
     util::{money_value, now_utc, parse_date, parse_optional_uuid, parse_uuid, quantity, trimmed},
 };
 
@@ -58,11 +61,6 @@ struct BranchLotRow {
 #[derive(Debug, FromQueryResult)]
 struct CountRow {
     count: i64,
-}
-
-#[derive(Debug, FromQueryResult)]
-struct BalanceRow {
-    balance_after: Decimal,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -376,39 +374,28 @@ impl LotRepository {
 
         let total_cost = money_value(cost * qty);
         if let Some(supplier_id) = supplier_id {
-            let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1",
-                [supplier_id.into()],
-            ))
-            .one(transaction)
-            .await?
-            .map(|row| row.balance_after)
-            .unwrap_or(Decimal::ZERO);
-            let balance_after = previous + total_cost;
-            transaction
-                .execute_raw(Statement::from_sql_and_values(
-                    DbBackend::Sqlite,
-                    "INSERT INTO supplier_ledger_entries (id, supplier_id, branch_id, type, purchase_order_id, goods_receipt_id, money_transaction_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?, ?, ?)",
-                    [
-                        Uuid::new_v4().into(),
-                        supplier_id.into(),
-                        ledger_branch_id.into(),
-                        LEDGER_PURCHASE.into(),
-                        matched
-                            .as_ref()
-                            .map(|row| row.purchase_order_id)
-                            .into(),
-                        matched.as_ref().map(|row| row.goods_receipt_id).into(),
-                        total_cost.into(),
-                        balance_after.into(),
-                        format!("Lot receive {lot_id}").into(),
-                        now.into(),
-                        context.user_id.into(),
-                        now.into(),
-                    ],
-                ))
-                .await?;
+            let note = format!("Lot receive {lot_id}");
+            LedgerRepository::post_entry(
+                transaction,
+                LedgerEntryInput {
+                    id: None,
+                    party: LedgerParty::Supplier(supplier_id),
+                    branch_id: ledger_branch_id,
+                    entry_type: LEDGER_PURCHASE,
+                    debit: total_cost,
+                    credit: Decimal::ZERO,
+                    notes: Some(&note),
+                    occurred_at: now,
+                    created_by: context.user_id,
+                    purchase_order_id: matched.as_ref().map(|row| row.purchase_order_id),
+                    goods_receipt_id: matched.as_ref().map(|row| row.goods_receipt_id),
+                    money_transaction_id: None,
+                    invoice_id: None,
+                    payment_id: None,
+                    return_id: None,
+                },
+            )
+            .await?;
             if paid_now > Decimal::ZERO {
                 PurchasingRepository::supplier_payment(
                     transaction,

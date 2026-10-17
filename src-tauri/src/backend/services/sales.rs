@@ -576,4 +576,306 @@ mod tests {
 
         let _ = CreditRepository::customer_ledger(&database, cid).await;
     }
+
+    /// QA-02 part 2 §6 mix chain (exact amounts):
+    /// SALE 30 → PAY 10 → revise 30→45 (ADJ −30, SALE 45) → RETURN 15 → SALE 15.
+    /// QA stored RETURN after=−25 (stale ADJUSTMENT tip −10); hand-calc expects 20 then tip 35.
+    #[tokio::test]
+    async fn qa_mix_sale_pay_revise_return_sale_balance_after() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let context = ctx();
+
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "MixQA".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let customer = MasterService::create(
+            &database,
+            MasterKind::Customer,
+            MasterRequest {
+                name: "Mix Continuity Customer".into(),
+                symbol: None,
+                phone: Some("03009998877".into()),
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: Some(true),
+                previous_balance: None,
+            },
+            Some(&context),
+        )
+        .await
+        .expect("customer");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Mix Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(10, 0),
+                    wholesale: Decimal::new(12, 0),
+                    price: Decimal::new(15, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(200, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let unit_id = product.sell_units[0].id.clone();
+        let cid = Uuid::parse_str(&customer.id).unwrap();
+
+        // 1) Credit sale 2 × 15 = 30
+        let first = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "mix-sale-1".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::new(2, 0),
+                    unit_price: Decimal::new(15, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("first sale");
+        assert_eq!(first.credit_amount, 30.0);
+
+        let session = AuthService::open_cash_session(
+            &database,
+            &context,
+            CashSessionOpenRequest {
+                opening_float: Decimal::ZERO,
+            },
+        )
+        .await
+        .expect("open cash session");
+        let mut context = context;
+        context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
+
+        // 2) Pay 10 → 20
+        CreditService::customer_payment(
+            &database,
+            &context,
+            cid,
+            CustomerPaymentRequest {
+                amount: Decimal::new(10, 0),
+                payment_method: "CASH".into(),
+                reference_number: None,
+                notes: Some("mix pay".into()),
+                client_request_id: Some("mix-pay-1".into()),
+            },
+        )
+        .await
+        .expect("payment");
+
+        // 3–4) Revise 2 → 3 @ 15 = 45: ADJUSTMENT −30 → −10, SALE 45 → 35
+        let revised = SalesService::revise(
+            &database,
+            &context,
+            Uuid::parse_str(&first.id).unwrap(),
+            CompleteSaleRequest {
+                client_request_id: "mix-revise-1".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::new(3, 0),
+                    unit_price: Decimal::new(15, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("revise to 45");
+        assert_eq!(revised.credit_amount, 45.0);
+
+        // 5) Return 15 against revised invoice → must read prior 35, not stale ADJ −10
+        let return_item_id = revised.items[0].id.clone();
+        CreditService::create_return(
+            &database,
+            &context,
+            CreateReturnRequest {
+                invoice_id: revised.id.clone(),
+                return_type: "REFUND".into(),
+                reason: "mix return".into(),
+                notes: None,
+                items: vec![ReturnItemInput {
+                    invoice_item_id: return_item_id,
+                    quantity: Decimal::ONE,
+                    condition: "GOOD".into(),
+                    refund_amount: Decimal::new(15, 0),
+                    original_product_lot_id: None,
+                }],
+                replacements: vec![],
+            },
+        )
+        .await
+        .expect("return");
+
+        // 6) New credit sale 15 → tip 35
+        SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "mix-sale-2".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::ONE,
+                    unit_price: Decimal::new(15, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("second sale");
+
+        let expected = vec![30.0, 20.0, -10.0, 35.0, 20.0, 35.0];
+        let actual = ledger_balances(&database, &customer.id).await;
+        assert_eq!(actual, expected, "hand-calculated balance_after chain");
+
+        #[derive(Debug, FromQueryResult)]
+        struct TypeRow {
+            entry_type: String,
+            balance_after: f64,
+        }
+        let rows = TypeRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT type AS entry_type, CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at ASC, created_at ASC, rowid ASC",
+            [cid.into()],
+        ))
+        .all(&database)
+        .await
+        .expect("typed rows");
+        let types: Vec<&str> = rows.iter().map(|r| r.entry_type.as_str()).collect();
+        assert_eq!(
+            types,
+            vec![
+                "SALE",
+                "PAYMENT_RECEIVED",
+                "ADJUSTMENT",
+                "SALE",
+                "RETURN",
+                "SALE"
+            ]
+        );
+        assert_eq!(rows[4].balance_after, 20.0, "RETURN must be 20 not −25");
+
+        // Deliberately recreate QA's broken RETURN tip (−25), then recompute repairs it.
+        database
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE customer_ledger_entries SET balance_after = -25 WHERE customer_id = ? AND type = 'RETURN'",
+                [cid.into()],
+            ))
+            .await
+            .expect("break return row");
+        database
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE customer_ledger_entries SET balance_after = -10 WHERE id = (
+                    SELECT id FROM customer_ledger_entries WHERE customer_id = ?
+                    ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1
+                )",
+                [cid.into()],
+            ))
+            .await
+            .expect("break tip");
+        assert_eq!(ledger_balances(&database, &customer.id).await[4], -25.0);
+        LedgerRepository::recompute_balances(&database)
+            .await
+            .expect("recompute");
+        assert_eq!(
+            ledger_balances(&database, &customer.id).await,
+            expected,
+            "recompute must repair broken RETURN and tip"
+        );
+    }
 }

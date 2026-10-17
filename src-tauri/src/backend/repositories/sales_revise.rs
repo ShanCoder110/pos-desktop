@@ -377,6 +377,7 @@ pub async fn revise_invoice(
             LedgerRepository::post_entry(
                 transaction,
                 LedgerEntryInput {
+                    id: None,
                     party: LedgerParty::Customer(customer_id),
                     branch_id: context.branch_id,
                     entry_type: LEDGER_SALE,

@@ -55,6 +55,8 @@ pub enum LedgerParty {
 }
 
 pub struct LedgerEntryInput<'a> {
+    /// When set, use this id; otherwise allocate a new UUID.
+    pub id: Option<Uuid>,
     pub party: LedgerParty,
     pub branch_id: Uuid,
     pub entry_type: &'a str,
@@ -111,7 +113,7 @@ impl LedgerRepository {
         }
         let previous = Self::current_balance(database, input.party).await?;
         let balance_after = money_value(previous + debit - credit);
-        let id = Uuid::new_v4();
+        let id = input.id.unwrap_or_else(Uuid::new_v4);
         match input.party {
             LedgerParty::Supplier(supplier_id) => {
                 database
@@ -188,6 +190,7 @@ impl LedgerRepository {
         Self::post_entry(
             database,
             LedgerEntryInput {
+                id: None,
                 party,
                 branch_id,
                 entry_type,

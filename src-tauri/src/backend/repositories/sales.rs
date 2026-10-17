@@ -437,6 +437,7 @@ impl SalesRepository {
                 LedgerRepository::post_entry(
                     transaction,
                     LedgerEntryInput {
+                        id: None,
                         party: LedgerParty::Customer(customer_id),
                         branch_id: context.branch_id,
                         entry_type: LEDGER_SALE,
@@ -1022,6 +1023,7 @@ pub(super) async fn reverse_invoice_ledger(
         LedgerRepository::post_entry(
             transaction,
             LedgerEntryInput {
+                id: None,
                 party: LedgerParty::Customer(net.customer_id),
                 branch_id,
                 entry_type: LEDGER_ADJUSTMENT,
