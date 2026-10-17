@@ -1,5 +1,3 @@
-PRAGMA foreign_keys = OFF;
-
 CREATE TABLE invoices_new (
   id TEXT PRIMARY KEY NOT NULL,
   branch_id TEXT NOT NULL REFERENCES branches(id),
@@ -56,5 +54,3 @@ ALTER TABLE invoices_new RENAME TO invoices;
 
 CREATE INDEX IF NOT EXISTS ix_invoices_created ON invoices(created_at);
 CREATE INDEX IF NOT EXISTS ix_invoices_customer ON invoices(customer_id, created_at);
-
-PRAGMA foreign_keys = ON;

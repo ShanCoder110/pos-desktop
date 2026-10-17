@@ -1,5 +1,3 @@
-PRAGMA foreign_keys = OFF;
-
 CREATE TABLE invoices_new (
   id TEXT PRIMARY KEY NOT NULL,
   branch_id TEXT NOT NULL REFERENCES branches(id),
@@ -52,4 +50,19 @@ ALTER TABLE invoices_new RENAME TO invoices;
 CREATE INDEX IF NOT EXISTS ix_invoices_created ON invoices(created_at);
 CREATE INDEX IF NOT EXISTS ix_invoices_customer ON invoices(customer_id, created_at);
 
-PRAGMA foreign_keys = ON;
+-- Existing full credit returns that were left as PAID with Paid Rs 0.
+UPDATE invoices
+SET payment_status = 'RETURNED'
+WHERE deleted_at IS NULL
+  AND credit_amount = 0
+  AND paid_amount = 0
+  AND payment_status IN ('PAID', 'CREDIT', 'PARTIAL')
+  AND EXISTS (SELECT 1 FROM sale_returns sr WHERE sr.invoice_id = invoices.id);
+
+-- Existing partial credit returns that still showed CREDIT/PARTIAL only.
+UPDATE invoices
+SET payment_status = 'PARTIALLY_RETURNED'
+WHERE deleted_at IS NULL
+  AND credit_amount > 0
+  AND payment_status IN ('CREDIT', 'PARTIAL', 'PAID')
+  AND EXISTS (SELECT 1 FROM sale_returns sr WHERE sr.invoice_id = invoices.id);
