@@ -63,7 +63,8 @@ export function StockCountPage() {
     saving: false,
   });
 
-  const allowed = viewerRole === null || STOCK_COUNT_ROLES.has(viewerRole);
+  // null = role still loading — do not fetch stock/history (avoids cashier toasts).
+  const allowed = viewerRole !== null && STOCK_COUNT_ROLES.has(viewerRole);
 
   const product = useMemo(
     () => products.find((row) => row.id === productId) ?? null,

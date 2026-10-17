@@ -39,6 +39,7 @@ import type { ProductLotRow } from "@/shared/domain/types";
 import type { Product } from "@/shared/types";
 import { money, shortError } from "@/utils/format";
 import { createLoadGuard, isAbortError } from "@/utils/async";
+import { hubSideQuery } from "@/utils/hubLoad";
 import { toaster } from "@/components/common";
 import { openLotStockValue } from "@/pages/products/productFifo";
 import { PRODUCT_COPY } from "@/shared/constants/products";
@@ -581,7 +582,8 @@ export function ProductsLayout() {
     () =>
       PRODUCT_SECTION_TABS.filter(
         (item) =>
-          item.id !== "stock-count" || viewerRole === null || STOCK_COUNT_ROLES.has(viewerRole),
+          // Wait until role is known — do not flash Stock count (or its fetches) for cashiers.
+          item.id !== "stock-count" || (viewerRole !== null && STOCK_COUNT_ROLES.has(viewerRole)),
       ),
     [viewerRole],
   );
@@ -634,37 +636,54 @@ export function ProductsLayout() {
       try {
         await ensureSession();
         if (guard && !guard.isActive()) return;
-        const [productRows, lotRows, categoryRows, unitRows, supplierRows, transferRows, poRows] =
-          await Promise.all([
-            listAllProducts(signal),
-            listAllLots({}, signal),
-            listMasterRecords(
-              "categories",
-              { perPage: MAX_PAGE_SIZE, isActive: true },
-              signal,
-            ).then((r) => r.data.map(({ id, name }) => ({ id, name }))),
-            listMasterRecords("units", { perPage: MAX_PAGE_SIZE, isActive: true }, signal).then(
-              (r) => r.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" })),
-            ),
-            listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, signal).then((r) =>
-              r.data.map(({ id, name, isActive, cityId, cityName }) => ({
-                id,
-                name,
-                isActive,
-                cityId,
-                cityName,
-              })),
-            ),
-            listAllTransfers({}, signal),
-            listAllPurchaseOrders({}, signal),
-          ]);
-        if (guard && !guard.isActive()) return;
+
+        // Products are required for the catalog. Side queries (lots, masters, POs, …)
+        // must not wipe the list or toast when one of them fails (e.g. cashier / role
+        // edges) — GET /products can succeed while Promise.all would reject.
+        const productRows = await listAllProducts(signal);
+        if (signal?.aborted || (guard && !guard.isActive())) return;
         setProducts(productRows);
+
+        const [lotRows, categoryRows, unitRows, supplierRows, transferRows, poRows] =
+          await Promise.all([
+            hubSideQuery(listAllLots({}, signal), []),
+            hubSideQuery(
+              listMasterRecords(
+                "categories",
+                { perPage: MAX_PAGE_SIZE, isActive: true },
+                signal,
+              ).then((r) => r.data.map(({ id, name }) => ({ id, name }))),
+              [],
+            ),
+            hubSideQuery(
+              listMasterRecords("units", { perPage: MAX_PAGE_SIZE, isActive: true }, signal).then(
+                (r) => r.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" })),
+              ),
+              [],
+            ),
+            hubSideQuery(
+              listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, signal).then((r) =>
+                r.data.map(({ id, name, isActive, cityId, cityName }) => ({
+                  id,
+                  name,
+                  isActive,
+                  cityId,
+                  cityName,
+                })),
+              ),
+              [],
+            ),
+            hubSideQuery(listAllTransfers({}, signal), []),
+            hubSideQuery(listAllPurchaseOrders({}, signal), []),
+          ]);
+        if (signal?.aborted || (guard && !guard.isActive())) return;
         setLots(lotRows);
         setCategories(categoryRows);
         setUnits(unitRows);
         setSuppliers(supplierRows);
-        setTransfers(transferRows.map((t) => ({ id: t.id, status: t.status, items: t.items })));
+        setTransfers(
+          transferRows.map((t) => ({ id: t.id, status: t.status, items: t.items ?? [] })),
+        );
         setPurchaseOrders(
           poRows.map((row) => ({ id: row.id, status: row.status, total: row.total })),
         );
