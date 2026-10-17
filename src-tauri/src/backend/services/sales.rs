@@ -1286,4 +1286,314 @@ mod tests {
             .expect("totals");
         assert_eq!(totals.balance, Decimal::new(15, 0));
     }
+
+    /// Step 8: remaining profit = gross × (paid+credit)/total; hold/realized split by credit/paid.
+    /// (b) sale 60 GP 30, return one line, pay 0 → hold 15.
+    /// (c) sale 60 GP 30, pay 30, return one line → hold 0 (cash covers remaining).
+    #[tokio::test]
+    async fn credit_return_profit_hold_partial_and_paid_scenarios() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let context = ctx();
+
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "ProfitQA".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let customer = MasterService::create(
+            &database,
+            MasterKind::Customer,
+            MasterRequest {
+                name: "Profit Return Cust".into(),
+                symbol: None,
+                phone: Some("03001112233".into()),
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: Some(true),
+                previous_balance: None,
+            },
+            Some(&context),
+        )
+        .await
+        .expect("customer");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        // Cost 15, price 30 → GP 15 per line (two lines = 30).
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Profit Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(15, 0),
+                    min: Decimal::new(15, 0),
+                    wholesale: Decimal::new(20, 0),
+                    price: Decimal::new(30, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(500, 0),
+                    cost: Decimal::new(15, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let unit_id = product.sell_units[0].id.clone();
+        let cid = Uuid::parse_str(&customer.id).unwrap();
+
+        let session = AuthService::open_cash_session(
+            &database,
+            &context,
+            CashSessionOpenRequest {
+                opening_float: Decimal::ZERO,
+            },
+        )
+        .await
+        .expect("open cash session");
+        let mut context = context;
+        context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
+
+        // (b) two equal lines, return one, pay 0 → hold 15
+        let sale_b = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "profit-b-60".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![
+                    SaleItemInput {
+                        product_id: product.id.clone(),
+                        product_unit_id: unit_id.clone(),
+                        quantity: Decimal::ONE,
+                        unit_price: Decimal::new(30, 0),
+                        price_mode: "RETAIL".into(),
+                        sold_below_minimum: false,
+                        authorized_by: None,
+                        discount: Decimal::ZERO,
+                        tax: Decimal::ZERO,
+                    },
+                    SaleItemInput {
+                        product_id: product.id.clone(),
+                        product_unit_id: unit_id.clone(),
+                        quantity: Decimal::ONE,
+                        unit_price: Decimal::new(30, 0),
+                        price_mode: "RETAIL".into(),
+                        sold_below_minimum: false,
+                        authorized_by: None,
+                        discount: Decimal::ZERO,
+                        tax: Decimal::ZERO,
+                    },
+                ],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("sale b 60");
+        assert_eq!(sale_b.credit_amount, 60.0);
+        let gp_b: f64 = sale_b.items.iter().map(|i| i.gross_profit).sum();
+        assert!((gp_b - 30.0).abs() < 0.01, "expected GP 30 got {gp_b}");
+
+        CreditService::create_return(
+            &database,
+            &context,
+            CreateReturnRequest {
+                invoice_id: sale_b.id.clone(),
+                return_type: "REFUND".into(),
+                reason: "return one line".into(),
+                notes: None,
+                items: vec![ReturnItemInput {
+                    invoice_item_id: sale_b.items[0].id.clone(),
+                    quantity: Decimal::ONE,
+                    condition: "GOOD".into(),
+                    refund_amount: Decimal::new(30, 0),
+                    original_product_lot_id: None,
+                }],
+                replacements: vec![],
+            },
+        )
+        .await
+        .expect("return one line b");
+        let after_b = SalesService::get(&database, Uuid::parse_str(&sale_b.id).unwrap())
+            .await
+            .expect("after b");
+        assert_eq!(after_b.credit_amount, 30.0);
+        assert_eq!(after_b.payment_status, "PARTIALLY_RETURNED");
+        let hold_b = MasterRepository::find(&database, MasterKind::Customer, cid)
+            .await
+            .expect("cust")
+            .expect("row")
+            .profit_on_hold
+            .unwrap_or(-1.0);
+        assert!(
+            (hold_b - 15.0).abs() < 0.01,
+            "case (b) hold must be 15, got {hold_b}"
+        );
+
+        // Fresh customer for (c): pay 30 then return one line → hold 0
+        let cust_c = MasterService::create(
+            &database,
+            MasterKind::Customer,
+            MasterRequest {
+                name: "Profit Pay Return Cust".into(),
+                symbol: None,
+                phone: Some("03002223344".into()),
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: Some(true),
+                previous_balance: None,
+            },
+            Some(&context),
+        )
+        .await
+        .expect("customer c");
+        let cid_c = Uuid::parse_str(&cust_c.id).unwrap();
+        let sale_c = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "profit-c-60".into(),
+                customer_id: Some(cust_c.id.clone()),
+                items: vec![
+                    SaleItemInput {
+                        product_id: product.id.clone(),
+                        product_unit_id: unit_id.clone(),
+                        quantity: Decimal::ONE,
+                        unit_price: Decimal::new(30, 0),
+                        price_mode: "RETAIL".into(),
+                        sold_below_minimum: false,
+                        authorized_by: None,
+                        discount: Decimal::ZERO,
+                        tax: Decimal::ZERO,
+                    },
+                    SaleItemInput {
+                        product_id: product.id.clone(),
+                        product_unit_id: unit_id.clone(),
+                        quantity: Decimal::ONE,
+                        unit_price: Decimal::new(30, 0),
+                        price_mode: "RETAIL".into(),
+                        sold_below_minimum: false,
+                        authorized_by: None,
+                        discount: Decimal::ZERO,
+                        tax: Decimal::ZERO,
+                    },
+                ],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("sale c 60");
+        CreditService::customer_payment(
+            &database,
+            &context,
+            cid_c,
+            CustomerPaymentRequest {
+                amount: Decimal::new(30, 0),
+                payment_method: "CASH".into(),
+                reference_number: None,
+                notes: None,
+                client_request_id: Some("profit-c-pay".into()),
+            },
+        )
+        .await
+        .expect("pay 30");
+        CreditService::create_return(
+            &database,
+            &context,
+            CreateReturnRequest {
+                invoice_id: sale_c.id.clone(),
+                return_type: "REFUND".into(),
+                reason: "return after pay".into(),
+                notes: None,
+                items: vec![ReturnItemInput {
+                    invoice_item_id: sale_c.items[0].id.clone(),
+                    quantity: Decimal::ONE,
+                    condition: "GOOD".into(),
+                    refund_amount: Decimal::new(30, 0),
+                    original_product_lot_id: None,
+                }],
+                replacements: vec![],
+            },
+        )
+        .await
+        .expect("return one line c");
+        let after_c = SalesService::get(&database, Uuid::parse_str(&sale_c.id).unwrap())
+            .await
+            .expect("after c");
+        assert_eq!(after_c.credit_amount, 0.0);
+        assert_eq!(after_c.paid_amount, 30.0);
+        assert_eq!(after_c.payment_status, "RETURNED");
+        let hold_c = MasterRepository::find(&database, MasterKind::Customer, cid_c)
+            .await
+            .expect("cust c")
+            .expect("row")
+            .profit_on_hold
+            .unwrap_or(-1.0);
+        assert!(
+            (hold_c - 0.0).abs() < 0.01,
+            "case (c) hold must be 0, got {hold_c}"
+        );
+    }
 }

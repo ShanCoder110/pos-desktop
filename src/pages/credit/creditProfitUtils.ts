@@ -42,36 +42,59 @@ export function summarizeCreditLedger(entries: LedgerRow[], balanceAfter?: numbe
 }
 
 /**
- * Calculates the Profit on Hold for an invoice.
- * Option A (Proportional):
- * When unpaid/credit amount is outstanding:
- * profitHold = totalGrossProfit * (creditAmount / total)
- * If total <= 0 or creditAmount <= 0, profitHold is 0.
+ * Net invoice value still on the books after returns (cash received + open credit).
+ * Full return with no cash → 0; RETURNED/PARTIALLY_RETURNED never invent a paid share.
+ */
+export function invoiceNetRemaining(invoice: InvoiceRow): number {
+  const paid = Math.max(0, Number(invoice.paidAmount) || 0);
+  const credit = Math.max(0, Number(invoice.creditAmount) || 0);
+  return +(paid + credit).toFixed(2);
+}
+
+/**
+ * Profit still attributable to non-returned value.
+ * remainingProfit = gross × (paid + credit) / total.
+ * RETURNED with paid=0,credit=0 → 0 (not “fully paid”).
+ */
+export function calculateInvoiceRemainingProfit(invoice: InvoiceRow): number {
+  if (invoice.total <= 0) return 0;
+  const grossProfit = calculateInvoiceGrossProfit(invoice);
+  if (grossProfit <= 0) return 0;
+  const net = invoiceNetRemaining(invoice);
+  if (net <= 0) return 0;
+  const ratio = Math.min(1, Math.max(0, net / invoice.total));
+  return +(grossProfit * ratio).toFixed(4);
+}
+
+/**
+ * Profit on hold = remaining profit × credit / (paid + credit)
+ * ≡ gross × credit / total. Zero when no open credit (incl. full return).
  */
 export function calculateInvoiceProfitHold(invoice: InvoiceRow): number {
   if (invoice.total <= 0 || invoice.creditAmount <= 0) return 0;
   const grossProfit = calculateInvoiceGrossProfit(invoice);
   if (grossProfit <= 0) return 0;
   const ratio = Math.min(1, Math.max(0, invoice.creditAmount / invoice.total));
-  return grossProfit * ratio;
+  return +(grossProfit * ratio).toFixed(4);
 }
 
 /**
- * Calculates the Realized Profit for an invoice so far.
- * Realized tracks the paid share of GP. A full unpaid return (credit=0, paid=0)
- * leaves both hold and realized at 0.
+ * Realized profit = remaining profit × paid / (paid + credit)
+ * ≡ gross × paid / total. Cash only — never treat creditAmount 0 / RETURNED as paid.
  */
 export function calculateInvoiceRealizedProfit(invoice: InvoiceRow): number {
   if (invoice.total <= 0) return 0;
   const grossProfit = calculateInvoiceGrossProfit(invoice);
   if (grossProfit <= 0) return 0;
   const paid = Math.max(0, Number(invoice.paidAmount) || 0);
+  if (paid <= 0) return 0;
   const ratio = Math.min(1, paid / invoice.total);
-  return grossProfit * ratio;
+  return +(grossProfit * ratio).toFixed(4);
 }
 
 /**
  * Aggregates credit stats across a collection of credit invoices.
+ * Realized uses cash paid only — never gross − hold (that treated full returns as paid).
  */
 export function summarizeCreditInvoices(invoices: InvoiceRow[]) {
   let totalInvoiced = 0;
@@ -87,9 +110,10 @@ export function summarizeCreditInvoices(invoices: InvoiceRow[]) {
     totalCreditOutstanding += inv.creditAmount;
     const gross = calculateInvoiceGrossProfit(inv);
     const hold = calculateInvoiceProfitHold(inv);
+    const realized = calculateInvoiceRealizedProfit(inv);
     totalGrossProfit += gross;
     totalProfitOnHold += hold;
-    totalRealizedProfit += Math.max(0, gross - hold);
+    totalRealizedProfit += realized;
   }
 
   return {
@@ -97,8 +121,8 @@ export function summarizeCreditInvoices(invoices: InvoiceRow[]) {
     totalInvoiced,
     totalPaid,
     totalCreditOutstanding,
-    totalGrossProfit,
-    totalProfitOnHold,
-    totalRealizedProfit,
+    totalGrossProfit: +totalGrossProfit.toFixed(2),
+    totalProfitOnHold: +totalProfitOnHold.toFixed(2),
+    totalRealizedProfit: +totalRealizedProfit.toFixed(2),
   };
 }

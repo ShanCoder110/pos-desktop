@@ -3,6 +3,8 @@ import type { InvoiceRow, LedgerRow } from "@/shared/domain/types";
 import {
   calculateInvoiceProfitHold,
   calculateInvoiceRealizedProfit,
+  calculateInvoiceRemainingProfit,
+  summarizeCreditInvoices,
   summarizeCreditLedger,
 } from "@/pages/credit/creditProfitUtils";
 
@@ -97,10 +99,109 @@ describe("invoice profit after return", () => {
     } as InvoiceRow;
   }
 
-  it("full unpaid return: credit 0 → hold 0 and realized 0", () => {
-    const inv = invoice({ creditAmount: 0, paidAmount: 0 });
+  function twoLineSale(
+    overrides: Partial<InvoiceRow> & { creditAmount: number; paidAmount: number },
+  ) {
+    return {
+      id: "inv-60",
+      invoiceNumber: "INV-60",
+      branchId: "b1",
+      customerId: "c1",
+      status: "COMPLETED",
+      paymentStatus: "CREDIT",
+      subtotal: 60,
+      discount: 0,
+      tax: 0,
+      total: 60,
+      changeAmount: 0,
+      items: [
+        {
+          id: "ii-a",
+          productId: "p1",
+          productUnitId: "u1",
+          unitName: "Piece",
+          quantity: 1,
+          baseQuantity: 1,
+          unitPrice: 30,
+          discount: 0,
+          total: 30,
+          fifoCost: 15,
+          grossProfit: 15,
+        },
+        {
+          id: "ii-b",
+          productId: "p1",
+          productUnitId: "u1",
+          unitName: "Piece",
+          quantity: 1,
+          baseQuantity: 1,
+          unitPrice: 30,
+          discount: 0,
+          total: 30,
+          fifoCost: 15,
+          grossProfit: 15,
+        },
+      ],
+      notes: "",
+      createdBy: "u1",
+      createdAt: "2026-10-17T00:00:00Z",
+      ...overrides,
+    } as InvoiceRow;
+  }
+
+  it("(a) sale 40 profit 24, full return: held 0, realized 0", () => {
+    const inv = invoice({
+      creditAmount: 0,
+      paidAmount: 0,
+      paymentStatus: "RETURNED",
+    });
+    expect(calculateInvoiceRemainingProfit(inv)).toBe(0);
     expect(calculateInvoiceProfitHold(inv)).toBe(0);
     expect(calculateInvoiceRealizedProfit(inv)).toBe(0);
+    expect(summarizeCreditInvoices([inv])).toMatchObject({
+      totalProfitOnHold: 0,
+      totalRealizedProfit: 0,
+    });
+  });
+
+  it("RETURNED / credit 0 is never treated as fully paid for realized", () => {
+    const inv = invoice({
+      creditAmount: 0,
+      paidAmount: 0,
+      paymentStatus: "RETURNED",
+    });
+    // Regression: gross − hold would have been 24
+    expect(summarizeCreditInvoices([inv]).totalRealizedProfit).toBe(0);
+  });
+
+  it("(b) sale 60 profit 30, return 1 line, pay 0: held 15, realized 0", () => {
+    const inv = twoLineSale({
+      creditAmount: 30,
+      paidAmount: 0,
+      paymentStatus: "PARTIALLY_RETURNED",
+    });
+    expect(calculateInvoiceRemainingProfit(inv)).toBe(15);
+    expect(calculateInvoiceProfitHold(inv)).toBe(15);
+    expect(calculateInvoiceRealizedProfit(inv)).toBe(0);
+    expect(summarizeCreditInvoices([inv])).toMatchObject({
+      totalProfitOnHold: 15,
+      totalRealizedProfit: 0,
+    });
+  });
+
+  it("(c) sale 60 profit 30, pay 30, return 1 line: realized 15, held 0", () => {
+    const inv = twoLineSale({
+      creditAmount: 0,
+      paidAmount: 30,
+      paymentStatus: "RETURNED",
+    });
+    expect(calculateInvoiceRemainingProfit(inv)).toBe(15);
+    expect(calculateInvoiceProfitHold(inv)).toBe(0);
+    expect(calculateInvoiceRealizedProfit(inv)).toBe(15);
+    expect(summarizeCreditInvoices([inv])).toMatchObject({
+      totalProfitOnHold: 0,
+      totalRealizedProfit: 15,
+    });
   });
 
   it("partial credit remaining: hold is proportional to credit/total", () => {

@@ -131,4 +131,128 @@ mod tests {
         let count: i64 = user_count.try_get("", "count").expect("read user count");
         assert_eq!(count, 0, "owner is created during onboarding, not seed");
     }
+
+    /// Confirms m20261017_000019 ran on a DB that already had invoice rows: CHECK
+    /// accepts RETURNED / PARTIALLY_RETURNED, and the backfill rewrites stale PAID
+    /// full-return rows (credit 0, paid 0, with a sale_return) to RETURNED.
+    #[tokio::test]
+    async fn invoice_return_payment_status_migration_accepts_and_backfills() {
+        let database = Database::connect("sqlite::memory:")
+            .await
+            .expect("connect in-memory sqlite");
+        Migrator::up(&database, None)
+            .await
+            .expect("apply all migrations including return payment_status");
+
+        let applied = database
+            .query_one_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "SELECT version FROM seaql_migrations WHERE version = 'm20261017_000019_invoice_return_payment_status'".to_owned(),
+            ))
+            .await
+            .expect("query migrations")
+            .expect("migration 000019 must be recorded");
+        let version: String = applied.try_get("", "version").expect("version");
+        assert_eq!(version, "m20261017_000019_invoice_return_payment_status");
+        eprintln!("ok: migration {version} applied on existing schema path");
+
+        // Seed minimal FKs for an invoice that looks like a pre-fix full return
+        // (PAID + Paid Rs 0) so backfill SQL can be re-checked idempotently.
+        database
+            .execute_unprepared("PRAGMA foreign_keys = OFF")
+            .await
+            .expect("fk off for fixture insert");
+        database
+            .execute_unprepared(
+                "INSERT INTO users (id, name, username, password_hash, role, is_active, created_at, updated_at)
+                 VALUES ('20000000-0000-4000-8000-000000000002', 'Owner', 'owner', 'x', 'OWNER', 1, '2026-10-17T00:00:00Z', '2026-10-17T00:00:00Z')",
+            )
+            .await
+            .expect("user");
+        database
+            .execute_unprepared(
+                "INSERT INTO invoices (
+                    id, branch_id, customer_id, invoice_number, status, payment_status,
+                    subtotal, discount, tax, total, paid_amount, credit_amount, change_amount,
+                    created_by, cashier_name_snapshot, client_request_id,
+                    version, created_at, updated_at
+                 ) VALUES (
+                    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                    '20000000-0000-4000-8000-000000000001',
+                    NULL,
+                    'INV-MIG-1',
+                    'COMPLETED',
+                    'PAID',
+                    40, 0, 0, 40, 0, 0, 0,
+                    '20000000-0000-4000-8000-000000000002',
+                    'Owner',
+                    'mig-return-1',
+                    1,
+                    '2026-10-17T00:00:00Z',
+                    '2026-10-17T00:00:00Z'
+                 )",
+            )
+            .await
+            .expect("stale PAID invoice with paid 0");
+        database
+            .execute_unprepared(
+                "INSERT INTO sale_returns (
+                    id, return_number, invoice_id, branch_id, customer_id, type, status,
+                    reason, refund_amount, created_by, created_at
+                 ) VALUES (
+                    'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                    'RET-MIG-1',
+                    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                    '20000000-0000-4000-8000-000000000001',
+                    NULL,
+                    'REFUND',
+                    'COMPLETED',
+                    'full return',
+                    40,
+                    '20000000-0000-4000-8000-000000000002',
+                    '2026-10-17T00:00:00Z'
+                 )",
+            )
+            .await
+            .expect("sale_return for backfill");
+        database
+            .execute_unprepared("PRAGMA foreign_keys = ON")
+            .await
+            .expect("fk on");
+
+        // Re-run backfill statements (idempotent with migration SQL).
+        database
+            .execute_unprepared(
+                "UPDATE invoices
+                 SET payment_status = 'RETURNED'
+                 WHERE deleted_at IS NULL
+                   AND credit_amount = 0
+                   AND paid_amount = 0
+                   AND payment_status IN ('PAID', 'CREDIT', 'PARTIAL')
+                   AND EXISTS (SELECT 1 FROM sale_returns sr WHERE sr.invoice_id = invoices.id)",
+            )
+            .await
+            .expect("backfill RETURNED");
+
+        let status = database
+            .query_one_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "SELECT payment_status FROM invoices WHERE invoice_number = 'INV-MIG-1'".to_owned(),
+            ))
+            .await
+            .expect("read status")
+            .expect("invoice row");
+        let payment_status: String = status.try_get("", "payment_status").expect("ps");
+        assert_eq!(payment_status, "RETURNED");
+        eprintln!("ok: backfill rewrote stale PAID full-return row to RETURNED");
+
+        // CHECK must allow PARTIALLY_RETURNED on an existing row.
+        database
+            .execute_unprepared(
+                "UPDATE invoices SET payment_status = 'PARTIALLY_RETURNED', credit_amount = 20 WHERE invoice_number = 'INV-MIG-1'",
+            )
+            .await
+            .expect("PARTIALLY_RETURNED must satisfy invoices CHECK after migration");
+        eprintln!("ok: PARTIALLY_RETURNED accepted by post-migration CHECK");
+    }
 }
