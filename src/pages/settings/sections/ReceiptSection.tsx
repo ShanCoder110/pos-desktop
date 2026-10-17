@@ -1,13 +1,15 @@
 import { Field, SelectInput, TextArea, TextInput, Toggle } from "@/components/common";
+import { RECEIPT_FONT_OPTIONS } from "@/shared/constants/receiptBranding";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { SettingsSection } from "@/pages/settings/SettingsSection";
 import { ReceiptPreview } from "@/pages/settings/sections/ReceiptPreview";
 import { useSettings, useSettingsForm } from "@/shared/settings";
-import type { PaperWidth } from "@/shared/types";
+import type { PaperWidth, ReceiptFontFamily } from "@/shared/types";
 
 const KEYS = [
   "invoicePrefix",
   "paperWidth",
+  "receiptFontFamily",
   "footer",
   "tagline",
   "contactLine",
@@ -58,6 +60,20 @@ export function ReceiptSection() {
               </SelectInput>
             </Field>
           </div>
+          <Field label="Invoice font" hint="Applies to slip preview and print (Urdu stays Nastaleeq)">
+            <SelectInput
+              value={draft.receiptFontFamily}
+              onChange={(e) =>
+                patch({ receiptFontFamily: e.target.value as ReceiptFontFamily })
+              }
+            >
+              {RECEIPT_FONT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </SelectInput>
+          </Field>
           <Field label="Shop name on slip">
             <TextInput
               value={draft.receiptShopName}

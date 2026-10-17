@@ -75,15 +75,13 @@ export function PosSaleEntryControls({
       <div
         className="price-mode flex shrink-0 self-stretch rounded-md border border-[#c7d2fe] bg-paper p-[3px]"
         role="group"
-        aria-label="Price mode"
-        style={{ opacity: hasProduct ? 1 : 0.45, pointerEvents: hasProduct ? "auto" : "none" }}
+        aria-label="Default price for search and new lines"
       >
         {(["retail", "wholesale"] as const).map((mode) => (
           <button
             key={mode}
             type="button"
             className={`mode-btn inline-flex min-w-[72px] flex-col items-center justify-center rounded-[5px] border-0 bg-transparent px-2.5 text-[12px] font-semibold capitalize text-sub ${priceMode === mode ? "is-active" : ""}`}
-            disabled={!hasProduct}
             onClick={() => onPriceMode(mode)}
           >
             {mode}

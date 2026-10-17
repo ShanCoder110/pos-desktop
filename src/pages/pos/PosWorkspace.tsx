@@ -24,6 +24,7 @@ import {
 import { PrintPreview } from "@/components/print/PrintPreview";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { toaster } from "@/components/common/Toast";
+import { CartUnitDropdown } from "@/pages/pos/CartUnitDropdown";
 import { PosProductSearch, type PosSearchResult } from "@/pages/pos/PosProductSearch";
 import { PosSaleEntryControls } from "@/pages/pos/PosSaleEntryControls";
 import { PosBillsMenu, PosFunctionBar, PosLoadingOverlay } from "@/pages/pos/PosChrome";
@@ -53,7 +54,7 @@ import {
   productTotalStock,
 } from "@/utils/productStock";
 import { consumeLots } from "@/utils/lots";
-import { buildReceiptText, whatsAppShareUrl } from "@/utils/receiptShare";
+import { buildReceiptText, openWhatsAppReceipt } from "@/utils/receiptShare";
 import { ensureCashSession, ensureSession } from "@/services/auth";
 import { listAllProducts, searchAllProducts } from "@/services/products";
 import { createMasterRecord, listAllMasterRecords } from "@/services/masters";
@@ -163,6 +164,27 @@ function prettyUnit(u: string) {
       >
     )[u] || u
   );
+}
+
+/** Cart / search unit label — e.g. Pack ×12 when containment > 1. */
+function formatSellUnitLabel(unit: ProductSellUnit | undefined, fallback = "Unit") {
+  if (!unit) return fallback;
+  const name = unit.name || unit.symbol || fallback;
+  const n = stockPerUnit(unit);
+  return n > 1 ? `${name} ×${qtyStr(n)}` : name;
+}
+
+function formatCmwrPrices(unit: {
+  cost?: number;
+  min?: number;
+  wholesale?: number;
+  price?: number;
+}) {
+  const c = Number(unit.cost) || 0;
+  const m = Number(unit.min) || 0;
+  const w = Number(unit.wholesale) || 0;
+  const r = Number(unit.price) || 0;
+  return `C ${moneyNum(c)} · M ${moneyNum(m)} · W ${moneyNum(w)} · R ${moneyNum(r)}`;
 }
 function packOf(p: Product) {
   return p.packQty && p.packQty > 1 ? p.packQty : 0;
@@ -1039,7 +1061,7 @@ export function PosWorkspace() {
     setQuery("");
     setQtyInput("1");
     setRoundTarget(0);
-    showToast("Added");
+    if (!editInvoiceId) showToast("Added");
     focusSearch(false);
   }
 
@@ -1164,20 +1186,13 @@ export function PosWorkspace() {
     setRoundTarget(0);
   }
 
-  function convertUnit(id: string, to: SellUnit) {
+  function convertCartUnitId(id: string, productUnitId: string) {
     setCart((prev) =>
       prev.map((item) => {
-        if (item.id !== id) return item;
+        if (item.id !== id || item.productUnitId === productUnitId) return item;
         const p = products.find((x) => x.id === item.productId);
         if (!p) return item;
-        const packN = packOf(p);
-        if (!packN) return item;
-        const wantPack = to === "pack";
-        const isPack = item.sellUnit !== item.baseUnit && item.packSize > 1;
-        if (wantPack === isPack) return item;
-        const target = sellUnitOf(p, to);
-        if (!target?.id) return item;
-        const converted = convertLineToUnit(p, item.baseQty, item.priceMode, target.id);
+        const converted = convertLineToUnit(p, item.baseQty, item.priceMode, productUnitId);
         if (!converted) return item;
         return recompute({
           ...item,
@@ -1186,6 +1201,7 @@ export function PosWorkspace() {
         });
       }),
     );
+    setRoundTarget(0);
   }
 
   function setLineMode(id: string, mode: PriceMode) {
@@ -1703,9 +1719,17 @@ export function PosWorkspace() {
         const available = availableInUnit(unit, left);
         return {
           product,
-          unitLabel: unit?.name || unit?.symbol || prettyUnit(product.unit),
-          availableLabel: `${qtyStr(available)} ${unit?.name || unit?.symbol || product.unit}`,
+          unitLabel: formatSellUnitLabel(unit, prettyUnit(product.unit)),
+          availableLabel: `${qtyStr(available)} ${formatSellUnitLabel(unit, product.unit)}`,
           priceLabel: money(listPrice(product, priceMode, unit?.id)),
+          tierLabel: formatCmwrPrices(
+            unit ?? {
+              cost: product.cost,
+              min: product.min,
+              wholesale: product.wholesale,
+              price: product.retail,
+            },
+          ),
           stockTitle: posStockLabel(product, sessionBranchId),
           low: lowStock(product, left),
           out: available <= 0,
@@ -1847,7 +1871,7 @@ export function PosWorkspace() {
                 pending
                   ? unitsForProduct(pending).map((unit) => ({
                       id: unit.id,
-                      label: `${unit.name || unit.symbol || prettyUnit(pending.unit)}${unit.contains > 1 && stockPerUnit(unit) > 1 ? ` ×${unit.contains}` : ""}`,
+                      label: formatSellUnitLabel(unit, prettyUnit(pending.unit)),
                     }))
                   : []
               }
@@ -1873,7 +1897,15 @@ export function PosWorkspace() {
                 unitBtnRefs.current[unitId] = element;
               }}
               onUnitKeyDown={onUnitKey}
-              onPriceMode={setPriceMode}
+              onPriceMode={(mode) => {
+                const walkIn = customers.find((c) => c.id === customerId)?.isWalking;
+                if (walkIn && mode === "wholesale") {
+                  setPriceMode("retail");
+                  showToast("Walk-in uses retail");
+                  return;
+                }
+                setPriceMode(mode);
+              }}
               onQuantity={setQtyInput}
               onQuantityKeyDown={(event) => {
                 if (event.key === "Enter") {
@@ -1953,8 +1985,9 @@ export function PosWorkspace() {
                       #
                     </th>
                     <th className="c-item [width:auto] [text-align:left]">Item</th>
-                    <th className="c-stock [width:108px] [text-align:right]">Stock</th>
-                    <th className="c-qty [width:118px] [text-align:right]">Qty</th>
+                    <th className="c-unit [width:112px] [text-align:left]">Unit</th>
+                    <th className="c-stock [width:120px] [text-align:right]">Stock</th>
+                    <th className="c-qty [width:136px] [text-align:right]">Qty</th>
                     <th className="c-price [width:126px] [text-align:right]">Price</th>
                     <th className="c-disc [width:88px] [text-align:right]">Disc</th>
                     <th className="c-amt [width:112px] [text-align:right]">Amount</th>
@@ -1964,8 +1997,12 @@ export function PosWorkspace() {
                 <tbody>
                   {cart.map((item, i) => {
                     const left = cartStock(item.productId);
-                    const packN = item.packSize > 1 ? item.packSize : 0;
-                    const isPack = item.sellUnit !== item.baseUnit;
+                    const product = products.find((x) => x.id === item.productId);
+                    const lineUnits = product ? unitsForProduct(product) : [];
+                    const activeUnit =
+                      lineUnits.find((u) => u.id === item.productUnitId) ??
+                      (product ? resolveSellUnit(product, item.productUnitId) : undefined);
+                    const isPack = item.sellUnit !== item.baseUnit && item.packSize > 1;
                     return (
                       <tr
                         key={item.id}
@@ -1980,39 +2017,17 @@ export function PosWorkspace() {
                             <span className="name-text">{item.name}</span>
                           </span>
                           <span className="item-sku [font-size:11px] [color:var(--muted)] [font-family:var(--mono)] [display:block]">
-                            {item.sku} · {qtyStr(item.qty)} {prettyUnit(item.sellUnit)}
+                            {item.sku} · {qtyStr(item.qty)}{" "}
+                            {formatSellUnitLabel(activeUnit, prettyUnit(item.sellUnit))}
                             {isPack
                               ? ` = ${qtyStr(item.baseQty)} ${prettyUnit(item.baseUnit)}`
                               : ""}
                           </span>
-                          {packN ? (
-                            <span className="line-units [display:inline-flex] [gap:3px] [margin-top:4px] [margin-right:6px]">
-                              <button
-                                type="button"
-                                className={!isPack ? "is-active" : ""}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  convertUnit(item.id, "base");
-                                }}
-                              >
-                                {prettyUnit(item.baseUnit)}
-                              </button>
-                              <button
-                                type="button"
-                                className={isPack ? "is-active" : ""}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  convertUnit(item.id, "pack");
-                                }}
-                              >
-                                Pack of {packN}
-                              </button>
+                          {activeUnit ? (
+                            <span className="cart-cmwr" title="Cost · Min · Wholesale · Retail">
+                              {formatCmwrPrices(activeUnit)}
                             </span>
-                          ) : (
-                            <span className="unit-badge [display:inline-block] [margin-left:6px] [padding:1px_7px] [background:var(--accent-bg)] [color:#0f766e] [border-radius:99px] [font-size:11px] [font-weight:700] [font-family:var(--mono)] [vertical-align:middle]">
-                              {prettyUnit(item.sellUnit)}
-                            </span>
-                          )}
+                          ) : null}
                           <span
                             className="line-units line-price [display:inline-flex] [gap:3px] [margin-top:4px] [margin-right:6px]"
                             role="group"
@@ -2053,7 +2068,19 @@ export function PosWorkspace() {
                             </button>
                           </span>
                         </td>
-                        <td className="c-stock [width:108px] [text-align:right]">
+                        <td className="c-unit [width:120px] [text-align:left] [vertical-align:middle]">
+                          <CartUnitDropdown
+                            label={formatSellUnitLabel(activeUnit, prettyUnit(item.sellUnit))}
+                            value={item.productUnitId}
+                            ariaLabel={`Unit for ${item.name}`}
+                            options={lineUnits.map((unit) => ({
+                              id: unit.id,
+                              label: formatSellUnitLabel(unit, prettyUnit(item.baseUnit)),
+                            }))}
+                            onChange={(unitId) => convertCartUnitId(item.id, unitId)}
+                          />
+                        </td>
+                        <td className="c-stock [width:120px] [text-align:right]">
                           <span
                             className={`stock-val [font-family:var(--mono)] [font-size:12px] [color:var(--sub)] [white-space:nowrap] [display:inline-flex] [align-items:center] [justify-content:flex-end] [gap:4px] ${left < 10 ? "is-low" : ""}`}
                           >
@@ -2066,8 +2093,8 @@ export function PosWorkspace() {
                             </span>
                           </span>
                         </td>
-                        <td className="c-qty [width:118px] [text-align:right]">
-                          <div className="qty-step [display:flex] [align-items:center] [justify-content:flex-end] [gap:2px]">
+                        <td className="c-qty [width:136px] [text-align:right]">
+                          <div className="qty-step">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -2757,7 +2784,6 @@ export function PosWorkspace() {
             <button
               type="button"
               className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-wa"
-              disabled={!displayCustomer.phone}
               onClick={() => {
                 if (!displayCustomer.phone) {
                   showToast("No phone on this customer");
@@ -2777,7 +2803,9 @@ export function PosWorkspace() {
                   balanceAfter,
                   invoiceNumber: receiptInvoiceNo || undefined,
                 });
-                window.open(whatsAppShareUrl(displayCustomer.phone, text), "_blank", "noopener");
+                void openWhatsAppReceipt(displayCustomer.phone, text).catch(() =>
+                  showToast("Could not open WhatsApp"),
+                );
               }}
             >
               WhatsApp

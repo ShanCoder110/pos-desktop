@@ -6,6 +6,8 @@ export type PosSearchResult = {
   unitLabel: string;
   availableLabel: string;
   priceLabel: string;
+  /** Cost · Min · Wholesale · Retail (small line under price). */
+  tierLabel?: string;
   stockTitle: string;
   low: boolean;
   out: boolean;
@@ -177,7 +179,7 @@ export function PosProductSearch({
             <button
               key={result.product.id}
               type="button"
-              className={`search-hit grid min-h-12 w-full grid-cols-[60px_1fr_auto_auto] items-center gap-2 border-0 border-b border-line bg-transparent px-2.5 py-1 text-left text-[13px] ${index === activeIndex ? "is-active" : ""} ${result.low ? "is-low" : ""} ${result.out ? "is-out" : ""}`}
+              className={`search-hit grid min-h-12 w-full grid-cols-[56px_minmax(0,1fr)_minmax(92px,auto)_minmax(118px,auto)] items-center gap-x-2.5 gap-y-0 border-0 border-b border-line bg-transparent px-2.5 py-1.5 text-left text-[13px] ${index === activeIndex ? "is-active" : ""} ${result.low ? "is-low" : ""} ${result.out ? "is-out" : ""}`}
               onMouseEnter={() => onActiveIndex(index)}
               onMouseDown={(event) => {
                 event.preventDefault();
@@ -195,9 +197,22 @@ export function PosProductSearch({
                 className={`stock ${result.low ? "is-low" : ""} ${result.out ? "is-over" : ""}`}
                 title={result.stockTitle}
               >
-                {result.availableLabel}
+                {result.low || result.out ? (
+                  <svg className="warn-ico" viewBox="0 0 20 20" aria-hidden="true">
+                    <path
+                      fill="currentColor"
+                      d="M10.02 3.2a1.1 1.1 0 00-1.94 0L1.3 16.05A1.1 1.1 0 002.27 17.7h15.46a1.1 1.1 0 00.97-1.65L10.02 3.2zM10 8.2c.4 0 .7.32.7.72v3.96a.7.7 0 01-1.4 0V8.92c0-.4.3-.72.7-.72zm0 7.1a.85.85 0 110-1.7.85.85 0 010 1.7z"
+                    />
+                  </svg>
+                ) : null}
+                <span className="stock-qty">{result.availableLabel}</span>
               </span>
-              <span className="price text-right">{result.priceLabel}</span>
+              <span className="price text-right">
+                <strong className="price-main">{result.priceLabel}</strong>
+                {result.tierLabel ? (
+                  <small className="price-tiers">{result.tierLabel}</small>
+                ) : null}
+              </span>
             </button>
           ))}
       </div>

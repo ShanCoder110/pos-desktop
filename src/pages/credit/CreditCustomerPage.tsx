@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, CreditCard, History, Pencil, Plus, Receipt, Trash2 } from "lucide-react";
+import { ArrowLeft, CreditCard, Eye, History, Pencil, Plus, Receipt, Trash2 } from "lucide-react";
 import {
   Badge,
   Button,
@@ -20,6 +20,11 @@ import {
   Th,
   toaster,
 } from "@/components/common";
+import {
+  canOpenInvoicePosEdit,
+  invoicePosEditBlockReason,
+  invoicePosEditSearch,
+} from "@/utils/invoicePosEdit";
 import {
   CREDIT_SALE_FORM_ID,
   CreditSaleForm,
@@ -115,6 +120,7 @@ export function CreditCustomerPage() {
   const [saleOpen, setSaleOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [openInvoice, setOpenInvoice] = useState<InvoiceRow | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -192,6 +198,8 @@ export function CreditCustomerPage() {
       creditInvoices.flatMap((inv) =>
         inv.items.map((item) => ({
           id: item.id,
+          invoiceId: inv.id,
+          invoiceNumber: inv.invoiceNumber,
           date: inv.createdAt,
           productName: item.productName || "Product",
           sku: item.sku,
@@ -204,6 +212,16 @@ export function CreditCustomerPage() {
       ),
     [creditInvoices],
   );
+
+  function openInvoiceInPos(invoiceId: string) {
+    setOpenInvoice(null);
+    navigate({ pathname: routes.pos, search: invoicePosEditSearch(invoiceId) });
+  }
+
+  function viewInvoice(invoiceId: string) {
+    const row = allInvoices.find((inv) => inv.id === invoiceId) ?? null;
+    setOpenInvoice(row);
+  }
 
   async function saveCreditSale(lines: CreditSaleLine[], notes: string) {
     if (!customer) return;
@@ -409,22 +427,25 @@ export function CreditCustomerPage() {
             <THead>
               <tr>
                 <Th>Date</Th>
+                <Th>Invoice</Th>
                 <Th>Product</Th>
                 <Th>Quantity</Th>
                 <Th>Unit price</Th>
                 <Th>Line total</Th>
                 <Th>Gross profit</Th>
+                <Th />
               </tr>
             </THead>
             <tbody>
               {loading ? (
-                <EmptyRow cols={6} text="Loading credit sales…" />
+                <EmptyRow cols={8} text="Loading credit sales…" />
               ) : creditSaleLines.length === 0 ? (
-                <EmptyRow cols={6} text={CREDIT_COPY.noCreditSales} />
+                <EmptyRow cols={8} text={CREDIT_COPY.noCreditSales} />
               ) : (
                 creditSaleLines.map((line) => (
                   <tr key={line.id}>
                     <Td>{formatTableDateTime(line.date)}</Td>
+                    <Td className="font-medium text-ink">#{line.invoiceNumber}</Td>
                     <Td>
                       <div className="font-medium text-ink">{line.productName}</div>
                       {line.sku ? (
@@ -440,6 +461,17 @@ export function CreditCustomerPage() {
                     </Td>
                     <Td numeric className="text-muted">
                       {line.grossProfit !== undefined ? money(line.grossProfit) : "—"}
+                    </Td>
+                    <Td>
+                      <div className="flex flex-wrap items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          icon={<Eye size={14} />}
+                          onClick={() => viewInvoice(line.invoiceId)}
+                        >
+                          View
+                        </Button>
+                      </div>
                     </Td>
                   </tr>
                 ))
@@ -464,13 +496,14 @@ export function CreditCustomerPage() {
                   <Th>Paid</Th>
                   <Th>Credit</Th>
                   <Th>Status</Th>
+                  <Th />
                 </tr>
               </THead>
               <tbody>
                 {loading ? (
-                  <EmptyRow cols={7} text="Loading invoices…" />
+                  <EmptyRow cols={8} text="Loading invoices…" />
                 ) : allInvoices.length === 0 ? (
-                  <EmptyRow cols={7} text="No invoices found." />
+                  <EmptyRow cols={8} text="No invoices found." />
                 ) : (
                   allInvoices.map((inv) => (
                     <tr key={inv.id}>
@@ -493,6 +526,29 @@ export function CreditCustomerPage() {
                         <Badge tone={paymentStatusTone(inv.paymentStatus)}>
                           {inv.paymentStatus}
                         </Badge>
+                      </Td>
+                      <Td>
+                        <div className="flex flex-wrap items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            icon={<Eye size={14} />}
+                            onClick={() => setOpenInvoice(inv)}
+                          >
+                            View
+                          </Button>
+                          {inv.status === "COMPLETED" ? (
+                            <span title={invoicePosEditBlockReason(inv) ?? undefined}>
+                              <Button
+                                variant="ghost"
+                                icon={<Pencil size={14} />}
+                                disabled={!canOpenInvoicePosEdit(inv)}
+                                onClick={() => openInvoiceInPos(inv.id)}
+                              >
+                                Edit
+                              </Button>
+                            </span>
+                          ) : null}
+                        </div>
                       </Td>
                     </tr>
                   ))
@@ -694,6 +750,87 @@ export function CreditCustomerPage() {
             customer={customer}
             onValid={saveCustomerEdit}
           />
+        ) : null}
+      </Drawer>
+
+      <Drawer
+        open={Boolean(openInvoice)}
+        title={openInvoice ? `#${openInvoice.invoiceNumber}` : "Invoice"}
+        subtitle={
+          openInvoice
+            ? `${formatTableDateTime(openInvoice.createdAt)} · ${openInvoice.paymentStatus}`
+            : undefined
+        }
+        onClose={() => setOpenInvoice(null)}
+        footer={
+          <div className="flex w-full flex-wrap justify-end gap-2">
+            {openInvoice?.status === "COMPLETED" ? (
+              <span title={invoicePosEditBlockReason(openInvoice) ?? undefined}>
+                <Button
+                  variant="outline"
+                  icon={<Pencil size={14} />}
+                  disabled={!canOpenInvoicePosEdit(openInvoice)}
+                  onClick={() => openInvoiceInPos(openInvoice.id)}
+                >
+                  Edit in POS
+                </Button>
+              </span>
+            ) : null}
+            <Button onClick={() => setOpenInvoice(null)}>Close</Button>
+          </div>
+        }
+      >
+        {openInvoice ? (
+          <div className="grid gap-3">
+            <div className="grid grid-cols-3 gap-2 rounded-xl border border-line bg-bg/50 p-3 text-[12px]">
+              <div>
+                <span className="block text-muted">Total</span>
+                <strong className="text-ink">{money(openInvoice.total)}</strong>
+              </div>
+              <div>
+                <span className="block text-muted">Paid</span>
+                <strong className="text-[var(--ok)]">{money(openInvoice.paidAmount)}</strong>
+              </div>
+              <div>
+                <span className="block text-muted">Credit</span>
+                <strong
+                  className={
+                    openInvoice.creditAmount > 0 ? "text-[var(--danger)]" : "text-muted"
+                  }
+                >
+                  {money(openInvoice.creditAmount)}
+                </strong>
+              </div>
+            </div>
+            <Table>
+              <THead>
+                <tr>
+                  <Th>Product</Th>
+                  <Th>Qty</Th>
+                  <Th>Price</Th>
+                  <Th>Total</Th>
+                </tr>
+              </THead>
+              <tbody>
+                {openInvoice.items.length === 0 ? <EmptyRow cols={4} /> : null}
+                {openInvoice.items.map((item) => (
+                  <tr key={item.id}>
+                    <Td>
+                      <span className="font-semibold text-ink">{item.productName}</span>
+                      {item.sku ? (
+                        <span className="block text-[10px] text-muted">{item.sku}</span>
+                      ) : null}
+                    </Td>
+                    <Td numeric>
+                      {item.quantity} {item.unitName}
+                    </Td>
+                    <Td numeric>{money(item.unitPrice)}</Td>
+                    <Td numeric>{money(item.total)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
         ) : null}
       </Drawer>
 

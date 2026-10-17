@@ -742,33 +742,164 @@ input[type="number"]::-webkit-outer-spin-button {
   display: block;
 }
 .search-hit .stock {
-  font-size: 11px;
-  color: var(--muted);
+  justify-self: end;
+  min-width: 92px;
+  max-width: 140px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink2);
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  justify-content: flex-end;
+  gap: 4px;
   white-space: nowrap;
+  line-height: 1.2;
+}
+.search-hit .stock-qty {
+  font-weight: 700;
 }
 .search-hit .stock.is-low {
-  color: var(--warn-ink);
-  font-weight: 700;
+  color: #a16207;
   background: var(--warn-fill);
-  border-radius: 4px;
-  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  border-radius: 5px;
+  padding: 3px 7px;
 }
 .search-hit .stock.is-over {
   color: var(--danger);
-  font-weight: 700;
+  background: color-mix(in srgb, var(--danger) 10%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: 5px;
+  padding: 3px 7px;
 }
 .search-hit .stock .warn-ico {
-  width: 11px;
-  height: 11px;
-  color: var(--warn);
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: inherit;
   display: block;
+}
+.search-hit .stock.is-low .warn-ico {
+  color: #ca8a04;
+}
+.search-hit .stock.is-over .warn-ico {
+  color: var(--danger);
 }
 .search-hit .price {
   font-family: var(--mono);
   font-weight: 600;
+  display: grid;
+  justify-items: end;
+  gap: 1px;
+  line-height: 1.2;
+}
+.search-hit .price-main {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.search-hit .price-tiers {
+  display: block;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.cart-cmwr {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.cart-table th.c-unit,
+.cart-table td.c-unit {
+  width: 120px;
+  padding-right: 8px;
+}
+.cart-unit-dd {
+  position: relative;
+  display: inline-block;
+  max-width: 112px;
+  vertical-align: middle;
+}
+.cart-unit-dd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cart-unit-dd-btn.is-open,
+.cart-unit-dd-btn:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+.cart-unit-dd-btn span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cart-unit-dd-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  min-width: 100%;
+  width: max-content;
+  max-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+}
+.cart-unit-dd-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: left;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.cart-unit-dd-menu button:hover,
+.cart-unit-dd-menu button.is-active {
+  background: var(--accent-bg);
+  color: var(--accent-deep);
+}
+.cart-unit-badge {
+  display: inline-block;
+  min-height: 28px;
+  line-height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--accent-bg);
+  color: var(--accent-deep);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
 }
 .search-empty {
   padding: 12px;
@@ -967,24 +1098,46 @@ input[type="number"]::-webkit-outer-spin-button {
   border-radius: 4px;
   padding: 3px 6px;
 }
+.cart-table td.c-stock {
+  padding-right: 12px;
+  overflow: hidden;
+}
+.cart-table td.c-qty {
+  padding-left: 12px;
+  padding-right: 6px;
+  overflow: visible;
+}
+.qty-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+}
 .qty-step button {
-  width: 22px;
-  height: 26px;
+  width: 24px;
+  height: 28px;
   border: 1px solid #fcd34d;
   background: #fffbeb;
   border-radius: 4px;
   cursor: pointer;
   font-weight: 700;
   color: #b45309;
-  flex-shrink: 0;
+  flex: 0 0 24px;
 }
 .qty-step button:hover {
   background: #fde68a;
 }
-.qty-step input {
-  width: 52px;
-  flex: 1;
-  min-width: 0;
+/* Override .cart-table input { width:100% } so − / qty / + stay in the Qty cell */
+.cart-table .qty-step input {
+  width: 44px !important;
+  flex: 0 0 44px;
+  min-width: 44px;
+  max-width: 44px;
+  height: 28px;
+  padding: 0 2px;
 }
 .item-name .name-text {
   min-width: 0;
@@ -2211,10 +2364,10 @@ input[type="number"]::-webkit-outer-spin-button {
     display: none;
   }
   .c-stock {
-    width: 80px;
+    width: 100px;
   }
   .c-qty {
-    width: 108px;
+    width: 128px;
   }
   .c-price {
     width: 88px;
@@ -3772,6 +3925,28 @@ html[data-theme="dark"] .pos-workspace .cart-table th {
   border-bottom-color: #4a4e54;
 }
 
+html[data-theme="dark"] .pos-workspace .cart-unit-dd-btn {
+  background: #2e3034;
+  border-color: #5c6168;
+  color: #e8eaed;
+}
+html[data-theme="dark"] .pos-workspace .cart-unit-dd-menu {
+  background: #2e3034;
+  border-color: #5c6168;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
+}
+html[data-theme="dark"] .pos-workspace .cart-unit-dd-menu button {
+  color: #e8eaed;
+}
+html[data-theme="dark"] .pos-workspace .cart-unit-dd-menu button:hover,
+html[data-theme="dark"] .pos-workspace .cart-unit-dd-menu button.is-active {
+  background: color-mix(in srgb, var(--accent) 22%, #2e3034);
+  color: #99f6e4;
+}
+html[data-theme="dark"] .pos-workspace .cart-unit-badge {
+  background: color-mix(in srgb, var(--accent) 18%, #2e3034);
+  color: #99f6e4;
+}
 html[data-theme="dark"] .pos-workspace .cart-table th.c-stock {
   color: #e8c27a;
   background: #3a3426;

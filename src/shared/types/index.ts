@@ -1,6 +1,9 @@
+import type { ReceiptFontFamily } from "@/shared/constants/receiptBranding";
+
 export type StockPick = "oldest" | "newest" | "ask";
 export type PrintSize = "thermal" | "a4";
 export type PaperWidth = "MM_58" | "MM_80" | "A4";
+export type { ReceiptFontFamily };
 export type AppLanguage = "EN" | "UR";
 export type BranchKind = "retail" | "repair";
 export type Unit = "pc" | "m";
@@ -43,6 +46,8 @@ export interface ShopSettings {
   tagline: string;
   contactLine: string;
   promoUrdu: string;
+  /** Slip body font (thermal / courier / arial / times / consolas). */
+  receiptFontFamily: ReceiptFontFamily;
   /** Line-item table grid borders on the slip (dukan default off). */
   itemsTableBordered: boolean;
   printerName: string;

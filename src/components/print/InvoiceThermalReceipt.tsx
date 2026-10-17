@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import {
   RECEIPT_BRANDING,
-  RECEIPT_FONT_CSS,
+  receiptFontFamilyCss,
 } from "@/shared/constants/receiptBranding";
 import type { Customer, InvoiceLine, ShopSettings } from "@/shared/types";
 import { moneyNum } from "@/utils/format";
@@ -98,7 +98,7 @@ export function InvoiceThermalReceipt({
     <div className={className ?? "thermal-receipt-preview"}>
       <div
         className="receipt-inner receipt-size--medium"
-        style={{ fontFamily: RECEIPT_FONT_CSS } as CSSProperties}
+        style={{ fontFamily: receiptFontFamilyCss(settings.receiptFontFamily) } as CSSProperties}
       >
         <div className="receipt-header">
           {showBrandHeader ? (
