@@ -111,6 +111,17 @@ export function unitCostPerDisplay(unit: ProductSellUnit): number {
 
 export type PosPriceMode = "retail" | "wholesale";
 
+/**
+ * P2-8: selecting Walk-in/guest forces retail for the cart toggle.
+ * Selecting a named customer keeps the cashier's current mode.
+ */
+export function priceModeForCustomerSwitch(
+  nextIsWalkIn: boolean,
+  currentMode: PosPriceMode,
+): PosPriceMode {
+  return nextIsWalkIn ? "retail" : currentMode;
+}
+
 /** List/min prices for a cart line's unit row at retail or wholesale (not base×factor). */
 export function cartLineTierPrices(
   product: Product,

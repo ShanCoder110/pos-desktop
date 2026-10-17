@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  invoiceEditAllocatedPaid,
+  invoiceEditBalanceAfter,
   invoiceEditLoadSnapshot,
   invoiceEditPaymentPrefill,
+  invoiceEditPaymentStatusText,
+  invoiceEditPaymentTotals,
   previousBalanceExcludingInvoiceCredit,
 } from "@/utils/posInvoiceEdit";
 
@@ -21,6 +25,7 @@ describe("posInvoiceEdit preload", () => {
     expect(snap.payMethod).toBe("cash");
     expect(snap.received).toBe(0);
     expect(snap.creditOpen).toBe(25);
+    expect(snap.allocatedPaid).toBe(5);
     expect(
       invoiceEditPaymentPrefill({
         paidAmount: 5,
@@ -103,6 +108,7 @@ describe("posInvoiceEdit preload", () => {
     expect(snap.onlineAmt).toBe(20);
     expect(snap.received).toBe(0);
     expect(snap.creditOpen).toBe(10);
+    expect(snap.allocatedPaid).toBe(0);
   });
 
   it("credit only → cash tab with received 0", () => {
@@ -128,5 +134,61 @@ describe("posInvoiceEdit preload", () => {
         ],
       }),
     ).toEqual({ payMethod: "cash", received: 20, cashAmt: 0, onlineAmt: 0 });
+  });
+});
+
+describe("posInvoiceEdit payment totals (allocated as paid)", () => {
+  it("allocation only → unpaid 40 on total 45, due after bill 65", () => {
+    expect(invoiceEditAllocatedPaid({ paidAmount: 5, payments: [] })).toBe(5);
+    expect(invoiceEditPaymentTotals({ billTotal: 45, tenderPaid: 0, allocatedPaid: 5 })).toEqual({
+      billTotal: 45,
+      tenderPaid: 0,
+      allocatedPaid: 5,
+      amountPaid: 5,
+      unpaid: 40,
+      extra: 0,
+    });
+    // Previous Due 25 (POS −25) + bill 45 − allocated 5 → Due 65.
+    expect(
+      invoiceEditBalanceAfter({
+        previousBalance: -25,
+        billTotal: 45,
+        tenderPaid: 0,
+        allocatedPaid: 5,
+      }),
+    ).toBe(-65);
+    expect(
+      invoiceEditPaymentStatusText({
+        billTotal: 45,
+        tenderPaid: 0,
+        allocatedPaid: 5,
+      }),
+    ).toBe("Partially paid · 5 already collected");
+  });
+
+  it("tender + allocation → both count toward paid", () => {
+    expect(
+      invoiceEditAllocatedPaid({
+        paidAmount: 15,
+        payments: [{ amount: 10, paymentMethod: "CASH", status: "COMPLETED" }],
+      }),
+    ).toBe(5);
+    expect(
+      invoiceEditPaymentTotals({ billTotal: 45, tenderPaid: 10, allocatedPaid: 5 }),
+    ).toMatchObject({ amountPaid: 15, unpaid: 30, extra: 0 });
+  });
+
+  it("no payments → unpaid = total", () => {
+    expect(invoiceEditAllocatedPaid({ paidAmount: 0, payments: [] })).toBe(0);
+    expect(
+      invoiceEditPaymentTotals({ billTotal: 45, tenderPaid: 0, allocatedPaid: 0 }),
+    ).toMatchObject({ amountPaid: 0, unpaid: 45 });
+    expect(
+      invoiceEditPaymentStatusText({
+        billTotal: 45,
+        tenderPaid: 0,
+        allocatedPaid: 0,
+      }),
+    ).toBe("Unpaid");
   });
 });

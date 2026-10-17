@@ -17,6 +17,7 @@ import {
   resolveSellUnit,
   cartLineTierPrices,
   convertLineToUnit,
+  priceModeForCustomerSwitch,
   unitTierPrice,
   unitsForProduct,
 } from "@/utils/salePricing";
@@ -37,6 +38,8 @@ import { errorToastMessage } from "@/utils/toastErrors";
 import { canOpenInvoicePosEdit, invoicePosEditBlockReason } from "@/utils/invoicePosEdit";
 import {
   invoiceEditLoadSnapshot,
+  invoiceEditPaymentStatusText,
+  invoiceEditPaymentTotals,
   previousBalanceExcludingInvoiceCredit,
 } from "@/utils/posInvoiceEdit";
 import {
@@ -282,6 +285,8 @@ export function PosWorkspace() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [editInvoiceNumber, setEditInvoiceNumber] = useState("");
   const [editCreditOpen, setEditCreditOpen] = useState(0);
+  /** Later customer-payment allocations on the invoice being edited (not sale tenders). */
+  const [editAllocatedPaid, setEditAllocatedPaid] = useState(0);
   const [editDraft, setEditDraft] = useState<Awaited<ReturnType<typeof getInvoice>> | null>(null);
   const [selected, setSelected] = useState(-1);
   const [products, setProducts] = useState<Product[]>([]);
@@ -469,6 +474,7 @@ export function PosWorkspace() {
     if (!editInvoiceId) {
       setEditInvoiceNumber("");
       setEditCreditOpen(0);
+      setEditAllocatedPaid(0);
       setEditDraft(null);
       return;
     }
@@ -491,6 +497,7 @@ export function PosWorkspace() {
         setEditDraft(invoice);
         setEditInvoiceNumber(invoice.invoiceNumber);
         setEditCreditOpen(snap.creditOpen);
+        setEditAllocatedPaid(snap.allocatedPaid);
         if (snap.customerId) setCustomerId(snap.customerId);
         setBillDiscount(snap.billDiscount);
         setDiscMode("rs");
@@ -703,14 +710,21 @@ export function PosWorkspace() {
     setDiscMode(next);
     setRoundTarget(0);
   }
-  const amountPaid =
+  const tenderPaid =
     payMethod === "cash"
       ? num(received)
       : payMethod === "online"
         ? num(onlineAmt)
         : num(cashAmt) + num(onlineAmt);
-  const unpaid = +Math.max(0, t.total - amountPaid).toFixed(2);
-  const extra = +Math.max(0, amountPaid - t.total).toFixed(2);
+  const allocatedPaid = editInvoiceId ? editAllocatedPaid : 0;
+  const payTotals = invoiceEditPaymentTotals({
+    billTotal: t.total,
+    tenderPaid,
+    allocatedPaid,
+  });
+  const amountPaid = payTotals.amountPaid;
+  const unpaid = payTotals.unpaid;
+  const extra = payTotals.extra;
   // Walk-in has no ledger — overpay is always change, never balance.
   const giveChange = customer.isWalking || returnChange;
   const appliedPaid = giveChange ? Math.min(amountPaid, t.total) : amountPaid;
@@ -726,6 +740,15 @@ export function PosWorkspace() {
     extra,
     returnChange: giveChange,
   });
+  const paymentStatusDetail =
+    editInvoiceId && allocatedPaid > 0.001
+      ? invoiceEditPaymentStatusText({
+          billTotal: t.total,
+          tenderPaid,
+          allocatedPaid,
+          returnChange: giveChange,
+        })
+      : paymentState;
 
   const paymentOk = (() => {
     if (!cart.length) return false;
@@ -1124,13 +1147,7 @@ export function PosWorkspace() {
     );
   }
 
-  function switchAllCart(mode?: PriceMode) {
-    if (!cart.length) {
-      showToast("Cart is empty");
-      return;
-    }
-    const allW = cart.every((i) => i.priceMode === "wholesale");
-    const next = mode ?? (allW ? "retail" : "wholesale");
+  function applyPriceModeToCart(next: PriceMode, opts?: { toast?: boolean }) {
     setPriceMode(next);
     setCart((prev) =>
       prev.map((item) => {
@@ -1152,7 +1169,37 @@ export function PosWorkspace() {
       }),
     );
     setRoundTarget(0);
-    showToast(next === "wholesale" ? "All items wholesale" : "All items retail");
+    if (opts?.toast !== false) {
+      showToast(next === "wholesale" ? "All items wholesale" : "All items retail");
+    }
+  }
+
+  function switchAllCart(mode?: PriceMode) {
+    if (!cart.length) {
+      showToast("Cart is empty");
+      return;
+    }
+    const allW = cart.every((i) => i.priceMode === "wholesale");
+    const next = mode ?? (allW ? "retail" : "wholesale");
+    applyPriceModeToCart(next);
+  }
+
+  /** Customer picker: walk-in forces retail on all lines + toggle; named keeps mode. */
+  function selectPosCustomer(c: Customer) {
+    setCustomerId(c.id);
+    setReturnChange(c.isWalking);
+    if (!c.isWalking) setReceived(0);
+    setCustQ(c.isWalking ? "" : c.name);
+    setCustOpen(false);
+    if (c.isWalking) {
+      setGuestName("");
+      setGuestPhone("");
+    }
+    const nextMode = priceModeForCustomerSwitch(c.isWalking, priceMode);
+    if (nextMode !== priceMode || (c.isWalking && cart.some((i) => i.priceMode !== "retail"))) {
+      applyPriceModeToCart(nextMode, { toast: false });
+    }
+    focusSearch(false);
   }
 
   function newBill(silent = false) {
@@ -1167,6 +1214,8 @@ export function PosWorkspace() {
     setOnlineAmt(0);
     setPayMethod("cash");
     setReturnChange(false);
+    setEditAllocatedPaid(0);
+    setEditCreditOpen(0);
     setQuery("");
     setQtyInput("1");
     setNote("");
@@ -1174,6 +1223,7 @@ export function PosWorkspace() {
     setGuestName("");
     setGuestPhone("");
     setCustQ("");
+    setPriceMode("retail");
     if (!silent) showToast("New bill");
     focusSearch(false);
   }
@@ -2224,18 +2274,7 @@ export function PosWorkspace() {
                     } else if (e.key === "Enter") {
                       e.preventDefault();
                       const c = custHits[custHit];
-                      if (c) {
-                        setCustomerId(c.id);
-                        setReturnChange(c.isWalking);
-                        if (!c.isWalking) setReceived(0);
-                        setCustQ(c.isWalking ? "" : c.name);
-                        setCustOpen(false);
-                        if (c.isWalking) {
-                          setGuestName("");
-                          setGuestPhone("");
-                        }
-                        focusSearch(false);
-                      }
+                      if (c) selectPosCustomer(c);
                     } else if (e.key === "Escape") {
                       setCustOpen(false);
                     }
@@ -2266,16 +2305,7 @@ export function PosWorkspace() {
                   className={`cust-hit ${i === custHit ? "is-active" : ""}`}
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    setCustomerId(c.id);
-                    setReturnChange(c.isWalking);
-                    if (!c.isWalking) setReceived(0);
-                    setCustQ(c.isWalking ? "" : c.name);
-                    setCustOpen(false);
-                    if (c.isWalking) {
-                      setGuestName("");
-                      setGuestPhone("");
-                    }
-                    focusSearch(false);
+                    selectPosCustomer(c);
                   }}
                 >
                   <span>
@@ -2569,10 +2599,10 @@ export function PosWorkspace() {
                 : cartOverStock
                   ? "Reduce qty — not enough stock"
                   : paymentOk
-                    ? `${paymentState} · Ready to complete`
+                    ? `${paymentStatusDetail} · Ready to complete`
                     : customer.isWalking
-                      ? `${paymentState} · Pay in full required`
-                      : `${paymentState} · Account sale allowed`}
+                      ? `${paymentStatusDetail} · Pay in full required`
+                      : `${paymentStatusDetail} · Account sale allowed`}
             </div>
           </div>
 

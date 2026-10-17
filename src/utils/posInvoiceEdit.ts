@@ -3,6 +3,9 @@
  * Shared so Vitest can lock customer / payment / prior-balance behaviour.
  */
 
+import { balanceAfterSale } from "@/utils/salePricing";
+import { paymentStatusLabel } from "@/pages/pos/posBilling";
+
 export type InvoiceEditPaymentPrefill = {
   payMethod: "cash" | "online" | "split";
   /** Cash tendered / applied toward the bill (open credit = total − this). */
@@ -25,6 +28,82 @@ function activePayments(
     { amount?: number; paymentMethod?: string | null; status?: string | null }[] | null | undefined,
 ) {
   return (payments ?? []).filter((p) => (p.status ?? "COMPLETED").toUpperCase() !== "VOIDED");
+}
+
+/** Sum of COMPLETED invoice payment rows (sale-time tenders only). */
+export function invoiceEditSaleTenderTotal(
+  payments:
+    { amount?: number; paymentMethod?: string | null; status?: string | null }[] | null | undefined,
+) {
+  return activePayments(payments).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+}
+
+/**
+ * Later customer-payment allocations on the invoice (paidAmount minus sale tenders).
+ * Must count as already paid in edit totals, but must not prefill Cash received.
+ */
+export function invoiceEditAllocatedPaid(invoice: {
+  paidAmount: number;
+  payments?: { amount?: number; paymentMethod?: string | null; status?: string | null }[] | null;
+}) {
+  const tender = invoiceEditSaleTenderTotal(invoice.payments);
+  return +Math.max(0, (Number(invoice.paidAmount) || 0) - tender).toFixed(2);
+}
+
+/** Edit-mode due / paid mapping: tender inputs + already-allocated collections. */
+export function invoiceEditPaymentTotals(input: {
+  billTotal: number;
+  tenderPaid: number;
+  allocatedPaid: number;
+}) {
+  const billTotal = Math.max(0, Number(input.billTotal) || 0);
+  const tenderPaid = Math.max(0, Number(input.tenderPaid) || 0);
+  const allocatedPaid = Math.max(0, Number(input.allocatedPaid) || 0);
+  const amountPaid = +(tenderPaid + allocatedPaid).toFixed(2);
+  const unpaid = +Math.max(0, billTotal - amountPaid).toFixed(2);
+  const extra = +Math.max(0, amountPaid - billTotal).toFixed(2);
+  return { billTotal, tenderPaid, allocatedPaid, amountPaid, unpaid, extra };
+}
+
+/** Status text for the existing pay-status line (no new UI chrome). */
+export function invoiceEditPaymentStatusText(input: {
+  billTotal: number;
+  tenderPaid: number;
+  allocatedPaid: number;
+  returnChange?: boolean;
+}) {
+  const totals = invoiceEditPaymentTotals(input);
+  const base = paymentStatusLabel({
+    paid: totals.amountPaid,
+    unpaid: totals.unpaid,
+    extra: totals.extra,
+    returnChange: Boolean(input.returnChange),
+  });
+  if (totals.allocatedPaid > 0.001) {
+    const collected =
+      Number.isInteger(totals.allocatedPaid) ||
+      Math.abs(totals.allocatedPaid - Math.round(totals.allocatedPaid)) < 0.001
+        ? String(Math.round(totals.allocatedPaid))
+        : totals.allocatedPaid.toFixed(2);
+    return `${base} · ${collected} already collected`;
+  }
+  return base;
+}
+
+/** Due-after-bill using allocated+tender as paidNow. */
+export function invoiceEditBalanceAfter(input: {
+  previousBalance: number;
+  billTotal: number;
+  tenderPaid: number;
+  allocatedPaid: number;
+  returnChange?: boolean;
+}) {
+  const totals = invoiceEditPaymentTotals(input);
+  const giveChange = Boolean(input.returnChange);
+  const appliedPaid = giveChange
+    ? Math.min(totals.amountPaid, totals.billTotal)
+    : totals.amountPaid;
+  return balanceAfterSale(input.previousBalance, totals.billTotal, appliedPaid);
 }
 
 /**
@@ -109,6 +188,7 @@ export function invoiceEditLoadSnapshot(invoice: {
     billDiscount: Number(invoice.discount) || 0,
     notes: invoice.notes ?? "",
     creditOpen: Math.max(0, Number(invoice.creditAmount) || 0),
+    allocatedPaid: invoiceEditAllocatedPaid(invoice),
     ...payment,
   };
 }

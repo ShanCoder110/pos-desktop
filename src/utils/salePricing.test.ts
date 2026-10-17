@@ -9,6 +9,7 @@ import {
   lineProfit,
   lineTotal,
   posTierPrice,
+  priceModeForCustomerSwitch,
   productMatchesQuery,
   resolveMatchedUnitId,
   resolveSellUnit,
@@ -106,6 +107,18 @@ describe("balanceAfterSale", () => {
     expect(balanceAfterSale(330, 15, 0)).toBe(315);
     expect(balanceAfterSale(-1170, 15, 0)).toBe(-1185);
     expect(balanceAfterSale(10, 15, 0)).toBe(-5);
+  });
+});
+
+describe("priceModeForCustomerSwitch", () => {
+  it("resets to retail when switching to walk-in / guest", () => {
+    expect(priceModeForCustomerSwitch(true, "wholesale")).toBe("retail");
+    expect(priceModeForCustomerSwitch(true, "retail")).toBe("retail");
+  });
+
+  it("keeps the current mode when switching to a named customer", () => {
+    expect(priceModeForCustomerSwitch(false, "wholesale")).toBe("wholesale");
+    expect(priceModeForCustomerSwitch(false, "retail")).toBe("retail");
   });
 });
 

@@ -25,6 +25,7 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | Void blocked on RETURNED/PARTIALLY_RETURNED (UI + 422); stock-count max 1e6 base; Pack Left mixed qty; shared datetime; cashier GET /stock/movements?movementType=ADJUSTMENT → 403 | ✅ Step 16 |
 | No-op revise skips reverse/repost (0 ledger/payment/movement rows); split edit preloads CASH+MOBILE amounts | ✅ Step 17 |
 | Edit prefill uses sale tenders only (not later payment allocations); revise preserves allocated paid; block total &lt; allocated | ✅ Step 18 |
+| Edit totals count allocated as paid (due/after-bill); walk-in customer switch resets price mode to retail | ✅ Step 19 |
 
 ## UI agent-mistakes audit (2026-09-19)
 
