@@ -26,6 +26,8 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | No-op revise skips reverse/repost (0 ledger/payment/movement rows); split edit preloads CASH+MOBILE amounts | ✅ Step 17 |
 | Edit prefill uses sale tenders only (not later payment allocations); revise preserves allocated paid; block total &lt; allocated | ✅ Step 18 |
 | Edit totals count allocated as paid (due/after-bill); walk-in customer switch resets price mode to retail | ✅ Step 19 |
+| SKU search case/partial/hyphen-insensitive (PMX-001); db:seed sets customer credit_limit idempotently | ✅ Step 20 |
+| Edit Left stock = on-hand + this invoice base qty − cart holds (no double-add) | ✅ Step 20 |
 
 ## UI agent-mistakes audit (2026-09-19)
 

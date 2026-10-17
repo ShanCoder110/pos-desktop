@@ -287,6 +287,10 @@ export function PosWorkspace() {
   const [editCreditOpen, setEditCreditOpen] = useState(0);
   /** Later customer-payment allocations on the invoice being edited (not sale tenders). */
   const [editAllocatedPaid, setEditAllocatedPaid] = useState(0);
+  /** Base qty already consumed by the invoice under edit — added back into Left (once). */
+  const [editStockReturnByProduct, setEditStockReturnByProduct] = useState<Record<string, number>>(
+    {},
+  );
   const [editDraft, setEditDraft] = useState<Awaited<ReturnType<typeof getInvoice>> | null>(null);
   const [selected, setSelected] = useState(-1);
   const [products, setProducts] = useState<Product[]>([]);
@@ -475,6 +479,7 @@ export function PosWorkspace() {
       setEditInvoiceNumber("");
       setEditCreditOpen(0);
       setEditAllocatedPaid(0);
+      setEditStockReturnByProduct({});
       setEditDraft(null);
       return;
     }
@@ -555,6 +560,13 @@ export function PosWorkspace() {
     if (lines.length) {
       setCart(lines);
       setPriceMode(lines[0].priceMode);
+      const returns: Record<string, number> = {};
+      for (const item of editDraft.items) {
+        const base = Number(item.baseQuantity) || 0;
+        if (base <= 0) continue;
+        returns[item.productId] = (returns[item.productId] ?? 0) + base;
+      }
+      setEditStockReturnByProduct(returns);
     }
     setEditDraft(null);
   }, [editDraft, products]);
@@ -665,8 +677,11 @@ export function PosWorkspace() {
     const product = products.find((p) => p.id === productId);
     const held = cartHeldBase(productId, exceptId);
     if (!product) return { here: 0, total: 0 };
-    const total = Math.max(0, productSellableQty(product, sessionBranchId) - held);
-    const here = Math.max(0, productBranchStock(product, sessionBranchId) - held);
+    // Edit: on-hand already excludes this invoice's consumption — add it back once,
+    // then subtract current cart holds so nothing is double-counted.
+    const addBack = editInvoiceId ? (editStockReturnByProduct[productId] ?? 0) : 0;
+    const total = Math.max(0, productSellableQty(product, sessionBranchId) + addBack - held);
+    const here = Math.max(0, productBranchStock(product, sessionBranchId) + addBack - held);
     return { here, total };
   }
 
@@ -1216,6 +1231,7 @@ export function PosWorkspace() {
     setReturnChange(false);
     setEditAllocatedPaid(0);
     setEditCreditOpen(0);
+    setEditStockReturnByProduct({});
     setQuery("");
     setQtyInput("1");
     setNote("");

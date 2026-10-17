@@ -1165,4 +1165,117 @@ mod tests {
             .expect("search unknown barcode");
         assert!(unknown.is_empty());
     }
+
+    #[tokio::test]
+    async fn search_matches_pmx001_sku_case_and_hyphen_insensitive() {
+        let database = connect_memory().await.expect("memory db");
+        seed_test_owner(&database).await;
+        let context = RequestContext {
+            session_id: Uuid::new_v4(),
+            user_id: Uuid::parse_str(SEED_USER_ID).unwrap(),
+            branch_id: Uuid::parse_str(SEED_BRANCH_ID).unwrap(),
+            device_id: Uuid::parse_str(SEED_DEVICE_ID).unwrap(),
+            cash_session_id: None,
+            role: "OWNER".into(),
+            name: "Owner".into(),
+            username: "owner".into(),
+        };
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "PmxCat".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let created = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Pricing Matrix Multi-Unit".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: Some("PMX-001".into()),
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(10, 0),
+                    wholesale: Decimal::new(12, 0),
+                    price: Decimal::new(15, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(50, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("create product for PMX search");
+        // Create ignores client SKU (auto P-####); set PMX-001 explicitly for lookup tests.
+        let pmx_id = Uuid::parse_str(&created.id).expect("product id");
+        let hex_id = pmx_id
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<String>();
+        sea_orm::ConnectionTrait::execute_unprepared(
+            &database,
+            &format!("UPDATE products SET sku = 'PMX-001' WHERE id = x'{hex_id}'"),
+        )
+        .await
+        .expect("set PMX-001 sku");
+
+        for needle in ["PMX-001", "pmx", "pmx001", "PMX001"] {
+            let hits = ProductService::search(&database, needle, Some(context.branch_id))
+                .await
+                .unwrap_or_else(|_| panic!("search {needle}"));
+            assert!(
+                hits.iter()
+                    .any(|p| p.id == created.id && p.sku == "PMX-001"),
+                "expected PMX-001 in results for {needle:?}, got {:?}",
+                hits.iter().map(|p| p.sku.as_str()).collect::<Vec<_>>()
+            );
+        }
+    }
 }

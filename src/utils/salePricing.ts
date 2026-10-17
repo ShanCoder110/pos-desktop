@@ -42,13 +42,30 @@ export function resolveMatchedUnitId(
   return unit?.id;
 }
 
+/** Alphanumeric-only key so "pmx001" matches SKU "PMX-001". */
+export function productSearchCompactKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
 export function productMatchesQuery(product: Product, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return false;
   if ((product.name ?? "").toLowerCase().includes(q)) return true;
   if ((product.sku ?? "").toLowerCase().includes(q)) return true;
   if ((product.barcode ?? "").toLowerCase().includes(q)) return true;
-  return unitsForProduct(product).some((u) => (u.barcode ?? "").toLowerCase().includes(q));
+  if (unitsForProduct(product).some((u) => (u.barcode ?? "").toLowerCase().includes(q))) {
+    return true;
+  }
+  const compact = productSearchCompactKey(query);
+  if (!compact) return false;
+  if (productSearchCompactKey(product.sku ?? "").includes(compact)) return true;
+  if (productSearchCompactKey(product.barcode ?? "").includes(compact)) return true;
+  return unitsForProduct(product).some((u) =>
+    productSearchCompactKey(u.barcode ?? "").includes(compact),
+  );
 }
 
 /** Selling price for one displayed unit at the given tier (uses product_units row, not base×factor). */

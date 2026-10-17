@@ -173,6 +173,15 @@ describe("resolveMatchedUnitId / productMatchesQuery", () => {
     expect(productMatchesQuery(product, "6281999999999")).toBe(false);
     expect(productMatchesQuery(product, "Widget")).toBe(true);
   });
+
+  it("matches SKU PMX-001 case-insensitively and without hyphens", () => {
+    const pmx = { ...product, sku: "PMX-001", name: "Pricing Matrix Multi-Unit", barcode: "" };
+    expect(productMatchesQuery(pmx, "PMX-001")).toBe(true);
+    expect(productMatchesQuery(pmx, "pmx")).toBe(true);
+    expect(productMatchesQuery(pmx, "pmx001")).toBe(true);
+    expect(productMatchesQuery(pmx, "PMX001")).toBe(true);
+    expect(productMatchesQuery(pmx, "xyz")).toBe(false);
+  });
 });
 
 describe("edge cases", () => {

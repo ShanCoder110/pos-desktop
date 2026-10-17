@@ -189,6 +189,12 @@ async fn seed(path: &PathBuf) -> Result<(), String> {
     // Shop seed is also a migration; re-apply SQL with INSERT OR IGNORE for idempotent refresh.
     run_sql_script(&db, include_str!("../backend/migration/seed_shop.sql")).await?;
     run_sql_script(&db, include_str!("../backend/migration/seed_units.sql")).await?;
+    // Credit customers + credit_limit (requires migrations through 000021).
+    run_sql_script(
+        &db,
+        include_str!("../backend/migration/seed_credit_customers.sql"),
+    )
+    .await?;
     apply_runtime_pragmas(&db)
         .await
         .map_err(|e| e.to_string())?;

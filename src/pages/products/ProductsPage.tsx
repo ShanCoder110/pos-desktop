@@ -98,6 +98,7 @@ import {
 } from "@/pages/products/productPayload";
 import { listAllInvoices } from "@/services/sales";
 import { createMasterRecord } from "@/services/masters";
+import { productMatchesQuery } from "@/utils/salePricing";
 import {
   buildProductSalesStats,
   formatInsightMetricValue,
@@ -478,8 +479,15 @@ export function ProductsPage() {
 
   const filtered = useMemo(() => {
     const list = searchRows.filter((r) => {
-      const text = `${r.name} ${r.sku} ${r.category}`.toLowerCase();
-      if (q && !text.includes(q.toLowerCase())) return false;
+      // Use productMatchesQuery so SKU/barcode hits stay case/partial/hyphen-insensitive
+      // (e.g. "pmx001" → "PMX-001") after remote search merges into the table.
+      if (
+        q &&
+        !productMatchesQuery(r, q) &&
+        !(r.category ?? "").toLowerCase().includes(q.toLowerCase())
+      ) {
+        return false;
+      }
       for (const chip of chips) {
         const selected = chipValues(chip);
         if (chip.field === "health") {

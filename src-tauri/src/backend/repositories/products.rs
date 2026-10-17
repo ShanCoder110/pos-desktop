@@ -428,18 +428,30 @@ fn build_conditions(
         values.push(active.into());
     }
     if let Some(search) = &query.page.search {
-        // Match product fields and any sell-unit barcode without duplicating product rows.
+        // Case-insensitive partial match on name/sku/barcode/category/unit barcodes.
+        // Also match hyphen/space-stripped SKU/barcode so "pmx001" hits "PMX-001".
         parts.push(
-            "(lower(p.name) LIKE ? OR lower(p.sku) LIKE ? OR lower(p.barcode) LIKE ? OR lower(c.name) LIKE ? OR EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.deleted_at IS NULL AND lower(COALESCE(pu.barcode, '')) LIKE ?))"
+            "(lower(p.name) LIKE ? OR lower(p.sku) LIKE ? OR lower(p.barcode) LIKE ? OR lower(c.name) LIKE ? OR EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.deleted_at IS NULL AND lower(COALESCE(pu.barcode, '')) LIKE ?) OR replace(replace(lower(p.sku), '-', ''), ' ', '') LIKE ? OR replace(replace(lower(COALESCE(p.barcode, '')), '-', ''), ' ', '') LIKE ? OR EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.deleted_at IS NULL AND replace(replace(lower(COALESCE(pu.barcode, '')), '-', ''), ' ', '') LIKE ?))"
                 .to_owned(),
         );
         let needle = format!("%{}%", search.to_lowercase());
+        let compact = format!(
+            "%{}%",
+            search
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .flat_map(|c| c.to_lowercase())
+                .collect::<String>()
+        );
         values.extend([
             needle.clone().into(),
             needle.clone().into(),
             needle.clone().into(),
             needle.clone().into(),
             needle.into(),
+            compact.clone().into(),
+            compact.clone().into(),
+            compact.into(),
         ]);
     }
     crate::backend::util::push_in_uuids(
