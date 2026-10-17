@@ -9,7 +9,8 @@ use crate::backend::{
         ERROR_CLAIM_NOT_FOUND, ERROR_CUSTOMER_NOT_FOUND, ERROR_INSUFFICIENT_STOCK,
         ERROR_INVOICE_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND, ERROR_RETURN_NOT_FOUND,
         LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LEDGER_RETURN, LOT_SOURCE_RETURN,
-        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED, REFERENCE_RETURN,
+        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED,
+        PAYMENT_STATUS_PARTIALLY_RETURNED, PAYMENT_STATUS_RETURNED, REFERENCE_RETURN,
         STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN,
     },
     context::RequestContext,
@@ -20,17 +21,13 @@ use crate::backend::{
         CustomerPaymentResponse, ReturnItemResponse, ReturnListQuery, ReturnResponse,
     },
     errors::AppError,
+    repositories::{LedgerEntryInput, LedgerParty, LedgerRepository},
     util::{money_value, now_utc, parse_optional_uuid, parse_uuid, quantity, trimmed},
 };
 
 #[derive(Debug, FromQueryResult)]
 struct CountRow {
     count: i64,
-}
-
-#[derive(Debug, FromQueryResult)]
-struct BalanceRow {
-    balance_after: Decimal,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -189,7 +186,7 @@ impl CreditRepository {
         ensure_customer(database, customer_id).await?;
         let rows = LedgerRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, customer_id, branch_id, type AS entry_type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_at FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at ASC, created_at ASC",
+            "SELECT id, customer_id, branch_id, type AS entry_type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_at FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at ASC, created_at ASC, rowid ASC",
             [customer_id.into()],
         ))
         .all(database)
@@ -248,24 +245,17 @@ impl CreditRepository {
             .clone()
             .filter(|v| !v.trim().is_empty())
             .unwrap_or_else(|| format!("cust-pay-{payment_id}"));
-        let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-            [customer_id.into()],
-        ))
-        .one(transaction)
-        .await?
-        .map(|row| row.balance_after)
-        .unwrap_or(Decimal::ZERO);
+        let previous =
+            LedgerRepository::current_balance(transaction, LedgerParty::Customer(customer_id))
+                .await?;
         // Positive balance = customer owes (collect). Negative = advance (refund).
         let collecting = previous >= Decimal::ZERO;
-        let (direction, entry_type, debit, credit, balance_after) = if collecting {
+        let (direction, entry_type, debit, credit) = if collecting {
             (
                 PAYMENT_DIRECTION_IN,
                 LEDGER_PAYMENT_RECEIVED,
                 Decimal::ZERO,
                 amount,
-                previous - amount,
             )
         } else {
             (
@@ -273,9 +263,15 @@ impl CreditRepository {
                 LEDGER_PAYMENT_MADE,
                 amount,
                 Decimal::ZERO,
-                previous + amount,
             )
         };
+        let ledger_note = trimmed(&request.notes).unwrap_or_else(|| {
+            if collecting {
+                "Customer payment".into()
+            } else {
+                "Customer refund".into()
+            }
+        });
 
         transaction
             .execute_raw(Statement::from_sql_and_values(
@@ -319,34 +315,27 @@ impl CreditRepository {
                 ],
             ))
             .await?;
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "INSERT INTO customer_ledger_entries (id, customer_id, branch_id, type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    ledger_id.into(),
-                    customer_id.into(),
-                    context.branch_id.into(),
-                    entry_type.into(),
-                    payment_id.into(),
-                    debit.into(),
-                    credit.into(),
-                    balance_after.into(),
-                    trimmed(&request.notes)
-                        .unwrap_or_else(|| {
-                            if collecting {
-                                "Customer payment".into()
-                            } else {
-                                "Customer refund".into()
-                            }
-                        })
-                        .into(),
-                    now.into(),
-                    context.user_id.into(),
-                    now.into(),
-                ],
-            ))
-            .await?;
+        let balance_after = LedgerRepository::post_entry(
+            transaction,
+            LedgerEntryInput {
+                id: Some(ledger_id),
+                party: LedgerParty::Customer(customer_id),
+                branch_id: context.branch_id,
+                entry_type,
+                debit,
+                credit,
+                notes: Some(&ledger_note),
+                occurred_at: now,
+                created_by: context.user_id,
+                purchase_order_id: None,
+                goods_receipt_id: None,
+                money_transaction_id: None,
+                invoice_id: None,
+                payment_id: Some(payment_id),
+                return_id: None,
+            },
+        )
+        .await?;
 
         if collecting && amount > Decimal::ZERO {
             let mut remaining_to_apply = amount;
@@ -476,7 +465,7 @@ impl CreditRepository {
         .map(|row| row.count.max(0) as u64)
         .unwrap_or(0);
         let sql = format!(
-            "SELECT cle.id, cle.customer_id, c.name AS customer_name, cle.branch_id, cle.type AS entry_type, cle.invoice_id, cle.payment_id, cle.return_id, CAST(cle.debit AS REAL) AS debit, CAST(cle.credit AS REAL) AS credit, CAST(cle.balance_after AS REAL) AS balance_after, cle.notes, cle.occurred_at, cle.created_at FROM customer_ledger_entries cle INNER JOIN customers c ON c.id = cle.customer_id WHERE {where_sql} ORDER BY cle.created_at DESC, cle.id DESC LIMIT ? OFFSET ?"
+            "SELECT cle.id, cle.customer_id, c.name AS customer_name, cle.branch_id, cle.type AS entry_type, cle.invoice_id, cle.payment_id, cle.return_id, CAST(cle.debit AS REAL) AS debit, CAST(cle.credit AS REAL) AS credit, CAST(cle.balance_after AS REAL) AS balance_after, cle.notes, cle.occurred_at, cle.created_at FROM customer_ledger_entries cle INNER JOIN customers c ON c.id = cle.customer_id WHERE {where_sql} ORDER BY cle.occurred_at ASC, cle.created_at ASC, cle.rowid ASC LIMIT ? OFFSET ?"
         );
         let mut page_values = values;
         page_values.push((page.per_page as i64).into());
@@ -928,42 +917,68 @@ impl CreditRepository {
             ))
             .await?;
 
-        // Cash already left the drawer. Only the unpaid part of the invoice
-        // belongs on the customer balance, or a cash refund also becomes advance.
-        let ledger_refund = refund_total.min(invoice.credit_amount);
-        if ledger_refund > Decimal::ZERO {
-            if let Some(customer_id) = invoice.customer_id {
-                let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
+        // Open credit on the invoice shrinks by the returned value (never below 0).
+        // Excess beyond open credit becomes customer advance via the ledger RETURN credit.
+        let refund = money_value(refund_total);
+        let credit_before = money_value(invoice.credit_amount);
+        let new_credit = money_value(credit_before - refund.min(credit_before));
+        // Only rewrite payment_status when this return touched open credit — cash-only
+        // invoices that never had credit keep their existing PAID/etc. status.
+        if credit_before > Decimal::ZERO {
+            let payment_status = if new_credit <= Decimal::ZERO {
+                PAYMENT_STATUS_RETURNED
+            } else {
+                PAYMENT_STATUS_PARTIALLY_RETURNED
+            };
+            transaction
+                .execute_raw(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
-                    "SELECT CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-                    [customer_id.into()],
+                    "UPDATE invoices SET credit_amount = ?, payment_status = ?, updated_at = ? WHERE id = ?",
+                    [
+                        new_credit.into(),
+                        payment_status.into(),
+                        now.into(),
+                        invoice_id.into(),
+                    ],
                 ))
-                .one(transaction)
-                .await?
-                .map(|row| row.balance_after)
-                .unwrap_or(Decimal::ZERO);
-                let refund = money_value(ledger_refund);
-                let balance_after = previous - refund;
-                transaction
-                    .execute_raw(Statement::from_sql_and_values(
-                        DbBackend::Sqlite,
-                        "INSERT INTO customer_ledger_entries (id, customer_id, branch_id, type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?, ?, ?, ?)",
-                        [
-                            Uuid::new_v4().into(),
-                            customer_id.into(),
-                            invoice.branch_id.into(),
-                            LEDGER_RETURN.into(),
-                            invoice_id.into(),
-                            return_id.into(),
-                            refund.into(),
-                            balance_after.into(),
-                            format!("Return {}", invoice.invoice_number).into(),
-                            now.into(),
-                            context.user_id.into(),
-                            now.into(),
-                        ],
-                    ))
-                    .await?;
+                .await?;
+        } else if refund > Decimal::ZERO {
+            // No open credit to clear; still bump updated_at for audit consistency.
+            transaction
+                .execute_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "UPDATE invoices SET updated_at = ? WHERE id = ?",
+                    [now.into(), invoice_id.into()],
+                ))
+                .await?;
+        }
+
+        // Always post the full refund on the ledger when there is a named customer.
+        // Prior tip uses stable rowid order (revise ADJUSTMENT+SALE share timestamps).
+        if refund > Decimal::ZERO {
+            if let Some(customer_id) = invoice.customer_id {
+                let note = format!("Return {}", invoice.invoice_number);
+                LedgerRepository::post_entry(
+                    transaction,
+                    LedgerEntryInput {
+                        id: None,
+                        party: LedgerParty::Customer(customer_id),
+                        branch_id: invoice.branch_id,
+                        entry_type: LEDGER_RETURN,
+                        debit: Decimal::ZERO,
+                        credit: refund,
+                        notes: Some(&note),
+                        occurred_at: now,
+                        created_by: context.user_id,
+                        purchase_order_id: None,
+                        goods_receipt_id: None,
+                        money_transaction_id: None,
+                        invoice_id: Some(invoice_id),
+                        payment_id: None,
+                        return_id: Some(return_id),
+                    },
+                )
+                .await?;
             }
         }
 
@@ -1106,6 +1121,7 @@ impl CreditRepository {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn allocate_fifo(
     transaction: &DatabaseTransaction,
     context: &RequestContext,

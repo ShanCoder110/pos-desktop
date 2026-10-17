@@ -228,7 +228,7 @@ export function useLotDrawer() {
     }
   }
 
-  async function commitNestedProduct(next: Product): Promise<boolean> {
+  async function commitNestedProduct(next: Product): Promise<boolean | string> {
     const category = resolveCategoryId(next, categories);
     if (!category) {
       toaster.error(PRODUCT_COPY.categoryRequired);
@@ -269,7 +269,9 @@ export function useLotDrawer() {
       toaster.success(PRODUCT_COPY.added);
       return true;
     } catch (error) {
-      toaster.error(shortError(error, PRODUCT_COPY.saveFailed));
+      const message = shortError(error, PRODUCT_COPY.saveFailed);
+      if (/sku/i.test(message)) return message;
+      toaster.error(message);
       return false;
     } finally {
       setLoading((current) => ({ ...current, nested: false }));
@@ -401,12 +403,14 @@ export function useLotDrawer() {
           : Math.round(next.remainingQuantity * 10000) / 10000;
       await updateLot(next.id, {
         supplierId: next.supplierId || undefined,
+        // Original qty is immutable after movements — omit so a stale client cannot desync.
         remainingQuantity,
         damagedQuantity: next.damagedQuantity,
         cost: next.purchasePrice,
         min: next.minimumPrice,
         wholesale: next.wholesalePrice,
         retail: next.retailPrice,
+        expiryDate: next.expiryDate ? next.expiryDate.slice(0, 10) : null,
         branchAllocations: branchAllocations.length ? branchAllocations : undefined,
       });
       if (sellUnits?.length) {

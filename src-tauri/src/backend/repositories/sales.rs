@@ -5,13 +5,15 @@ use sea_orm::{
 use uuid::Uuid;
 
 use crate::backend::{
+    accounting::line_gross_profit,
     constants::{
         ERROR_BELOW_MINIMUM, ERROR_HOLD_NOT_FOUND, ERROR_INVOICE_ALREADY_VOIDED,
-        ERROR_INVOICE_NOT_FOUND, ERROR_WALK_IN_CREDIT, INVOICE_STATUS_CANCELLED,
-        INVOICE_STATUS_COMPLETED, LEDGER_ADJUSTMENT, LEDGER_SALE, MONEY_TYPE_SALE, MONEY_TYPE_VOID,
-        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED,
-        PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID, PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_UNPAID,
-        PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE, STOCK_MOVEMENT_SALE,
+        ERROR_INVOICE_NOT_FOUND, ERROR_INVOICE_RETURNED_CANNOT_VOID, ERROR_WALK_IN_CREDIT,
+        INVOICE_STATUS_CANCELLED, INVOICE_STATUS_COMPLETED, LEDGER_ADJUSTMENT, LEDGER_SALE,
+        MONEY_TYPE_SALE, MONEY_TYPE_VOID, PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT,
+        PAYMENT_STATUS_COMPLETED, PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID,
+        PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_PARTIALLY_RETURNED, PAYMENT_STATUS_RETURNED,
+        PAYMENT_STATUS_UNPAID, PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE, STOCK_MOVEMENT_SALE,
     },
     context::RequestContext,
     dto::{
@@ -24,6 +26,7 @@ use crate::backend::{
         allocate_fifo_with_branch_fallback, ensure_demand_in_stock, StockAllocationOptions,
         StockDemand,
     },
+    repositories::{LedgerEntryInput, LedgerParty, LedgerRepository},
     util::{money_value, now_utc, parse_optional_uuid, parse_uuid, quantity, trimmed},
 };
 
@@ -53,8 +56,10 @@ struct CustomerFlag {
 }
 
 #[derive(Debug, FromQueryResult)]
-struct BalanceRow {
-    balance_after: Decimal,
+struct NetInvoiceLedgerRow {
+    customer_id: Uuid,
+    debit: Decimal,
+    credit: Decimal,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -124,13 +129,6 @@ struct ConsumptionRow {
     product_lot_id: Uuid,
     base_quantity: Decimal,
     unit_cost: Decimal,
-}
-
-#[derive(Debug, FromQueryResult)]
-struct LedgerRow {
-    customer_id: Uuid,
-    debit: Decimal,
-    credit: Decimal,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -322,6 +320,14 @@ impl SalesRepository {
             ))
             .await?;
 
+        // Bill discount share is proportional to pre-tax line revenue
+        // (unit×qty − line discount). Invoice `subtotal` includes line tax.
+        let discount_base = money_value(
+            prepared_items
+                .iter()
+                .map(|p| p.unit_price * p.displayed - p.discount)
+                .sum::<Decimal>(),
+        );
         for prepared in prepared_items {
             let item_id = Uuid::new_v4();
             let fifo = allocate_fifo_with_branch_fallback(
@@ -340,7 +346,14 @@ impl SalesRepository {
             )
             .await?;
             let fifo_cost = money_value(fifo.fifo_cost);
-            let gross_profit = money_value(prepared.line_total - fifo_cost);
+            let gross_profit = line_gross_profit(
+                prepared.unit_price,
+                prepared.displayed,
+                prepared.discount,
+                fifo_cost,
+                discount,
+                discount_base,
+            );
             transaction
                 .execute_raw(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
@@ -437,35 +450,28 @@ impl SalesRepository {
 
         if credit_amount > Decimal::ZERO {
             if let Some(customer_id) = customer_id {
-                let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-                    DbBackend::Sqlite,
-                    "SELECT balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-                    [customer_id.into()],
-                ))
-                .one(transaction)
-                .await?
-                .map(|row| row.balance_after)
-                .unwrap_or(Decimal::ZERO);
-                let balance_after = previous + credit_amount;
-                transaction
-                    .execute_raw(Statement::from_sql_and_values(
-                        DbBackend::Sqlite,
-                        "INSERT INTO customer_ledger_entries (id, customer_id, branch_id, type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, 0, ?, ?, ?, ?, ?)",
-                        [
-                            Uuid::new_v4().into(),
-                            customer_id.into(),
-                            context.branch_id.into(),
-                            LEDGER_SALE.into(),
-                            invoice_id.into(),
-                            credit_amount.into(),
-                            balance_after.into(),
-                            format!("Sale {invoice_number}").into(),
-                            now.into(),
-                            context.user_id.into(),
-                            now.into(),
-                        ],
-                    ))
-                    .await?;
+                let note = format!("Sale {invoice_number}");
+                LedgerRepository::post_entry(
+                    transaction,
+                    LedgerEntryInput {
+                        id: None,
+                        party: LedgerParty::Customer(customer_id),
+                        branch_id: context.branch_id,
+                        entry_type: LEDGER_SALE,
+                        debit: credit_amount,
+                        credit: Decimal::ZERO,
+                        notes: Some(&note),
+                        occurred_at: now,
+                        created_by: context.user_id,
+                        purchase_order_id: None,
+                        goods_receipt_id: None,
+                        money_transaction_id: None,
+                        invoice_id: Some(invoice_id),
+                        payment_id: None,
+                        return_id: None,
+                    },
+                )
+                .await?;
                 // Enroll named customers in the credit sales book when they take credit.
                 transaction
                     .execute_raw(Statement::from_sql_and_values(
@@ -564,6 +570,15 @@ impl SalesRepository {
         if header.status == INVOICE_STATUS_CANCELLED || header.voided_at.is_some() {
             return Err(AppError::Conflict(ERROR_INVOICE_ALREADY_VOIDED.into()));
         }
+        // Returns already restored stock and unwound credit/ledger — voiding again
+        // would double-reverse remaining qty, balance, and profit hold.
+        if header.payment_status == PAYMENT_STATUS_RETURNED
+            || header.payment_status == PAYMENT_STATUS_PARTIALLY_RETURNED
+        {
+            return Err(AppError::Validation(
+                ERROR_INVOICE_RETURNED_CANNOT_VOID.into(),
+            ));
+        }
         let now = now_utc();
         let consumptions = ConsumptionRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
@@ -644,45 +659,15 @@ impl SalesRepository {
                 .await?;
         }
 
-        let ledgers = LedgerRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT customer_id, debit, credit FROM customer_ledger_entries WHERE invoice_id = ?",
-            [invoice_id.into()],
-        ))
-        .all(transaction)
+        reverse_invoice_ledger(
+            transaction,
+            header.branch_id,
+            invoice_id,
+            now,
+            context,
+            &format!("Void invoice {invoice_id}"),
+        )
         .await?;
-        for ledger in ledgers {
-            let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "SELECT balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-                [ledger.customer_id.into()],
-            ))
-            .one(transaction)
-            .await?
-            .map(|row| row.balance_after)
-            .unwrap_or(Decimal::ZERO);
-            let balance_after = previous - ledger.debit + ledger.credit;
-            transaction
-                .execute_raw(Statement::from_sql_and_values(
-                    DbBackend::Sqlite,
-                    "INSERT INTO customer_ledger_entries (id, customer_id, branch_id, type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)",
-                    [
-                        Uuid::new_v4().into(),
-                        ledger.customer_id.into(),
-                        header.branch_id.into(),
-                        LEDGER_ADJUSTMENT.into(),
-                        invoice_id.into(),
-                        ledger.credit.into(),
-                        ledger.debit.into(),
-                        balance_after.into(),
-                        format!("Void invoice {invoice_id}").into(),
-                        now.into(),
-                        context.user_id.into(),
-                        now.into(),
-                    ],
-                ))
-                .await?;
-        }
 
         let payments = PaymentRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
@@ -1040,6 +1025,50 @@ fn map_hold(row: HoldRow) -> Result<HoldResponse, AppError> {
 
 fn decimal(value: Decimal) -> f64 {
     value.to_f64().unwrap_or_default()
+}
+
+/// Reverse the net ledger effect of an invoice with one ADJUSTMENT per customer.
+/// Uses `LedgerRepository` so `balance_after` chains off the latest row (rowid-stable).
+pub(super) async fn reverse_invoice_ledger(
+    transaction: &DatabaseTransaction,
+    branch_id: Uuid,
+    invoice_id: Uuid,
+    now: chrono::DateTime<chrono::Utc>,
+    context: &RequestContext,
+    notes: &str,
+) -> Result<(), AppError> {
+    let nets = NetInvoiceLedgerRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT customer_id, CAST(SUM(debit) AS REAL) AS debit, CAST(SUM(credit) AS REAL) AS credit FROM customer_ledger_entries WHERE invoice_id = ? GROUP BY customer_id",
+        [invoice_id.into()],
+    ))
+    .all(transaction)
+    .await?;
+    for net in nets {
+        // Flip: prior debit becomes credit (and vice versa) so the running balance unwinds.
+        LedgerRepository::post_entry(
+            transaction,
+            LedgerEntryInput {
+                id: None,
+                party: LedgerParty::Customer(net.customer_id),
+                branch_id,
+                entry_type: LEDGER_ADJUSTMENT,
+                debit: net.credit,
+                credit: net.debit,
+                notes: Some(notes),
+                occurred_at: now,
+                created_by: context.user_id,
+                purchase_order_id: None,
+                goods_receipt_id: None,
+                money_transaction_id: None,
+                invoice_id: Some(invoice_id),
+                payment_id: None,
+                return_id: None,
+            },
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 const PAYMENT_STATUS_REFUNDED_PLACEHOLDER: &str = "REFUNDED";

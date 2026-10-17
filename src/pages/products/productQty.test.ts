@@ -9,6 +9,7 @@ import {
   deriveAll,
   derivePricesBetween,
   factorDirectionForContains,
+  formatLinkedQty,
   formatMixedQty,
   normalizeSellUnits,
   priceFromStock,
@@ -307,5 +308,68 @@ describe("gaz in 1 roll prices", () => {
     });
     const product = { unit: "pc", sellUnits: [piece, pack] } as Product;
     expect(formatMixedQty(product, 19)).toBe("1 Pack + 7 Piece");
+  });
+
+  it("shows 103 pieces as 8 Pack + 7 Piece (not 8.58 Pack)", () => {
+    const piece = unit({
+      id: "pc",
+      symbol: "pc",
+      name: "Piece",
+      contains: 1,
+      isBase: true,
+      factorDirection: "multiply",
+    });
+    const pack = unit({
+      id: "pk",
+      symbol: "pk",
+      name: "Pack",
+      contains: 12,
+      factorDirection: "multiply",
+    });
+    const product = { unit: "pc", sellUnits: [piece, pack] } as Product;
+    expect(formatMixedQty(product, 103)).toBe("8 Pack + 7 Piece");
+  });
+
+  it("shows 7 pieces of a 10-pack as 7 Piece (not 0.7 Pack) — Step 26 lot Qty lock display", () => {
+    const piece = unit({
+      id: "pc",
+      symbol: "pc",
+      name: "Piece",
+      contains: 1,
+      isBase: true,
+      factorDirection: "multiply",
+    });
+    const pack = unit({
+      id: "pk",
+      symbol: "pk",
+      name: "Pack",
+      contains: 10,
+      factorDirection: "multiply",
+    });
+    const product = { unit: "pc", sellUnits: [piece, pack] } as Product;
+    expect(formatMixedQty(product, 7)).toBe("7 Piece");
+    expect(formatMixedQty(product, 7)).not.toMatch(/0\.7/);
+  });
+
+  it("formatLinkedQty uses whole packs + pieces (not decimal Pack)", () => {
+    const piece = unit({
+      id: "pc",
+      symbol: "pc",
+      name: "Piece",
+      contains: 1,
+      isBase: true,
+      factorDirection: "multiply",
+    });
+    const pack = unit({
+      id: "pk",
+      symbol: "pk",
+      name: "Pack",
+      contains: 12,
+      factorDirection: "multiply",
+    });
+    const product = { unit: "pc", sellUnits: [piece, pack] } as Product;
+    // 99980.2 Pack would be wrong; mixed must floor packs.
+    expect(formatLinkedQty(product, 1_199_762)).toBe("99980 Pack + 2 Piece");
+    expect(formatLinkedQty(product, 1_199_762)).not.toMatch(/99980\.2/);
   });
 });

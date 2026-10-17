@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Ban, PackagePlus, ShoppingCart } from "lucide-react";
 import {
   Badge,
@@ -29,12 +28,12 @@ import {
   supplierLabel,
 } from "@/pages/products/hubSupplierFilters";
 import { useLotDrawer } from "@/pages/lots/useLotDrawer";
+import { ReorderCreateDrawer } from "@/pages/reorders/ReorderCreateDrawer";
 import { ReorderDetailDrawer } from "@/pages/reorders/ReorderDetailDrawer";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { CostBreakdownTooltip } from "@/pages/products/ProductPricingTooltip";
 import { formatStockQty } from "@/pages/products/productQty";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
-import { productsHref } from "@/shared/constants/products";
 import {
   REORDER_COPY,
   REORDER_FILTER_FIELDS,
@@ -109,10 +108,10 @@ function reorderApiFilters(
 }
 
 export function ReordersPage() {
-  const navigate = useNavigate();
-  const { setActions, products, suppliers, sectionKpi, purchaseOrders, refreshHub } =
+  const { setActions, products, suppliers, lots, sectionKpi, purchaseOrders, refreshHub } =
     useProductsHub();
   const { openCreate, lotDrawer } = useLotDrawer();
+  const [createOpen, setCreateOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [search, setSearch] = useState("");
@@ -306,14 +305,14 @@ export function ReordersPage() {
         <Button
           variant="primary"
           icon={<ShoppingCart size={14} />}
-          onClick={() => navigate(productsHref("low"))}
+          onClick={() => setCreateOpen(true)}
         >
           {REORDER_COPY.createAction}
         </Button>
       </>,
     );
     return () => setActions(null);
-  }, [exportRows, navigate, setActions]);
+  }, [exportRows, setActions]);
 
   function openDetail(row: PurchaseOrder) {
     setViewRow(row);
@@ -487,6 +486,16 @@ export function ReordersPage() {
         </tbody>
       </Table>
       {lotDrawer}
+      <ReorderCreateDrawer
+        open={createOpen}
+        products={products}
+        lots={lots}
+        suppliers={suppliers}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => {
+          void refreshHub();
+        }}
+      />
       <ReorderDetailDrawer
         order={viewRow}
         products={products}

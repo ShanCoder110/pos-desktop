@@ -6,6 +6,7 @@ export type UnitSegmentOption = {
   label: string;
   meta?: string;
   tone?: "default" | "danger" | "warning";
+  disabled?: boolean;
 };
 
 function moveSelection(
@@ -16,6 +17,8 @@ function moveSelection(
 ) {
   if (!units.length) return;
   let nextIndex = index;
+  const step =
+    event.key === "ArrowRight" || event.key === "ArrowDown" || event.key === "Home" ? 1 : -1;
   if (event.key === "ArrowRight" || event.key === "ArrowDown") {
     nextIndex = (index + 1) % units.length;
   } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
@@ -27,6 +30,10 @@ function moveSelection(
   } else {
     return;
   }
+  for (let attempts = 0; attempts < units.length && units[nextIndex]?.disabled; attempts += 1) {
+    nextIndex = (nextIndex + step + units.length) % units.length;
+  }
+  if (units[nextIndex]?.disabled) return;
   event.preventDefault();
   onChange(units[nextIndex].id);
   const group = event.currentTarget.parentElement;
@@ -72,10 +79,11 @@ export function UnitSegmentedControl({
             key={unit.id}
             ref={(element) => onButtonRef?.(unit.id, element)}
             type="button"
+            disabled={unit.disabled}
             tabIndex={active ? 0 : -1}
             aria-pressed={active}
             className={cn(
-              "flex min-w-0 flex-1 flex-col items-center justify-center rounded-md border px-2 font-bold transition-colors",
+              "flex min-w-0 flex-1 flex-col items-center justify-center rounded-md border px-2 font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40",
               compact ? "min-h-6 text-[10px]" : "min-h-7 text-[11px]",
               active
                 ? unit.tone === "danger"
@@ -89,7 +97,9 @@ export function UnitSegmentedControl({
                     ? "border-warn/45 bg-warn/10 text-warn-ink hover:bg-warn/15"
                     : "border-transparent bg-transparent text-sub hover:bg-bg",
             )}
-            onClick={() => onChange(unit.id)}
+            onClick={() => {
+              if (!unit.disabled) onChange(unit.id);
+            }}
             onKeyDown={(event) => {
               onKeyDown?.(event, index);
               if (!event.defaultPrevented) moveSelection(event, index, units, onChange);

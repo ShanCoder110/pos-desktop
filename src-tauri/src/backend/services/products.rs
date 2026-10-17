@@ -7,10 +7,11 @@ use crate::backend::{
     constants::{
         DEFAULT_BARCODE_PREFIX, DEFAULT_LOT_PREFIX, DEFAULT_SKU_PREFIX, ERROR_BASE_UNIT_CONVERSION,
         ERROR_INVALID_EXPIRY_DATE, ERROR_INVALID_PRODUCT_UNITS, ERROR_INVALID_RECEIVED_DATE,
-        ERROR_PRODUCT_NOT_FOUND, ERROR_SEARCH_TOO_SHORT, LOT_SOURCE_OPENING, MAX_PAGE_SIZE,
+        ERROR_PRODUCT_NOT_FOUND, ERROR_SEARCH_TOO_SHORT, ERROR_SKU_DUPLICATE,
+        ERROR_SKU_EDIT_DENIED, ERROR_SKU_INVALID, LOT_SOURCE_OPENING, MAX_PAGE_SIZE,
         MIN_SEARCH_LENGTH, PRODUCT_TYPE_MANUFACTURED, PRODUCT_TYPE_STANDARD,
         REFERENCE_PRODUCT_OPENING, SEQUENCE_KIND_LOT, SEQUENCE_KIND_PRODUCT_BARCODE,
-        SEQUENCE_KIND_PRODUCT_SKU, STOCK_MOVEMENT_ADJUSTMENT,
+        SEQUENCE_KIND_PRODUCT_SKU, SKU_MAX_LEN, STOCK_MOVEMENT_ADJUSTMENT,
     },
     context::RequestContext,
     dto::{
@@ -60,9 +61,11 @@ impl ProductService {
         if let Some(branch_id) = branch_id {
             list_query.branch_id = Some(branch_id.to_string());
         }
-        ProductRepository::list(database, &list_query)
+        let mut products = ProductRepository::list(database, &list_query)
             .await
-            .map(|result| result.0)
+            .map(|result| result.0)?;
+        annotate_matched_units(&mut products, query);
+        Ok(products)
     }
 
     pub async fn get(
@@ -91,9 +94,7 @@ impl ProductService {
         let transaction = database.begin().await?;
         let now = chrono::Utc::now();
         let product_id = Uuid::new_v4();
-        let sku =
-            SequenceRepository::next(&transaction, SEQUENCE_KIND_PRODUCT_SKU, DEFAULT_SKU_PREFIX)
-                .await?;
+        let sku = resolve_create_sku(&transaction, request.sku.as_deref()).await?;
         let barcode = if let Some(scanned) = trimmed(&request.barcode) {
             scanned
         } else {
@@ -139,7 +140,7 @@ impl ProductService {
         .await?;
 
         let mut units = request.sell_units.clone();
-        units.sort_by(|left, right| right.contains.cmp(&left.contains));
+        units.sort_by_key(|left| std::cmp::Reverse(left.contains));
         for (sort_order, unit) in units.into_iter().enumerate() {
             ProductRepository::insert_unit(
                 &transaction,
@@ -198,6 +199,31 @@ impl ProductService {
             }
         }
 
+        // Omit / blank / same SKU → leave unchanged. Real change → owner/manager only.
+        let next_sku = match request
+            .sku
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            None => None,
+            Some(raw) => {
+                let sku = normalize_custom_sku(raw)?;
+                if sku.eq_ignore_ascii_case(model.sku.as_str()) {
+                    None
+                } else {
+                    let role = context.role.trim().to_uppercase();
+                    if role != "OWNER" && role != "MANAGER" {
+                        return Err(AppError::Forbidden(ERROR_SKU_EDIT_DENIED));
+                    }
+                    if ProductRepository::sku_taken(database, &sku, Some(id)).await? {
+                        return Err(AppError::Validation(ERROR_SKU_DUPLICATE.into()));
+                    }
+                    Some(sku)
+                }
+            }
+        };
+
         let transaction = database.begin().await?;
         let now = chrono::Utc::now();
         let mut active: product::ActiveModel = model.into();
@@ -207,6 +233,9 @@ impl ProductService {
         }
         if let Some(category_id) = request.category_id {
             active.category_id = Set(parse_uuid(&category_id, "categoryId")?);
+        }
+        if let Some(sku) = next_sku {
+            active.sku = Set(sku);
         }
         if let Some(minimum_stock) = request.minimum_stock {
             active.minimum_stock = Set(minimum_stock);
@@ -251,7 +280,7 @@ impl ProductService {
                 }
             }
             let mut units = sell_units;
-            units.sort_by(|left, right| right.is_base.cmp(&left.is_base));
+            units.sort_by_key(|left| std::cmp::Reverse(left.is_base));
             let models = units
                 .into_iter()
                 .enumerate()
@@ -492,6 +521,69 @@ fn normalize_create(request: &mut CreateProductRequest) {
     }
 }
 
+/// Allowed: letters, digits, `-`, `_`, `.`, `/`. Max [`SKU_MAX_LEN`]. Trimmed.
+fn normalize_custom_sku(raw: &str) -> Result<String, AppError> {
+    let sku = raw.trim();
+    if sku.is_empty() {
+        return Err(AppError::Validation(ERROR_SKU_INVALID.into()));
+    }
+    if sku.chars().count() > SKU_MAX_LEN {
+        return Err(AppError::Validation(ERROR_SKU_INVALID.into()));
+    }
+    if !sku
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+    {
+        return Err(AppError::Validation(ERROR_SKU_INVALID.into()));
+    }
+    Ok(sku.to_owned())
+}
+
+async fn resolve_create_sku(
+    transaction: &sea_orm::DatabaseTransaction,
+    requested: Option<&str>,
+) -> Result<String, AppError> {
+    if let Some(raw) = requested.map(str::trim).filter(|s| !s.is_empty()) {
+        let sku = normalize_custom_sku(raw)?;
+        if ProductRepository::sku_taken(transaction, &sku, None).await? {
+            return Err(AppError::Validation(ERROR_SKU_DUPLICATE.into()));
+        }
+        return Ok(sku);
+    }
+    // Auto P-#### — skip any value already taken by a custom SKU.
+    for _ in 0..10_000 {
+        let candidate =
+            SequenceRepository::next(transaction, SEQUENCE_KIND_PRODUCT_SKU, DEFAULT_SKU_PREFIX)
+                .await?;
+        if !ProductRepository::sku_taken(transaction, &candidate, None).await? {
+            return Ok(candidate);
+        }
+    }
+    Err(AppError::Internal(
+        "Could not allocate a unique product SKU.".into(),
+    ))
+}
+
+/// Exact product barcode → default unit (no matched_unit_id).
+/// Exact sell-unit barcode → that unit id for POS preselection.
+fn annotate_matched_units(products: &mut [ProductResponse], query: &str) {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return;
+    }
+    for product in products.iter_mut() {
+        if !product.barcode.is_empty() && product.barcode.to_lowercase() == needle {
+            product.matched_unit_id = None;
+            continue;
+        }
+        product.matched_unit_id = product
+            .sell_units
+            .iter()
+            .find(|unit| !unit.barcode.is_empty() && unit.barcode.to_lowercase() == needle)
+            .map(|unit| unit.id.clone());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rust_decimal::Decimal;
@@ -654,12 +746,155 @@ mod tests {
             .await
             .expect("create product transaction");
         assert_eq!(product.name, "Switch");
-        assert!(product.sku.starts_with("P-"));
-        assert_ne!(product.sku, "CLIENT-SKU");
+        assert_eq!(product.sku, "CLIENT-SKU");
         assert_eq!(product.stock, 5.0);
         assert_eq!(product.cost, 10.0);
         assert_eq!(product.sell_units.len(), 1);
         let _ = Database::connect("sqlite::memory:").await;
+    }
+
+    #[tokio::test]
+    async fn custom_sku_pmx002_stored_and_duplicate_rejected() {
+        let database = connect_memory().await.expect("memory db");
+        seed_test_owner(&database).await;
+        let context = RequestContext {
+            session_id: Uuid::new_v4(),
+            user_id: Uuid::parse_str(SEED_USER_ID).unwrap(),
+            branch_id: Uuid::parse_str(SEED_BRANCH_ID).unwrap(),
+            device_id: Uuid::parse_str(SEED_DEVICE_ID).unwrap(),
+            cash_session_id: None,
+            role: "OWNER".into(),
+            name: "Owner".into(),
+            username: "owner".into(),
+        };
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "SkuQA".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("piece");
+
+        let base = |name: &str, sku: Option<&str>| CreateProductRequest {
+            name: name.into(),
+            category_id: category.id.clone(),
+            base_unit_id: unit.id.clone(),
+            created_by: None,
+            sku: sku.map(str::to_owned),
+            barcode: None,
+            is_manufactured: false,
+            track_lots: true,
+            track_expiry: false,
+            minimum_stock: Decimal::ZERO,
+            warranty_qty: None,
+            warranty_unit: None,
+            warranty_note: None,
+            sell_units: vec![ProductUnitInput {
+                id: None,
+                unit_id: unit.id.clone(),
+                name: "Piece".into(),
+                contains: Decimal::ONE,
+                cost: Decimal::new(5, 0),
+                min: Decimal::new(5, 0),
+                wholesale: Decimal::new(8, 0),
+                price: Decimal::new(10, 0),
+                barcode: None,
+                factor_direction: None,
+                is_base: true,
+                is_default: true,
+            }],
+            opening_stock: None,
+            opening_stocks: vec![],
+        };
+
+        let created = ProductService::create(&database, &context, base("Matrix", Some("PMX-002")))
+            .await
+            .expect("create PMX-002");
+        assert_eq!(created.sku, "PMX-002");
+
+        let dup = ProductService::create(&database, &context, base("Dup", Some("pmx-002")))
+            .await
+            .expect_err("case-insensitive duplicate");
+        assert!(
+            matches!(dup, AppError::Validation(ref m) if m.contains("SKU") || m.contains("already")),
+            "expected 422-style validation, got {dup:?}"
+        );
+
+        let auto = ProductService::create(&database, &context, base("Auto", None))
+            .await
+            .expect("blank sku auto-generates");
+        assert!(
+            auto.sku.starts_with("P-"),
+            "expected auto P-#### got {}",
+            auto.sku
+        );
+
+        // Edit without sku field keeps custom SKU.
+        let kept = ProductService::update(
+            &database,
+            &context,
+            Uuid::parse_str(&created.id).unwrap(),
+            UpdateProductRequest {
+                name: Some("Matrix Renamed".into()),
+                category_id: None,
+                sku: None,
+                minimum_stock: None,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                is_active: None,
+                sell_units: None,
+            },
+        )
+        .await
+        .expect("rename without sku");
+        assert_eq!(kept.sku, "PMX-002");
+        assert_eq!(kept.name, "Matrix Renamed");
+
+        let cashier = RequestContext {
+            role: "CASHIER".into(),
+            ..context.clone()
+        };
+        let denied = ProductService::update(
+            &database,
+            &cashier,
+            Uuid::parse_str(&created.id).unwrap(),
+            UpdateProductRequest {
+                name: None,
+                category_id: None,
+                sku: Some("PMX-009".into()),
+                minimum_stock: None,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                is_active: None,
+                sell_units: None,
+            },
+        )
+        .await
+        .expect_err("cashier cannot edit sku");
+        assert!(matches!(denied, AppError::Forbidden(_)));
     }
 
     #[tokio::test]
@@ -924,6 +1159,7 @@ mod tests {
             UpdateProductRequest {
                 name: Some("Cable updated".into()),
                 category_id: None,
+                sku: None,
                 minimum_stock: Some(Decimal::new(3, 0)),
                 warranty_qty: None,
                 warranty_unit: None,
@@ -960,6 +1196,7 @@ mod tests {
             UpdateProductRequest {
                 name: Some("Cable updated again".into()),
                 category_id: None,
+                sku: None,
                 minimum_stock: None,
                 warranty_qty: None,
                 warranty_unit: None,
@@ -988,5 +1225,272 @@ mod tests {
         assert_eq!(updated_again.sell_units.len(), 1);
         assert_eq!(updated_again.sell_units[0].id, unit_row_id);
         assert_eq!(updated_again.sell_units[0].cost, 12.0);
+    }
+
+    #[tokio::test]
+    async fn search_matches_unit_barcodes_and_annotates_matched_unit() {
+        let database = connect_memory().await.expect("memory db");
+        seed_test_owner(&database).await;
+        let context = RequestContext {
+            session_id: Uuid::new_v4(),
+            user_id: Uuid::parse_str(SEED_USER_ID).unwrap(),
+            branch_id: Uuid::parse_str(SEED_BRANCH_ID).unwrap(),
+            device_id: Uuid::parse_str(SEED_DEVICE_ID).unwrap(),
+            cash_session_id: None,
+            role: "OWNER".into(),
+            name: "Owner".into(),
+            username: "owner".into(),
+        };
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "BarcodeQA".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("create category");
+        let units = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("load seeded units")
+            .data;
+        let piece_master = units
+            .iter()
+            .find(|unit| unit.symbol.as_deref() == Some("pc"))
+            .expect("seeded Piece unit");
+        let pack_master = units
+            .iter()
+            .find(|unit| unit.symbol.as_deref() == Some("pk"))
+            .expect("seeded Pack unit");
+
+        const PIECE_BARCODE: &str = "6281000000001";
+        const PACK_BARCODE: &str = "6281000000012";
+
+        let created = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "QA Barcode Widget".into(),
+                category_id: category.id,
+                base_unit_id: piece_master.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: Some(PIECE_BARCODE.into()),
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![
+                    ProductUnitInput {
+                        id: None,
+                        unit_id: piece_master.id.clone(),
+                        name: "Piece".into(),
+                        contains: Decimal::ONE,
+                        cost: Decimal::new(8, 0),
+                        min: Decimal::new(10, 0),
+                        wholesale: Decimal::new(12, 0),
+                        price: Decimal::new(15, 0),
+                        barcode: Some(PIECE_BARCODE.into()),
+                        factor_direction: None,
+                        is_base: true,
+                        is_default: true,
+                    },
+                    ProductUnitInput {
+                        id: None,
+                        unit_id: pack_master.id.clone(),
+                        name: "Pack".into(),
+                        contains: Decimal::new(10, 0),
+                        cost: Decimal::new(80, 0),
+                        min: Decimal::new(100, 0),
+                        wholesale: Decimal::new(114, 0),
+                        price: Decimal::new(140, 0),
+                        barcode: Some(PACK_BARCODE.into()),
+                        factor_direction: Some("multiply".into()),
+                        is_base: false,
+                        is_default: false,
+                    },
+                ],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(100, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("create product with piece/pack barcodes");
+
+        let piece_unit = created
+            .sell_units
+            .iter()
+            .find(|unit| unit.is_base)
+            .expect("piece unit");
+        let pack_unit = created
+            .sell_units
+            .iter()
+            .find(|unit| unit.name == "Pack")
+            .expect("pack unit");
+
+        let by_piece = ProductService::search(&database, PIECE_BARCODE, Some(context.branch_id))
+            .await
+            .expect("search piece barcode");
+        assert_eq!(by_piece.len(), 1);
+        assert_eq!(by_piece[0].id, created.id);
+        // Product barcode matches → default unit (no matched_unit_id).
+        assert_eq!(by_piece[0].matched_unit_id, None);
+        assert!(
+            by_piece[0]
+                .sell_units
+                .iter()
+                .any(|unit| unit.id == piece_unit.id && unit.is_default),
+            "piece remains the default sale unit"
+        );
+
+        let by_pack = ProductService::search(&database, PACK_BARCODE, Some(context.branch_id))
+            .await
+            .expect("search pack barcode");
+        assert_eq!(by_pack.len(), 1);
+        assert_eq!(by_pack[0].id, created.id);
+        assert_eq!(
+            by_pack[0].matched_unit_id.as_deref(),
+            Some(pack_unit.id.as_str())
+        );
+
+        let unknown = ProductService::search(&database, "6281999999999", Some(context.branch_id))
+            .await
+            .expect("search unknown barcode");
+        assert!(unknown.is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_matches_pmx001_sku_case_and_hyphen_insensitive() {
+        let database = connect_memory().await.expect("memory db");
+        seed_test_owner(&database).await;
+        let context = RequestContext {
+            session_id: Uuid::new_v4(),
+            user_id: Uuid::parse_str(SEED_USER_ID).unwrap(),
+            branch_id: Uuid::parse_str(SEED_BRANCH_ID).unwrap(),
+            device_id: Uuid::parse_str(SEED_DEVICE_ID).unwrap(),
+            cash_session_id: None,
+            role: "OWNER".into(),
+            name: "Owner".into(),
+            username: "owner".into(),
+        };
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "PmxCat".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let created = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Pricing Matrix Multi-Unit".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: Some("PMX-001".into()),
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(10, 0),
+                    wholesale: Decimal::new(12, 0),
+                    price: Decimal::new(15, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(50, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("create product for PMX search");
+        // Create ignores client SKU (auto P-####); set PMX-001 explicitly for lookup tests.
+        let pmx_id = Uuid::parse_str(&created.id).expect("product id");
+        let hex_id = pmx_id
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<String>();
+        sea_orm::ConnectionTrait::execute_unprepared(
+            &database,
+            &format!("UPDATE products SET sku = 'PMX-001' WHERE id = x'{hex_id}'"),
+        )
+        .await
+        .expect("set PMX-001 sku");
+
+        for needle in ["PMX-001", "pmx", "pmx001", "PMX001"] {
+            let hits = ProductService::search(&database, needle, Some(context.branch_id))
+                .await
+                .unwrap_or_else(|_| panic!("search {needle}"));
+            assert!(
+                hits.iter()
+                    .any(|p| p.id == created.id && p.sku == "PMX-001"),
+                "expected PMX-001 in results for {needle:?}, got {:?}",
+                hits.iter().map(|p| p.sku.as_str()).collect::<Vec<_>>()
+            );
+        }
     }
 }

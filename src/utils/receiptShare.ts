@@ -1,6 +1,8 @@
 import type { Customer, InvoiceLine } from "@/shared/types";
 import type { ShopSettings } from "@/shared/types";
 import { money } from "@/utils/format";
+import { isTauri } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 /** On-screen slip width (wider than physical printable for readability). */
 export function thermalWidthPx(paper: ShopSettings["paperWidth"] | undefined) {
@@ -49,9 +51,28 @@ export function buildReceiptText(opts: {
   return bits.filter((line) => line !== undefined).join("\n");
 }
 
+/** Converts common Pakistani local formats (03xx / 3xx) to WhatsApp's 92 country format. */
+export function whatsAppPhone(phone: string) {
+  let digits = phone.replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.startsWith("0")) digits = `92${digits.slice(1)}`;
+  else if (digits.length === 10 && digits.startsWith("3")) digits = `92${digits}`;
+  return digits;
+}
+
 export function whatsAppShareUrl(phone: string, text: string) {
-  const digits = phone.replace(/\D/g, "");
+  const digits = whatsAppPhone(phone);
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+}
+
+/** Opens WhatsApp/Web in desktop builds and a new browser tab during web development. */
+export async function openWhatsAppReceipt(phone: string, text: string) {
+  const url = whatsAppShareUrl(phone, text);
+  if (isTauri()) {
+    await openUrl(url);
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function waitForPrintFonts(doc: Document): Promise<void> {

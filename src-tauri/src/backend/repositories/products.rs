@@ -198,6 +198,35 @@ impl ProductRepository {
             .await?)
     }
 
+    /// Case-insensitive SKU collision check (active products only).
+    pub async fn sku_taken<C: ConnectionTrait>(
+        database: &C,
+        sku: &str,
+        exclude_id: Option<Uuid>,
+    ) -> Result<bool, AppError> {
+        let sql = if exclude_id.is_some() {
+            "SELECT COUNT(*) AS count FROM products
+             WHERE deleted_at IS NULL AND lower(sku) = lower(?) AND id != ?"
+        } else {
+            "SELECT COUNT(*) AS count FROM products
+             WHERE deleted_at IS NULL AND lower(sku) = lower(?)"
+        };
+        let mut values: Vec<sea_orm::Value> = vec![sku.into()];
+        if let Some(id) = exclude_id {
+            values.push(id.into());
+        }
+        let count = CountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            sql,
+            values,
+        ))
+        .one(database)
+        .await?
+        .map(|row| row.count)
+        .unwrap_or(0);
+        Ok(count > 0)
+    }
+
     pub async fn soft_delete(database: &DatabaseConnection, id: Uuid) -> Result<bool, AppError> {
         let Some(model) = Self::model(database, id).await? else {
             return Ok(false);
@@ -428,13 +457,30 @@ fn build_conditions(
         values.push(active.into());
     }
     if let Some(search) = &query.page.search {
-        parts.push("(lower(p.name) LIKE ? OR lower(p.sku) LIKE ? OR lower(p.barcode) LIKE ? OR lower(c.name) LIKE ?)".to_owned());
+        // Case-insensitive partial match on name/sku/barcode/category/unit barcodes.
+        // Also match hyphen/space-stripped SKU/barcode so "pmx001" hits "PMX-001".
+        parts.push(
+            "(lower(p.name) LIKE ? OR lower(p.sku) LIKE ? OR lower(p.barcode) LIKE ? OR lower(c.name) LIKE ? OR EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.deleted_at IS NULL AND lower(COALESCE(pu.barcode, '')) LIKE ?) OR replace(replace(lower(p.sku), '-', ''), ' ', '') LIKE ? OR replace(replace(lower(COALESCE(p.barcode, '')), '-', ''), ' ', '') LIKE ? OR EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.deleted_at IS NULL AND replace(replace(lower(COALESCE(pu.barcode, '')), '-', ''), ' ', '') LIKE ?))"
+                .to_owned(),
+        );
         let needle = format!("%{}%", search.to_lowercase());
+        let compact = format!(
+            "%{}%",
+            search
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .flat_map(|c| c.to_lowercase())
+                .collect::<String>()
+        );
         values.extend([
             needle.clone().into(),
             needle.clone().into(),
             needle.clone().into(),
+            needle.clone().into(),
             needle.into(),
+            compact.clone().into(),
+            compact.clone().into(),
+            compact.into(),
         ]);
     }
     crate::backend::util::push_in_uuids(
@@ -551,7 +597,7 @@ async fn hydrate(
         .into_iter()
         .map(|row| {
             let mut units = units_by_product.remove(&row.id).unwrap_or_default();
-            units.sort_by(|left, right| left.sort_order.cmp(&right.sort_order));
+            units.sort_by_key(|left| left.sort_order);
             let base = units
                 .iter()
                 .find(|unit| unit.is_base)
@@ -655,6 +701,7 @@ async fn hydrate(
                 branch_stock,
                 components: Vec::new(),
                 sell_units,
+                matched_unit_id: None,
                 is_active: row.is_active,
                 created_at: row.created_at.to_rfc3339(),
                 updated_at: row.updated_at.to_rfc3339(),

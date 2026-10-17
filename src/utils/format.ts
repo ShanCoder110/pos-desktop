@@ -53,25 +53,42 @@ export function formatEntityRef(prefix: string, id: string) {
   return `#${prefix}-${String(code).padStart(4, "0")}`;
 }
 
-export function formatDetailDate(iso?: string) {
+/**
+ * Shared local date-only for calendar fields (expiry, received).
+ * Example: `17 Oct 2026`
+ */
+export function formatTableDate(iso?: string | null) {
   if (!iso) return "—";
-  const date = new Date(iso);
+  const date = new Date(`${String(iso).slice(0, 10)}T00:00:00`);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
-
-/** Table cells — date and short local time (no raw ISO). */
-export function formatTableDateTime(iso?: string | null) {
-  if (!iso) return "—";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  const day = date.toLocaleDateString("en-GB", {
+  return date.toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",
   });
-  const time = date.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit" });
+}
+
+/**
+ * Shared local datetime for list/detail timestamps outside the POS sale screen.
+ * Example: `17 Oct 2026, 3:40 PM`
+ */
+export function formatTableDateTime(iso?: string | null) {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const day = formatTableDate(iso);
+  if (day === "—" || day === iso) return day;
+  const time = date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
   return `${day}, ${time}`;
+}
+
+/** Detail drawers — same shared local datetime formatter. */
+export function formatDetailDate(iso?: string) {
+  return formatTableDateTime(iso);
 }
 
 export function shortError(error: unknown, fallback: string) {

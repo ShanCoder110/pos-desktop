@@ -45,7 +45,8 @@ export interface EmployeeLedgerEntry {
   notes: string;
 }
 export type BranchType = "STORE" | "WAREHOUSE" | "REPAIR" | "PRODUCTION";
-export type PaymentStatus = "PAID" | "PARTIAL" | "CREDIT";
+export type PaymentStatus =
+  "PAID" | "PARTIAL" | "CREDIT" | "UNPAID" | "RETURNED" | "PARTIALLY_RETURNED";
 export type InvoiceState = "COMPLETED" | "CANCELLED";
 export type ReturnType = "REFUND" | "REPLACEMENT";
 export type ItemCondition = "GOOD" | "DAMAGED" | "WARRANTY";
@@ -167,6 +168,13 @@ export interface ProductLotRow {
   originalQuantity: number;
   remainingQuantity: number;
   damagedQuantity: number;
+  /** Committed sales qty — never original − left − damaged (that treats count-downs as sold). */
+  soldQuantity?: number;
+  /** Stock-count / adjustment shrinkage qty (cost only). */
+  shrunkQuantity?: number;
+  soldRevenue?: number;
+  soldProfit?: number;
+  shrinkCost?: number;
   receivedAt: string;
   expiryDate: string | null;
   createdBy: string;
@@ -193,11 +201,15 @@ export interface StockMovementRow {
   branchId: string;
   type: StockMoveType;
   quantity: number;
+  quantityBefore?: number | null;
+  quantityAfter?: number | null;
+  displayedUnitName?: string;
   referenceType: string;
   referenceId: string;
   notes: string;
   createdBy: string;
   createdAt: string;
+  productName?: string;
 }
 
 export interface StockTransferItemRow {
@@ -247,6 +259,17 @@ export interface SupplierRow {
   updatedAt?: string;
 }
 
+export interface InvoicePaymentRow {
+  id: string;
+  amount: number;
+  amountTendered?: number | null;
+  changeAmount?: number;
+  paymentMethod: string;
+  referenceNumber?: string | null;
+  status: string;
+  paidAt?: string;
+}
+
 export interface InvoiceRow {
   id: string;
   invoiceNumber: string;
@@ -263,6 +286,8 @@ export interface InvoiceRow {
   createdBy: string;
   createdAt: string;
   items: InvoiceItemRow[];
+  /** Completed tender rows — required for POS edit payment prefill (split/cash/online). */
+  payments?: InvoicePaymentRow[];
 }
 
 export interface InvoiceItemRow {

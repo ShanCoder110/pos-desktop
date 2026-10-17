@@ -37,8 +37,9 @@ import {
 } from "@/shared/constants/dashboard";
 import { productsHref } from "@/shared/constants/products";
 import { routes } from "@/shared/constants/routes";
-import type { ExpenseRow, InvoiceRow, PaymentStatus, ReturnRow } from "@/shared/domain/types";
-import { money } from "@/utils/format";
+import type { ExpenseRow, InvoiceRow, ReturnRow } from "@/shared/domain/types";
+import { formatTableDateTime, money } from "@/utils/format";
+import { paymentStatusTone } from "@/utils/paymentStatus";
 import { ensureSession } from "@/services/auth";
 import { listAllReturns } from "@/services/credit";
 import { listAllExpenses, reportsAnalytics, reportsDashboard } from "@/services/finance";
@@ -46,12 +47,6 @@ import { listAllRepairs, type RepairResponse } from "@/services/repairs";
 import { listAllInvoices } from "@/services/sales";
 import { listAllTransfers } from "@/services/transfers";
 import { createLoadGuard } from "@/utils/async";
-
-function payTone(status: PaymentStatus) {
-  if (status === "PAID") return "ok" as const;
-  if (status === "PARTIAL") return "warn" as const;
-  return "danger" as const;
-}
 
 function weekdayLabel(date = new Date()) {
   return date.toLocaleDateString("en-GB", {
@@ -417,17 +412,10 @@ export function DashboardPage() {
                   >
                     <Td>
                       {row.invoiceNumber}
-                      <span className="sub">
-                        {new Date(row.createdAt).toLocaleString("en-GB", {
-                          day: "numeric",
-                          month: "short",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
+                      <span className="sub">{formatTableDateTime(row.createdAt)}</span>
                     </Td>
                     <Td>
-                      <Badge tone={payTone(row.paymentStatus)}>{row.paymentStatus}</Badge>
+                      <Badge tone={paymentStatusTone(row.paymentStatus)}>{row.paymentStatus}</Badge>
                     </Td>
                     <Td numeric>{money(row.total)}</Td>
                     <Td numeric>{money(row.paidAmount)}</Td>

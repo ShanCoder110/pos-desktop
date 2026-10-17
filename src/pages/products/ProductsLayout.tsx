@@ -31,6 +31,7 @@ import { useQueryTab } from "@/hooks/useQueryTab";
 import {
   PRODUCT_SECTION_TABS,
   PRODUCT_TAB_ALL,
+  STOCK_COUNT_ROLES,
   type ProductHealth,
   type ProductSectionTab,
 } from "@/shared/constants/products";
@@ -38,6 +39,7 @@ import type { ProductLotRow } from "@/shared/domain/types";
 import type { Product } from "@/shared/types";
 import { money, shortError } from "@/utils/format";
 import { createLoadGuard, isAbortError } from "@/utils/async";
+import { hubSideQuery } from "@/utils/hubLoad";
 import { toaster } from "@/components/common";
 import { openLotStockValue } from "@/pages/products/productFifo";
 import { PRODUCT_COPY } from "@/shared/constants/products";
@@ -51,7 +53,7 @@ import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { Outlet } from "react-router-dom";
 
 export type HubSection =
-  "catalog" | "lots" | "units" | "categories" | "transfers" | "reorders" | "low";
+  "catalog" | "lots" | "stock-count" | "units" | "categories" | "transfers" | "reorders" | "low";
 
 export function matchesHealth(row: Product, kpi: ProductHealth) {
   if (kpi === "healthy") return row.stock >= (row.minimumStock ?? 20);
@@ -63,6 +65,7 @@ export function matchesHealth(row: Product, kpi: ProductHealth) {
 export function hubSection(tab: string): HubSection {
   if (
     tab === "lots" ||
+    tab === "stock-count" ||
     tab === "units" ||
     tab === "categories" ||
     tab === "transfers" ||
@@ -564,6 +567,7 @@ function ProductHubKpis() {
     );
   }
   if (section === "lots") return <LotsKpis />;
+  if (section === "stock-count") return null;
   if (section === "units") return <UnitsKpis />;
   if (section === "categories") return <CategoriesKpis />;
   if (section === "transfers") return <TransfersKpis />;
@@ -573,7 +577,17 @@ function ProductHubKpis() {
 }
 
 export function ProductsLayout() {
-  const [tab, setTab] = useQueryTab(PRODUCT_SECTION_TABS, PRODUCT_TAB_ALL);
+  const [viewerRole, setViewerRole] = useState<string | null>(null);
+  const sectionTabs = useMemo(
+    () =>
+      PRODUCT_SECTION_TABS.filter(
+        (item) =>
+          // Wait until role is known — do not flash Stock count (or its fetches) for cashiers.
+          item.id !== "stock-count" || (viewerRole !== null && STOCK_COUNT_ROLES.has(viewerRole)),
+      ),
+    [viewerRole],
+  );
+  const [tab, setTab] = useQueryTab(sectionTabs, PRODUCT_TAB_ALL);
   const section = hubSection(tab);
   const [actions, setActions] = useState<ReactNode>(null);
   const [health, setHealth] = useState<ProductHealth | null>(null);
@@ -620,39 +634,57 @@ export function ProductsLayout() {
       if (guard && !guard.isActive()) return;
       setLoading((current) => ({ ...current, hub: true }));
       try {
-        await ensureSession();
+        // Products are required for the catalog. Side queries soft-fail only on
+        // 403 (e.g. GET /stock/movements?movementType=ADJUSTMENT for cashiers).
+        const session = await ensureSession(signal);
         if (guard && !guard.isActive()) return;
-        const [productRows, lotRows, categoryRows, unitRows, supplierRows, transferRows, poRows] =
-          await Promise.all([
-            listAllProducts(signal),
-            listAllLots({}, signal),
-            listMasterRecords(
-              "categories",
-              { perPage: MAX_PAGE_SIZE, isActive: true },
-              signal,
-            ).then((r) => r.data.map(({ id, name }) => ({ id, name }))),
-            listMasterRecords("units", { perPage: MAX_PAGE_SIZE, isActive: true }, signal).then(
-              (r) => r.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" })),
-            ),
-            listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, signal).then((r) =>
-              r.data.map(({ id, name, isActive, cityId, cityName }) => ({
-                id,
-                name,
-                isActive,
-                cityId,
-                cityName,
-              })),
-            ),
-            listAllTransfers({}, signal),
-            listAllPurchaseOrders({}, signal),
-          ]);
-        if (guard && !guard.isActive()) return;
+        const role = session?.user.role ?? null;
+        if (role) setViewerRole(role);
+
+        const productRows = await listAllProducts(signal);
+        if (signal?.aborted || (guard && !guard.isActive())) return;
         setProducts(productRows);
+
+        const [lotRows, categoryRows, unitRows, supplierRows, transferRows, poRows] =
+          await Promise.all([
+            hubSideQuery(listAllLots({}, signal), []),
+            hubSideQuery(
+              listMasterRecords(
+                "categories",
+                { perPage: MAX_PAGE_SIZE, isActive: true },
+                signal,
+              ).then((r) => r.data.map(({ id, name }) => ({ id, name }))),
+              [],
+            ),
+            hubSideQuery(
+              listMasterRecords("units", { perPage: MAX_PAGE_SIZE, isActive: true }, signal).then(
+                (r) => r.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" })),
+              ),
+              [],
+            ),
+            hubSideQuery(
+              listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, signal).then((r) =>
+                r.data.map(({ id, name, isActive, cityId, cityName }) => ({
+                  id,
+                  name,
+                  isActive,
+                  cityId,
+                  cityName,
+                })),
+              ),
+              [],
+            ),
+            hubSideQuery(listAllTransfers({}, signal), []),
+            hubSideQuery(listAllPurchaseOrders({}, signal), []),
+          ]);
+        if (signal?.aborted || (guard && !guard.isActive())) return;
         setLots(lotRows);
         setCategories(categoryRows);
         setUnits(unitRows);
         setSuppliers(supplierRows);
-        setTransfers(transferRows.map((t) => ({ id: t.id, status: t.status, items: t.items })));
+        setTransfers(
+          transferRows.map((t) => ({ id: t.id, status: t.status, items: t.items ?? [] })),
+        );
         setPurchaseOrders(
           poRows.map((row) => ({ id: row.id, status: row.status, total: row.total })),
         );
@@ -732,6 +764,20 @@ export function ProductsLayout() {
 
   useEffect(() => {
     const controller = new AbortController();
+    void ensureSession(controller.signal)
+      .then((session) => setViewerRole(session?.user.role ?? null))
+      .catch(() => setViewerRole(null));
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (tab === "stock-count" && viewerRole && !STOCK_COUNT_ROLES.has(viewerRole)) {
+      setTab(PRODUCT_TAB_ALL);
+    }
+  }, [tab, viewerRole, setTab]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     const guard = createLoadGuard();
     void refreshHub(controller.signal, guard);
     return () => {
@@ -753,7 +799,7 @@ export function ProductsLayout() {
         <TabSheet
           tabs={
             <Tabs
-              items={[...PRODUCT_SECTION_TABS]}
+              items={[...sectionTabs]}
               value={tab}
               onChange={(id) => setTab(id as ProductSectionTab)}
               ariaLabel="Products sections"

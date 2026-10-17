@@ -5,10 +5,14 @@ import {
   convertLineToUnit,
   balanceAfterSale,
   displayToBaseQty,
+  hasCompleteSellUnit,
   toBaseQty,
   lineProfit,
   lineTotal,
   posTierPrice,
+  priceModeForCustomerSwitch,
+  productMatchesQuery,
+  resolveMatchedUnitId,
   resolveSellUnit,
   unitTierPrice,
 } from "@/utils/salePricing";
@@ -21,7 +25,7 @@ const piece: ProductSellUnit = {
   min: 90,
   wholesale: 95,
   price: 100,
-  barcode: "",
+  barcode: "6281000000001",
   isBase: true,
   kind: "base",
 };
@@ -34,7 +38,7 @@ const pack: ProductSellUnit = {
   min: 1080,
   wholesale: 1140,
   price: 1200,
-  barcode: "",
+  barcode: "6281000000012",
   kind: "bigger",
 };
 
@@ -54,6 +58,7 @@ const product: Product = {
   id: "p1",
   name: "Widget",
   sku: "W1",
+  barcode: "6281000000001",
   category: "Test",
   unit: "pc",
   packQty: 12,
@@ -96,6 +101,13 @@ describe("conversions", () => {
     expect(lineProfit(2, 1200, 90)).toBe(2220);
     expect(lineTotal(0, 100)).toBe(0);
   });
+
+  it("requires enough stock for one complete pack", () => {
+    expect(hasCompleteSellUnit(pack, 4)).toBe(false);
+    expect(hasCompleteSellUnit(pack, 11.999)).toBe(false);
+    expect(hasCompleteSellUnit(pack, 12)).toBe(true);
+    expect(hasCompleteSellUnit(piece, 1)).toBe(true);
+  });
 });
 
 describe("balanceAfterSale", () => {
@@ -103,6 +115,18 @@ describe("balanceAfterSale", () => {
     expect(balanceAfterSale(330, 15, 0)).toBe(315);
     expect(balanceAfterSale(-1170, 15, 0)).toBe(-1185);
     expect(balanceAfterSale(10, 15, 0)).toBe(-5);
+  });
+});
+
+describe("priceModeForCustomerSwitch", () => {
+  it("resets to retail when switching to walk-in / guest", () => {
+    expect(priceModeForCustomerSwitch(true, "wholesale")).toBe("retail");
+    expect(priceModeForCustomerSwitch(true, "retail")).toBe("retail");
+  });
+
+  it("keeps the current mode when switching to a named customer", () => {
+    expect(priceModeForCustomerSwitch(false, "wholesale")).toBe("wholesale");
+    expect(priceModeForCustomerSwitch(false, "retail")).toBe("retail");
   });
 });
 
@@ -140,6 +164,34 @@ describe("resolveSellUnit", () => {
   });
 });
 
+describe("resolveMatchedUnitId / productMatchesQuery", () => {
+  it("product barcode keeps default unit; pack barcode preselects Pack", () => {
+    expect(resolveMatchedUnitId(product, "6281000000001")).toBeUndefined();
+    expect(resolveMatchedUnitId(product, "6281000000012")).toBe("u-pack");
+    expect(resolveMatchedUnitId(product, "6281000000012", "u-pack")).toBe("u-pack");
+    expect(resolveSellUnit(product, resolveMatchedUnitId(product, "6281000000012"))?.name).toBe(
+      "Pack",
+    );
+    expect(posTierPrice(product, "u-pack", "retail")).toBe(1200);
+  });
+
+  it("matches unit barcodes in search and ignores unknown codes", () => {
+    expect(productMatchesQuery(product, "6281000000012")).toBe(true);
+    expect(productMatchesQuery(product, "6281000000001")).toBe(true);
+    expect(productMatchesQuery(product, "6281999999999")).toBe(false);
+    expect(productMatchesQuery(product, "Widget")).toBe(true);
+  });
+
+  it("matches SKU PMX-001 case-insensitively and without hyphens", () => {
+    const pmx = { ...product, sku: "PMX-001", name: "Pricing Matrix Multi-Unit", barcode: "" };
+    expect(productMatchesQuery(pmx, "PMX-001")).toBe(true);
+    expect(productMatchesQuery(pmx, "pmx")).toBe(true);
+    expect(productMatchesQuery(pmx, "pmx001")).toBe(true);
+    expect(productMatchesQuery(pmx, "PMX001")).toBe(true);
+    expect(productMatchesQuery(pmx, "xyz")).toBe(false);
+  });
+});
+
 describe("edge cases", () => {
   it("zero retail on unit", () => {
     const free = { ...piece, price: 0 };
@@ -167,6 +219,17 @@ describe("cartLineTierPrices", () => {
     const w = cartLineTierPrices(product, "u-pack", "wholesale");
     expect(w.listPrice).toBe(1140);
     expect(w.minPrice).toBe(1080);
+    expect(w.usedRetailFallback).toBe(false);
+  });
+
+  it("falls back to retail when wholesale is 0 or unset", () => {
+    const noWholesale = {
+      ...product,
+      sellUnits: [{ ...pack, wholesale: 0 }],
+    };
+    const w = cartLineTierPrices(noWholesale, "u-pack", "wholesale");
+    expect(w.listPrice).toBe(1200);
+    expect(w.usedRetailFallback).toBe(true);
   });
 
   it("convertLineToUnit keeps base qty and applies target tier", () => {
@@ -176,6 +239,13 @@ describe("cartLineTierPrices", () => {
     const toPack = convertLineToUnit(product, 24, "wholesale", "u-pack");
     expect(toPack?.qty).toBe(2);
     expect(toPack?.listPrice).toBe(1140);
+  });
+
+  it("does not round away stock when a partial pack is selected", () => {
+    const toPack = convertLineToUnit(product, 1, "retail", "u-pack");
+    expect(toPack?.qty).toBeCloseTo(1 / 12, 12);
+    expect((toPack?.qty ?? 0) * 12).toBeCloseTo(1, 12);
+    expect((toPack?.qty ?? 0) * 1200).toBeCloseTo(100, 8);
   });
 
   it("preserves stock when switching from a roll to a subdivision", () => {

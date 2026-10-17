@@ -17,7 +17,7 @@ import type { TableExportColumn } from "@/utils/exportFile";
 import { useSalesHub } from "@/pages/sales/SalesLayout";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import type { ReturnRow } from "@/shared/domain/types";
-import { money } from "@/utils/format";
+import { formatTableDateTime, money } from "@/utils/format";
 
 export function ReturnsPage() {
   const { sectionKpi, returns, invoices, products } = useSalesHub();
@@ -46,7 +46,7 @@ export function ReturnsPage() {
   const shown = rows.slice((page - 1) * DEFAULT_PAGE_SIZE, page * DEFAULT_PAGE_SIZE);
 
   const exportColumns: TableExportColumn<ReturnRow>[] = [
-    { label: "When", value: (row) => row.createdAt },
+    { label: "When", value: (row) => formatTableDateTime(row.createdAt) },
     { label: "Invoice", value: (row) => invoiceLabel(row.invoiceId) },
     { label: "Customer", value: (row) => row.customerId || "Walk-in" },
     { label: "Type", value: (row) => row.type },
@@ -99,7 +99,7 @@ export function ReturnsPage() {
           {shown.length === 0 ? <EmptyRow cols={7} /> : null}
           {shown.map((row) => (
             <tr key={row.id}>
-              <Td>{row.createdAt}</Td>
+              <Td>{formatTableDateTime(row.createdAt)}</Td>
               <Td>{invoiceLabel(row.invoiceId)}</Td>
               <Td>{row.customerId || "Walk-in"}</Td>
               <Td>

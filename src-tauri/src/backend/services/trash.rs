@@ -36,7 +36,7 @@ impl TrashService {
         if TrashRepository::restore(database, entity, id).await? {
             Ok(())
         } else {
-            Err(AppError::NotFound("Record not in trash.".into()))
+            Err(AppError::NotFound("Record not in trash."))
         }
     }
 
@@ -58,7 +58,7 @@ impl TrashService {
         if TrashRepository::purge(database, entity, id).await? {
             Ok(())
         } else {
-            Err(AppError::NotFound("Record not in trash.".into()))
+            Err(AppError::NotFound("Record not in trash."))
         }
     }
 }

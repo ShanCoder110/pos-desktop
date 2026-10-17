@@ -15,9 +15,9 @@ VALUES
    'local-device-seed', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 INSERT OR IGNORE INTO customers
-  (id, name, phone, email, address, credit_limit, is_walk_in, notes, is_active, version, created_at, updated_at)
+  (id, name, phone, email, address, is_walk_in, notes, is_active, version, created_at, updated_at)
 VALUES
-  (X'20000000000040008000000000000004', 'Walk-in', '', NULL, '', NULL, 1, '', 1, 1,
+  (X'20000000000040008000000000000004', 'Walk-in', '', NULL, '', 1, '', 1, 1,
    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 INSERT OR IGNORE INTO localization_settings

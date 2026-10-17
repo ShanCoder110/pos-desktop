@@ -112,6 +112,28 @@ export function mapInvoice(row: InvoiceResponse): InvoiceRow {
     fifoCost: item.fifoCost,
     grossProfit: item.grossProfit,
   }));
+  const payments = (row.payments ?? []).map((raw) => {
+    const payment = raw as {
+      id?: string;
+      amount?: number;
+      amountTendered?: number | null;
+      changeAmount?: number;
+      paymentMethod?: string;
+      referenceNumber?: string | null;
+      status?: string;
+      paidAt?: string;
+    };
+    return {
+      id: payment.id ?? "",
+      amount: Number(payment.amount) || 0,
+      amountTendered: payment.amountTendered,
+      changeAmount: Number(payment.changeAmount) || 0,
+      paymentMethod: payment.paymentMethod ?? "CASH",
+      referenceNumber: payment.referenceNumber,
+      status: payment.status ?? "COMPLETED",
+      paidAt: payment.paidAt,
+    };
+  });
   return {
     id: row.id,
     invoiceNumber: row.invoiceNumber,
@@ -128,6 +150,7 @@ export function mapInvoice(row: InvoiceResponse): InvoiceRow {
     createdBy: row.cashierName,
     createdAt: row.createdAt,
     items,
+    payments,
   };
 }
 

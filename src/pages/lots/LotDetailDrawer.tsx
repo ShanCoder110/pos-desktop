@@ -6,10 +6,16 @@ import { DetailQtyDisplay } from "@/pages/products/DetailQtyDisplay";
 import { ensureSession } from "@/services/auth";
 import { lotUnitPricing, ProductUnitPricingList } from "@/pages/products/ProductUnitPricingCard";
 import {
-  formatLinkedQty,
+  lotShrinkCost,
+  lotShrunkQuantity,
+  lotSoldProfit,
+  lotSoldQuantity,
+  lotSoldRevenue,
+} from "@/pages/lots/lotMetrics";
+import {
+  formatMixedQty,
   formatStockQty,
   lotCostInStockUnit,
-  productBasePricing,
   unitLabel,
 } from "@/pages/products/productQty";
 import { LOT_COPY, PRODUCT_COPY } from "@/shared/constants/products";
@@ -17,13 +23,7 @@ import { REORDER_COPY } from "@/shared/constants/reorders";
 import type { ProductLotRow } from "@/shared/domain/types";
 import type { Product } from "@/shared/types";
 import { listAllBranches, type BranchResponse } from "@/services/org";
-import { cn, formatDetailDate, money } from "@/utils/format";
-
-function shortDate(iso: string) {
-  const date = new Date(`${iso.slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
+import { cn, formatDetailDate, formatTableDate, money } from "@/utils/format";
 
 export function LotDetailDrawer({
   lot,
@@ -33,6 +33,7 @@ export function LotDetailDrawer({
   onEdit,
   onReorder,
   onUnlink,
+  canEdit = true,
 }: {
   lot: ProductLotRow | null;
   product?: Product;
@@ -41,6 +42,7 @@ export function LotDetailDrawer({
   onEdit: (row: ProductLotRow) => void;
   onReorder: (productId: string) => void;
   onUnlink?: (lot: ProductLotRow) => void;
+  canEdit?: boolean;
 }) {
   const [branches, setBranches] = useState<BranchResponse[]>([]);
   const [sessionBranchId, setSessionBranchId] = useState("");
@@ -68,8 +70,11 @@ export function LotDetailDrawer({
   const fifoCost = product ? lotCostInStockUnit(product, lot.purchasePrice) : lot.purchasePrice;
   const stockValue = lot.remainingQuantity * fifoCost;
   const empty = lot.remainingQuantity <= 0;
-  const sold = Math.max(0, lot.originalQuantity - lot.remainingQuantity - lot.damagedQuantity);
-  const { retail } = product ? productBasePricing(product) : { retail: 0 };
+  const sold = lotSoldQuantity(lot);
+  const shrunk = lotShrunkQuantity(lot);
+  const revenue = lotSoldRevenue(lot);
+  const profit = lotSoldProfit(lot);
+  const shrinkCost = lotShrinkCost(lot);
 
   return (
     <Drawer
@@ -81,16 +86,18 @@ export function LotDetailDrawer({
     >
       <div className="product-detail">
         <DetailToolbar>
-          <DetailToolbarButton
-            variant="edit"
-            icon={<Pencil size={15} />}
-            onClick={() => {
-              onClose();
-              onEdit(lot);
-            }}
-          >
-            {LOT_COPY.editAction}
-          </DetailToolbarButton>
+          {canEdit ? (
+            <DetailToolbarButton
+              variant="edit"
+              icon={<Pencil size={15} />}
+              onClick={() => {
+                onClose();
+                onEdit(lot);
+              }}
+            >
+              {LOT_COPY.editAction}
+            </DetailToolbarButton>
+          ) : null}
           <DetailToolbarButton
             variant="accent"
             icon={<ShoppingCart size={15} />}
@@ -142,7 +149,7 @@ export function LotDetailDrawer({
             </strong>
             <small>
               {product
-                ? `of ${formatLinkedQty(product, lot.originalQuantity)}`
+                ? `of ${formatMixedQty(product, lot.originalQuantity)}`
                 : `of ${formatStockQty(lot.originalQuantity)} ${stockUnit}`}
             </small>
           </article>
@@ -162,7 +169,7 @@ export function LotDetailDrawer({
               <DetailQtyDisplay product={product} qty={sold} />
             </strong>
             <small>
-              {sold > 0 && product ? `Profit ${money(sold * (retail - fifoCost))}` : "No sales yet"}
+              {sold > 0 ? `Revenue ${money(revenue)} · Profit ${money(profit)}` : "No sales yet"}
             </small>
           </article>
         </div>
@@ -175,11 +182,11 @@ export function LotDetailDrawer({
           <dl className="product-detail-facts is-strong">
             <div>
               <dt>Received</dt>
-              <dd>{shortDate(lot.receivedAt)}</dd>
+              <dd>{formatTableDate(lot.receivedAt)}</dd>
             </div>
             <div>
-              <dt>Expiry</dt>
-              <dd>{lot.expiryDate ? shortDate(lot.expiryDate) : "—"}</dd>
+              <dt>{LOT_COPY.expiryLabel}</dt>
+              <dd>{formatTableDate(lot.expiryDate)}</dd>
             </div>
             <div>
               <dt>Original qty</dt>
@@ -191,6 +198,13 @@ export function LotDetailDrawer({
               <dt>Damaged</dt>
               <dd>
                 <DetailQtyDisplay product={product} qty={lot.damagedQuantity} />
+              </dd>
+            </div>
+            <div>
+              <dt>Shrinkage</dt>
+              <dd>
+                <DetailQtyDisplay product={product} qty={shrunk} />
+                {shrunk > 0 ? ` · cost ${money(shrinkCost)}` : null}
               </dd>
             </div>
           </dl>

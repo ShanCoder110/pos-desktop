@@ -6,6 +6,7 @@ import {
 
 export function PosSaleEntryControls({
   hasProduct,
+  categoryActive,
   unitFocused,
   units,
   unitId,
@@ -23,6 +24,7 @@ export function PosSaleEntryControls({
   onAdd,
 }: {
   hasProduct: boolean;
+  categoryActive: boolean;
   unitFocused: boolean;
   units: UnitSegmentOption[];
   unitId: string;
@@ -43,7 +45,18 @@ export function PosSaleEntryControls({
     <>
       <button
         type="button"
-        className="cat-btn inline-flex shrink-0 items-center justify-center gap-1.5 self-stretch whitespace-nowrap rounded-md border border-[#c7d2fe] bg-paper px-3 text-[13px] font-semibold text-sub"
+        className={`cat-btn inline-flex shrink-0 items-center justify-center gap-1.5 self-stretch whitespace-nowrap rounded-md border border-[#c7d2fe] bg-paper px-3 text-[13px] font-semibold text-sub ${categoryActive ? "is-active" : ""}`}
+        aria-pressed={categoryActive}
+        style={
+          categoryActive
+            ? {
+                background: "var(--accent)",
+                borderColor: "var(--accent)",
+                color: "#fff",
+                boxShadow: "0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent)",
+              }
+            : undefined
+        }
         onClick={onCategory}
       >
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -51,7 +64,19 @@ export function PosSaleEntryControls({
           <path d="M3.5 6.5V5.2A1.2 1.2 0 014.7 4h3.1l1.2 1.5" />
         </svg>
         <span>Categories</span>
-        <kbd>⇧F3</kbd>
+        <kbd
+          style={
+            categoryActive
+              ? {
+                  background: "rgb(255 255 255 / 12%)",
+                  borderColor: "rgb(255 255 255 / 38%)",
+                  color: "#fff",
+                }
+              : undefined
+          }
+        >
+          ⇧F3
+        </kbd>
       </button>
 
       <div
@@ -75,15 +100,13 @@ export function PosSaleEntryControls({
       <div
         className="price-mode flex shrink-0 self-stretch rounded-md border border-[#c7d2fe] bg-paper p-[3px]"
         role="group"
-        aria-label="Price mode"
-        style={{ opacity: hasProduct ? 1 : 0.45, pointerEvents: hasProduct ? "auto" : "none" }}
+        aria-label="Default price for search and new lines"
       >
         {(["retail", "wholesale"] as const).map((mode) => (
           <button
             key={mode}
             type="button"
             className={`mode-btn inline-flex min-w-[72px] flex-col items-center justify-center rounded-[5px] border-0 bg-transparent px-2.5 text-[12px] font-semibold capitalize text-sub ${priceMode === mode ? "is-active" : ""}`}
-            disabled={!hasProduct}
             onClick={() => onPriceMode(mode)}
           >
             {mode}

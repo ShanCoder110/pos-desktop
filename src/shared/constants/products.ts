@@ -6,12 +6,51 @@ export const PRODUCT_TAB_ALL = "all";
 export const PRODUCT_SECTION_TABS = [
   { id: PRODUCT_TAB_ALL, label: "All products" },
   { id: "lots", label: "Lots" },
+  { id: "stock-count", label: "Stock count" },
   { id: "units", label: "Units" },
   { id: "categories", label: "Categories" },
   { id: "transfers", label: "Transfers" },
   { id: "reorders", label: "Reorders" },
   { id: "low", label: "Low stock" },
 ] as const;
+
+/** Owners/managers only — cashiers must not see the Stock count tab. */
+export const STOCK_COUNT_ROLES = new Set(["OWNER", "MANAGER"]);
+
+export const STOCK_COUNT_COPY = {
+  title: "Stock count",
+  subtitle: "Count on-hand stock and post an adjustment",
+  product: "Product",
+  branch: "Branch",
+  unit: "Count unit",
+  currentBase: "System qty (base)",
+  currentInUnit: "System qty (unit)",
+  counted: "Counted qty",
+  difference: "Difference",
+  reason: "Reason",
+  reasonPlaceholder: "Why is the count different?",
+  reasonRequired: "Enter a reason",
+  reasonMax: "Reason must be 200 characters or less",
+  countedRequired: "Enter a counted quantity",
+  countedNegative: "Counted quantity cannot be negative",
+  countedTooLarge: "Counted quantity cannot exceed 1,000,000 base units",
+  save: "Save count",
+  saved: "Stock count saved",
+  saveFailed: "Could not save stock count",
+  history: "Adjustment history",
+  historyEmpty: "No stock adjustments yet",
+  supplierAdjust: "Adjust supplier payable",
+  supplierAdjustHint: "Optional — posts a supplier ledger adjustment",
+  supplier: "Supplier",
+  supplierAmount: "Amount",
+  denied: "Only owners and managers can count stock",
+  pickProduct: "Choose a product",
+  pickBranch: "Choose a branch",
+  pickUnit: "Choose a unit",
+  leftLockedHint: "Use Stock count to change quantity",
+  loadFailed: "Could not load stock movements",
+  retry: "Retry",
+} as const;
 
 export type ProductSectionTab = (typeof PRODUCT_SECTION_TABS)[number]["id"];
 
@@ -195,6 +234,7 @@ export const LOT_COPY = {
   transferDescription: "Move stock between branches",
   editAction: "Edit",
   editDescription: "Adjust quantities, supplier, and prices",
+  editDeniedCashier: "Only owners and managers can edit lots",
   branchStockTitle: "Branch stock",
   branchStockHint: "Quantity left in each branch for this lot",
   branchSplitTitle: "Split between branches",
@@ -212,6 +252,12 @@ export const LOT_COPY = {
   filterCity: "City",
   valueLeftColumn: "Value left",
   filteredValueTotal: "Total value left",
+  loadFailed: "Could not load lots",
+  retry: "Retry",
+  expiryLabel: "Expiry",
+  expiryHint: "Optional. Leave blank to clear.",
+  expiryBeforeReceived: "Expiry cannot be before the received date",
+  expiryPastWarning: "Expiry is in the past — saved anyway",
 } as const;
 
 export const LOT_FILTER_FIELDS: {
@@ -252,6 +298,7 @@ export const LOT_TABLE_COLUMNS = [
   { id: "original", label: "Original" },
   { id: "left", label: "Left" },
   { id: "damaged", label: "Damaged" },
+  { id: "expiry", label: "Expiry" },
 ];
 
 export const CATEGORY_TABLE_COLUMNS = [

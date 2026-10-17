@@ -36,6 +36,7 @@ export const defaultSettings: ShopSettings = {
   tagline: RECEIPT_BRANDING.tagline,
   contactLine: RECEIPT_BRANDING.contactLine,
   promoUrdu: RECEIPT_BRANDING.promoUrdu,
+  receiptFontFamily: "thermal",
   itemsTableBordered: false,
   printerName: "XP-80C",
   printerPaperWidth: "MM_80",

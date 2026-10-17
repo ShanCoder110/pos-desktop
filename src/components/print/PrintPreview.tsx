@@ -9,7 +9,7 @@ import {
   printReceiptHtml,
   thermalLabel,
   thermalWidthPx,
-  whatsAppShareUrl,
+  openWhatsAppReceipt,
 } from "@/utils/receiptShare";
 import { jameelNooriFontFaceCss } from "@/utils/receiptPrintFonts";
 import { RECEIPT_THERMAL_CSS } from "@/utils/receiptThermalStyles";
@@ -112,7 +112,7 @@ export function PrintPreview({
 
   function handleWhatsApp() {
     if (!customer.phone) return;
-    window.open(whatsAppShareUrl(customer.phone, receiptText), "_blank", "noopener,noreferrer");
+    void openWhatsAppReceipt(customer.phone, receiptText);
   }
 
   return (

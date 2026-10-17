@@ -112,6 +112,7 @@ struct PartialAllocation {
     first_movement_id: Option<Uuid>,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn allocate_fifo_from_other_branches(
     transaction: &DatabaseTransaction,
     context: &RequestContext,
@@ -153,6 +154,7 @@ async fn allocate_fifo_from_other_branches(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn allocate_fifo_from_branch(
     transaction: &DatabaseTransaction,
     context: &RequestContext,
@@ -194,6 +196,7 @@ async fn allocate_fifo_from_branch(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn consume_lots(
     transaction: &DatabaseTransaction,
     context: &RequestContext,

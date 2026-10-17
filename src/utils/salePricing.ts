@@ -1,11 +1,7 @@
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { inventoryPerSellUnit, normalizeSellUnits } from "@/pages/products/productQty";
 import { productSellUnits as creditUnits } from "@/pages/credit/creditSaleUtils";
-import {
-  defaultTransactionUnit,
-  displayedToStockQuantity,
-  stockToDisplayedQuantity,
-} from "@/utils/unitConversion";
+import { defaultTransactionUnit, displayedToStockQuantity } from "@/utils/unitConversion";
 
 export type SalePriceTier = "retail" | "wholesale" | "minimum";
 
@@ -21,6 +17,51 @@ export function resolveSellUnit(product: Product, unitId?: string): ProductSellU
     if (hit) return hit;
   }
   return defaultTransactionUnit(product, units);
+}
+
+/** Exact product barcode → undefined (default unit). Exact sell-unit barcode → that unit. */
+export function resolveMatchedUnitId(
+  product: Product,
+  query: string,
+  matchedUnitId?: string | null,
+): string | undefined {
+  if (matchedUnitId) {
+    const hit = resolveSellUnit(product, matchedUnitId);
+    if (hit?.id) return hit.id;
+  }
+  const needle = query.trim().toLowerCase();
+  if (!needle) return undefined;
+  if ((product.barcode ?? "").toLowerCase() === needle) return undefined;
+  const unit = unitsForProduct(product).find(
+    (u) => (u.barcode ?? "").trim().toLowerCase() === needle,
+  );
+  return unit?.id;
+}
+
+/** Alphanumeric-only key so "pmx001" matches SKU "PMX-001". */
+export function productSearchCompactKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+export function productMatchesQuery(product: Product, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return false;
+  if ((product.name ?? "").toLowerCase().includes(q)) return true;
+  if ((product.sku ?? "").toLowerCase().includes(q)) return true;
+  if ((product.barcode ?? "").toLowerCase().includes(q)) return true;
+  if (unitsForProduct(product).some((u) => (u.barcode ?? "").toLowerCase().includes(q))) {
+    return true;
+  }
+  const compact = productSearchCompactKey(query);
+  if (!compact) return false;
+  if (productSearchCompactKey(product.sku ?? "").includes(compact)) return true;
+  if (productSearchCompactKey(product.barcode ?? "").includes(compact)) return true;
+  return unitsForProduct(product).some((u) =>
+    productSearchCompactKey(u.barcode ?? "").includes(compact),
+  );
 }
 
 /** Selling price for one displayed unit at the given tier (uses product_units row, not base×factor). */
@@ -64,6 +105,11 @@ export function displayToBaseQty(unit: ProductSellUnit, displayQty: number): num
   return round6(displayedToStockQuantity(unit, displayQty));
 }
 
+/** Whether inventory contains at least one complete unit (for example one full pack). */
+export function hasCompleteSellUnit(unit: ProductSellUnit, baseAvailable: number): boolean {
+  return baseAvailable + 0.000001 >= displayToBaseQty(unit, 1);
+}
+
 /** Positive balance is an advance. paidNow is money kept, not change handed back. */
 export function balanceAfterSale(currentBalance: number, billTotal: number, paidNow: number) {
   return +(currentBalance - billTotal + paidNow).toFixed(2);
@@ -83,17 +129,40 @@ export function unitCostPerDisplay(unit: ProductSellUnit): number {
 
 export type PosPriceMode = "retail" | "wholesale";
 
-/** List/min prices for a cart line's unit row at retail or wholesale (not base×factor). */
+/**
+ * P2-8: selecting Walk-in/guest forces retail for the cart toggle.
+ * Selecting a named customer keeps the cashier's current mode.
+ */
+export function priceModeForCustomerSwitch(
+  nextIsWalkIn: boolean,
+  currentMode: PosPriceMode,
+): PosPriceMode {
+  return nextIsWalkIn ? "retail" : currentMode;
+}
+
+/**
+ * List/min prices for a cart line's unit row at retail or wholesale (not base×factor).
+ * Wholesale with unset/0 unit wholesale falls back to that unit's retail price.
+ */
 export function cartLineTierPrices(
   product: Product,
   productUnitId: string,
   mode: PosPriceMode,
-): { listPrice: number; minPrice: number } {
+): { listPrice: number; minPrice: number; usedRetailFallback: boolean } {
   const unit = resolveSellUnit(product, productUnitId);
-  const tier = mode === "wholesale" ? "wholesale" : "retail";
-  const listPrice = unitTierPrice(unit, tier);
   const minPrice = unitTierPrice(unit, "minimum");
-  return { listPrice, minPrice };
+  if (mode !== "wholesale") {
+    return { listPrice: unitTierPrice(unit, "retail"), minPrice, usedRetailFallback: false };
+  }
+  const wholesale = unitTierPrice(unit, "wholesale");
+  if (wholesale > 0) {
+    return { listPrice: wholesale, minPrice, usedRetailFallback: false };
+  }
+  return {
+    listPrice: unitTierPrice(unit, "retail"),
+    minPrice,
+    usedRetailFallback: true,
+  };
 }
 
 /** When switching a line between sell units, keep base qty and apply target unit tier prices. */
@@ -110,19 +179,26 @@ export function convertLineToUnit(
   minPrice: number;
   sellUnit: string;
   packSize: number;
+  usedRetailFallback: boolean;
 } | null {
   const target = resolveSellUnit(product, targetUnitId);
   if (!target?.id) return null;
-  const tier = priceMode === "wholesale" ? "wholesale" : "retail";
-  const listPrice = unitTierPrice(target, tier);
-  const minPrice = unitTierPrice(target, "minimum");
+  const { listPrice, minPrice, usedRetailFallback } = cartLineTierPrices(
+    product,
+    target.id,
+    priceMode,
+  );
   return {
     productUnitId: target.id,
-    qty: +stockToDisplayedQuantity(target, baseQty).toFixed(4),
+    // Keep the unrounded converted quantity in cart state. The POS formats it for
+    // display, but calculations must retain the exact value (for example, one
+    // piece is 1 / 12 of a 12-piece pack, not 0.0833 packs).
+    qty: baseQty / stockPerUnit(target),
     listPrice,
     unitPrice: listPrice,
     minPrice,
     sellUnit: target.name || target.symbol || product.unit,
     packSize: stockPerUnit(target),
+    usedRetailFallback,
   };
 }

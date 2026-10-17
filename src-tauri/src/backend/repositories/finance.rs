@@ -376,33 +376,12 @@ impl FinanceRepository {
         .and_then(|row| row.value)
         .unwrap_or(Decimal::ZERO);
 
-        let credit = DecimalRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT CAST(COALESCE(SUM(balance_after), 0) AS REAL) AS value FROM (
-                SELECT customer_id, balance_after,
-                       ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY occurred_at DESC, created_at DESC) AS rn
-                FROM customer_ledger_entries
-                WHERE branch_id = ?
-              ) t WHERE rn = 1 AND balance_after > 0",
-            [branch_id.into()],
-        ))
-        .one(database)
-        .await;
-        // SQLite may not support window functions on older builds; fall back
-        let credit_outstanding = match credit {
-            Ok(Some(row)) => row.value.unwrap_or(Decimal::ZERO),
-            _ => {
-                DecimalRow::find_by_statement(Statement::from_sql_and_values(
-                    DbBackend::Sqlite,
-                    "SELECT CAST(COALESCE(SUM(debit - credit), 0) AS REAL) AS value FROM customer_ledger_entries WHERE branch_id = ?",
-                    [branch_id.into()],
-                ))
-                .one(database)
-                .await?
-                .and_then(|row| row.value)
-                .unwrap_or(Decimal::ZERO)
-            }
-        };
+        let credit_outstanding =
+            crate::backend::repositories::LedgerRepository::credit_outstanding(
+                database,
+                Some(branch_id),
+            )
+            .await?;
 
         let low_stock = CountRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,

@@ -377,17 +377,25 @@ export function splitStockQty(units: ProductSellUnit[], stockSymbol: string, sto
   return parts;
 }
 
-export function formatMixedQty(product: Product, stockQty: number) {
-  const units = productSellUnits(product);
-  const parts = splitStockQty(units, product.unit, stockQty);
+/** Whole packs + remainder pieces, e.g. `8 Pack + 7 Piece`. */
+export function formatMixedQtyFromUnits(
+  units: ProductSellUnit[],
+  stockSymbol: string,
+  stockQty: number,
+) {
+  const parts = splitStockQty(units, stockSymbol, stockQty);
   const bits = qtyUnits(units)
     .map((u) => {
       const n = parts[u.id];
       if (!n) return null;
-      return `${formatStockQty(n)} ${u.name || unitLabel(u.symbol || product.unit)}`;
+      return `${formatStockQty(n)} ${u.name || unitLabel(u.symbol || stockSymbol)}`;
     })
     .filter(Boolean);
-  return bits.join(" + ") || `0 ${unitLabel(product.unit)}`;
+  return bits.join(" + ") || `0 ${unitLabel(stockSymbol)}`;
+}
+
+export function formatMixedQty(product: Product, stockQty: number) {
+  return formatMixedQtyFromUnits(productSellUnits(product), product.unit, stockQty);
 }
 
 export function stockFromUnitQty(
@@ -436,15 +444,9 @@ export function displayQtyFromStock(
   return rounded;
 }
 
+/** Whole packs + remainder pieces (never decimal packs like `99980.2 Pack`). */
 export function formatLinkedQty(product: Product, stockQty: number) {
-  const units = productSellUnits(product);
-  const ordered = qtyUnits(units);
-  const list = ordered.length ? ordered : units;
-  const bits = list.map((u) => {
-    const n = qtyInUnit(units, product.unit, u, stockQty);
-    return `${formatStockQty(n)} ${u.name || unitLabel(u.symbol || product.unit)}`;
-  });
-  return bits.join(" = ") || `0 ${unitLabel(product.unit)}`;
+  return formatMixedQty(product, stockQty);
 }
 
 export function formatLinkedPrice(
