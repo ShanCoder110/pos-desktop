@@ -634,12 +634,13 @@ export function ProductsLayout() {
       if (guard && !guard.isActive()) return;
       setLoading((current) => ({ ...current, hub: true }));
       try {
-        await ensureSession();
+        // Products are required for the catalog. Side queries soft-fail only on
+        // 403 (e.g. GET /stock/movements?movementType=ADJUSTMENT for cashiers).
+        const session = await ensureSession(signal);
         if (guard && !guard.isActive()) return;
+        const role = session?.user.role ?? null;
+        if (role) setViewerRole(role);
 
-        // Products are required for the catalog. Side queries (lots, masters, POs, …)
-        // must not wipe the list or toast when one of them fails (e.g. cashier / role
-        // edges) — GET /products can succeed while Promise.all would reject.
         const productRows = await listAllProducts(signal);
         if (signal?.aborted || (guard && !guard.isActive())) return;
         setProducts(productRows);

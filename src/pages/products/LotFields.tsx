@@ -9,6 +9,7 @@ import {
   biggerUnit,
   cascadeDownPrices,
   displayQtyFromStock,
+  formatMixedQtyFromUnits,
   formatStockQty,
   priceFromStock,
   pricePerStock,
@@ -220,7 +221,12 @@ export function LotUnitLines({
                     inputMode="decimal"
                     maxLength={FIELD_LIMITS.qty}
                     placeholder="0"
-                    value={displayQty(displayQtyFromStock(units, stockSymbol, unit, left))}
+                    value={
+                      // Pack (and other non-base) Left: whole units + remainder, not 8.7 Pack.
+                      unitKind(unit) === "base"
+                        ? displayQty(displayQtyFromStock(units, stockSymbol, unit, left))
+                        : formatMixedQtyFromUnits(units, stockSymbol, left)
+                    }
                     disabled
                     readOnly
                   />

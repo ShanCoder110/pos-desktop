@@ -7,11 +7,12 @@ use uuid::Uuid;
 use crate::backend::{
     constants::{
         ERROR_BELOW_MINIMUM, ERROR_HOLD_NOT_FOUND, ERROR_INVOICE_ALREADY_VOIDED,
-        ERROR_INVOICE_NOT_FOUND, ERROR_WALK_IN_CREDIT, INVOICE_STATUS_CANCELLED,
-        INVOICE_STATUS_COMPLETED, LEDGER_ADJUSTMENT, LEDGER_SALE, MONEY_TYPE_SALE, MONEY_TYPE_VOID,
-        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED,
-        PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID, PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_UNPAID,
-        PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE, STOCK_MOVEMENT_SALE,
+        ERROR_INVOICE_NOT_FOUND, ERROR_INVOICE_RETURNED_CANNOT_VOID, ERROR_WALK_IN_CREDIT,
+        INVOICE_STATUS_CANCELLED, INVOICE_STATUS_COMPLETED, LEDGER_ADJUSTMENT, LEDGER_SALE,
+        MONEY_TYPE_SALE, MONEY_TYPE_VOID, PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT,
+        PAYMENT_STATUS_COMPLETED, PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID,
+        PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_PARTIALLY_RETURNED, PAYMENT_STATUS_RETURNED,
+        PAYMENT_STATUS_UNPAID, PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE, STOCK_MOVEMENT_SALE,
     },
     context::RequestContext,
     dto::{
@@ -552,6 +553,15 @@ impl SalesRepository {
         .ok_or(AppError::NotFound(ERROR_INVOICE_NOT_FOUND))?;
         if header.status == INVOICE_STATUS_CANCELLED || header.voided_at.is_some() {
             return Err(AppError::Conflict(ERROR_INVOICE_ALREADY_VOIDED.into()));
+        }
+        // Returns already restored stock and unwound credit/ledger — voiding again
+        // would double-reverse remaining qty, balance, and profit hold.
+        if header.payment_status == PAYMENT_STATUS_RETURNED
+            || header.payment_status == PAYMENT_STATUS_PARTIALLY_RETURNED
+        {
+            return Err(AppError::Validation(
+                ERROR_INVOICE_RETURNED_CANNOT_VOID.into(),
+            ));
         }
         let now = now_utc();
         let consumptions = ConsumptionRow::find_by_statement(Statement::from_sql_and_values(

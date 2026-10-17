@@ -209,8 +209,12 @@ pub const ERROR_STOCK_COUNT_DENIED: &str = "Only owners and managers can count s
 pub const ERROR_STOCK_COUNT_REASON_REQUIRED: &str =
     "Enter a reason for the stock count (max 200 characters).";
 pub const ERROR_STOCK_COUNT_NEGATIVE: &str = "Counted quantity cannot be negative.";
+pub const ERROR_STOCK_COUNT_TOO_LARGE: &str =
+    "Counted quantity cannot exceed 1,000,000 base units.";
 pub const ERROR_STOCK_COUNT_SUPPLIER_REQUIRED: &str =
     "supplierId and supplierAmount are required when adjustSupplierPayable is set.";
+/// Hard cap on stock-count counted quantity after conversion to base units.
+pub const MAX_STOCK_COUNT_BASE_UNITS: i64 = 1_000_000;
 pub const ERROR_INVOICE_NOT_FOUND: &str = "Invoice not found.";
 pub const ERROR_USER_NOT_FOUND: &str = "User not found.";
 pub const ERROR_BRANCH_NOT_FOUND: &str = "Branch not found.";
@@ -255,6 +259,8 @@ pub const ERROR_SUPPLIER_REQUIRED: &str = "supplierId is required for purchase r
 pub const ERROR_INVOICE_ALREADY_VOIDED: &str = "Invoice is already voided.";
 pub const ERROR_INVOICE_HAS_RETURNS: &str =
     "Returned invoices cannot be edited. Create a new sale instead.";
+pub const ERROR_INVOICE_RETURNED_CANNOT_VOID: &str =
+    "Returned invoices cannot be voided. Stock and ledger were already reversed by the return.";
 pub const ERROR_RETURN_EXCEEDS_SOLD: &str =
     "Return quantity exceeds the quantity still available on this invoice line.";
 pub const ERROR_EMPTY_SALE: &str = "Sale must include at least one item.";

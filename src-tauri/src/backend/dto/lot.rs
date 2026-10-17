@@ -2,6 +2,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError};
 
+use crate::backend::constants::MAX_STOCK_COUNT_BASE_UNITS;
+
 use super::PageQuery;
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -198,7 +200,9 @@ pub struct StockCountRequest {
     #[serde(default)]
     pub branch_id: Option<String>,
     pub product_unit_id: String,
-    #[validate(custom(function = "non_negative_decimal"))]
+    /// Displayed count in the chosen sell unit (converted to base server-side).
+    /// Rejects negatives; absolute cap is enforced on base units after conversion.
+    #[validate(custom(function = "stock_count_display_quantity"))]
     pub counted_quantity: Decimal,
     /// Required reason, max 200 characters.
     #[validate(length(min = 1, max = 200))]
@@ -264,6 +268,20 @@ fn non_negative_decimal(value: &Decimal) -> Result<(), ValidationError> {
 
 fn non_negative_optional_decimal(value: &Decimal) -> Result<(), ValidationError> {
     non_negative_decimal(value)
+}
+
+/// Displayed counted qty: non-negative and not absurdly large before unit conversion.
+fn stock_count_display_quantity(value: &Decimal) -> Result<(), ValidationError> {
+    if *value < Decimal::ZERO {
+        return Err(ValidationError::new("must_be_non_negative"));
+    }
+    // Cap display input at the base-unit max (1:1 units); pack conversion is
+    // re-checked after to_base in the stock-count service.
+    let max = Decimal::from(MAX_STOCK_COUNT_BASE_UNITS);
+    if *value > max {
+        return Err(ValidationError::new("stock_count_too_large"));
+    }
+    Ok(())
 }
 
 fn validate_receive_lot(value: &ReceiveLotRequest) -> Result<(), ValidationError> {

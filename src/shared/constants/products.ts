@@ -33,6 +33,7 @@ export const STOCK_COUNT_COPY = {
   reasonMax: "Reason must be 200 characters or less",
   countedRequired: "Enter a counted quantity",
   countedNegative: "Counted quantity cannot be negative",
+  countedTooLarge: "Counted quantity cannot exceed 1,000,000 base units",
   save: "Save count",
   saved: "Stock count saved",
   saveFailed: "Could not save stock count",

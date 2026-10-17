@@ -27,8 +27,10 @@ import { listAllInvoices, voidInvoice } from "@/services/sales";
 import { isAbortError } from "@/utils/async";
 import {
   canOpenInvoicePosEdit,
+  canVoidInvoice,
   invoicePosEditBlockReason,
   invoicePosEditSearch,
+  invoiceVoidBlockReason,
 } from "@/utils/invoicePosEdit";
 import { listAllBranches } from "@/services/org";
 import { listMasterRecords } from "@/services/masters";
@@ -219,23 +221,26 @@ export function InvoicesPage() {
         footer={
           <div className="flex w-full flex-wrap justify-end gap-2">
             {open?.status === "COMPLETED" ? (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const id = open.id;
-                  void voidInvoice(id, "Void")
-                    .then(() => {
-                      toaster.success("Invoice voided");
-                      setOpen(null);
-                      refreshHub();
-                    })
-                    .catch((error) =>
-                      toaster.error(error instanceof Error ? error.message : "Could not void"),
-                    );
-                }}
-              >
-                Void
-              </Button>
+              <span title={invoiceVoidBlockReason(open) ?? undefined}>
+                <Button
+                  variant="outline"
+                  disabled={!canVoidInvoice(open)}
+                  onClick={() => {
+                    const id = open.id;
+                    void voidInvoice(id, "Void")
+                      .then(() => {
+                        toaster.success("Invoice voided");
+                        setOpen(null);
+                        refreshHub();
+                      })
+                      .catch((error) =>
+                        toaster.error(error instanceof Error ? error.message : "Could not void"),
+                      );
+                  }}
+                >
+                  Void
+                </Button>
+              </span>
             ) : null}
             {open?.status === "COMPLETED" ? (
               <span title={invoicePosEditBlockReason(open) ?? undefined}>

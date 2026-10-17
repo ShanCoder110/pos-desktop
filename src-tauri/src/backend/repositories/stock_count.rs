@@ -12,9 +12,10 @@ use super::lots::{lot_committed_sold, lot_returned_to_supplier};
 use crate::backend::{
     constants::{
         DEFAULT_LOT_PREFIX, DEFAULT_STOCK_ADJUSTMENT_PREFIX, ERROR_INSUFFICIENT_STOCK,
-        ERROR_PRODUCT_NOT_FOUND, ERROR_STOCK_COUNT_NEGATIVE, ERROR_UNIT_NOT_FOUND,
-        LOT_SOURCE_ADJUSTMENT, REFERENCE_STOCK_ADJUSTMENT, SEQUENCE_KIND_LOT,
-        SEQUENCE_KIND_STOCK_ADJUSTMENT, STOCK_ADJUSTMENT_STATUS_POSTED, STOCK_MOVEMENT_ADJUSTMENT,
+        ERROR_PRODUCT_NOT_FOUND, ERROR_STOCK_COUNT_NEGATIVE, ERROR_STOCK_COUNT_TOO_LARGE,
+        ERROR_UNIT_NOT_FOUND, LOT_SOURCE_ADJUSTMENT, MAX_STOCK_COUNT_BASE_UNITS,
+        REFERENCE_STOCK_ADJUSTMENT, SEQUENCE_KIND_LOT, SEQUENCE_KIND_STOCK_ADJUSTMENT,
+        STOCK_ADJUSTMENT_STATUS_POSTED, STOCK_MOVEMENT_ADJUSTMENT,
     },
     context::RequestContext,
     dto::{StockCountResponse, StockReconcileFix, StockReconcileResponse},
@@ -138,6 +139,10 @@ impl StockCountRepository {
             unit.conversion_to_base,
             &unit.factor_direction,
         );
+        let max_base = Decimal::from(MAX_STOCK_COUNT_BASE_UNITS);
+        if counted_base > max_base {
+            return Err(AppError::Validation(ERROR_STOCK_COUNT_TOO_LARGE.into()));
+        }
         let old_qty = Self::branch_stock(transaction, input.product_id, input.branch_id).await?;
         let diff = quantity(counted_base - old_qty);
         let now = now_utc();

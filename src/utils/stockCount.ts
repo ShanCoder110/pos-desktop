@@ -41,3 +41,34 @@ export function stockCountAllowsFractions(symbol?: string, productIsLinear?: boo
 }
 
 export const STOCK_COUNT_REASON_MAX = 200;
+
+/** Shared with backend `MAX_STOCK_COUNT_BASE_UNITS` — counted qty after unit→base. */
+export const MAX_STOCK_COUNT_BASE_UNITS = 1_000_000;
+
+/** Whether a typed counted display value is usable (finite, non-negative). */
+export function stockCountCountedValid(raw: string, allowsFractions: boolean): boolean {
+  const trimmed = raw.trim();
+  if (trimmed === "") return false;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) return false;
+  if (!allowsFractions && !Number.isInteger(n)) return false;
+  return true;
+}
+
+/** Inline / toast reason when counted qty is invalid or over the base-unit cap. */
+export function stockCountCountedError(
+  raw: string,
+  countedBase: number,
+  allowsFractions: boolean,
+): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return "Enter a valid counted quantity";
+  if (n < 0) return "Counted quantity cannot be negative";
+  if (!allowsFractions && !Number.isInteger(n)) return "This unit only allows whole numbers";
+  if (countedBase > MAX_STOCK_COUNT_BASE_UNITS) {
+    return "Counted quantity cannot exceed 1,000,000 base units";
+  }
+  return null;
+}

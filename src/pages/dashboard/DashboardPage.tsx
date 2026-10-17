@@ -38,7 +38,7 @@ import {
 import { productsHref } from "@/shared/constants/products";
 import { routes } from "@/shared/constants/routes";
 import type { ExpenseRow, InvoiceRow, ReturnRow } from "@/shared/domain/types";
-import { money } from "@/utils/format";
+import { formatTableDateTime, money } from "@/utils/format";
 import { paymentStatusTone } from "@/utils/paymentStatus";
 import { ensureSession } from "@/services/auth";
 import { listAllReturns } from "@/services/credit";
@@ -412,14 +412,7 @@ export function DashboardPage() {
                   >
                     <Td>
                       {row.invoiceNumber}
-                      <span className="sub">
-                        {new Date(row.createdAt).toLocaleString("en-GB", {
-                          day: "numeric",
-                          month: "short",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
+                      <span className="sub">{formatTableDateTime(row.createdAt)}</span>
                     </Td>
                     <Td>
                       <Badge tone={paymentStatusTone(row.paymentStatus)}>{row.paymentStatus}</Badge>

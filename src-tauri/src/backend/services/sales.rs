@@ -1789,6 +1789,191 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn void_returned_invoice_rejected() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let mut context = ctx();
+
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "Void Return Cat".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let customer = MasterService::create(
+            &database,
+            MasterKind::Customer,
+            MasterRequest {
+                name: "Void Return Cust".into(),
+                symbol: None,
+                phone: Some("03008887766".into()),
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: Some(true),
+                previous_balance: None,
+            },
+            Some(&context),
+        )
+        .await
+        .expect("customer");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Void Return Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(10, 0),
+                    wholesale: Decimal::new(15, 0),
+                    price: Decimal::new(20, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(100, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let unit_id = product.sell_units[0].id.clone();
+
+        let session = AuthService::open_cash_session(
+            &database,
+            &context,
+            CashSessionOpenRequest {
+                opening_float: Decimal::new(100, 0),
+                notes: None,
+            },
+        )
+        .await
+        .expect("cash session");
+        context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
+
+        let sale = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "void-ret-sale".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::new(2, 0),
+                    unit_price: Decimal::new(20, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("credit sale");
+
+        CreditService::create_return(
+            &database,
+            &context,
+            CreateReturnRequest {
+                invoice_id: sale.id.clone(),
+                return_type: "REFUND".into(),
+                reason: "block void".into(),
+                notes: None,
+                items: vec![ReturnItemInput {
+                    invoice_item_id: sale.items[0].id.clone(),
+                    quantity: Decimal::new(2, 0),
+                    condition: "GOOD".into(),
+                    refund_amount: Decimal::new(40, 0),
+                    original_product_lot_id: None,
+                }],
+                replacements: vec![],
+            },
+        )
+        .await
+        .expect("full return");
+
+        let after = SalesService::get(&database, Uuid::parse_str(&sale.id).unwrap())
+            .await
+            .expect("returned invoice");
+        assert_eq!(after.payment_status, "RETURNED");
+
+        let err = SalesService::void(
+            &database,
+            &context,
+            Uuid::parse_str(&sale.id).unwrap(),
+            crate::backend::dto::VoidRequest {
+                reason: "should fail".into(),
+            },
+        )
+        .await
+        .expect_err("returned invoice must not void");
+        assert!(
+            err.to_string().to_lowercase().contains("void"),
+            "expected void rejection, got {err}"
+        );
+        assert!(matches!(
+            err,
+            crate::backend::errors::AppError::Validation(_)
+        ));
+    }
+
+    #[tokio::test]
     async fn revise_noop_keeps_ledger_credit_and_profit_hold() {
         let database = connect_memory().await.expect("memory db");
         seed_owner(&database).await;

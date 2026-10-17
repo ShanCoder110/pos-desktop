@@ -308,4 +308,24 @@ describe("gaz in 1 roll prices", () => {
     const product = { unit: "pc", sellUnits: [piece, pack] } as Product;
     expect(formatMixedQty(product, 19)).toBe("1 Pack + 7 Piece");
   });
+
+  it("shows 103 pieces as 8 Pack + 7 Piece (not 8.58 Pack)", () => {
+    const piece = unit({
+      id: "pc",
+      symbol: "pc",
+      name: "Piece",
+      contains: 1,
+      isBase: true,
+      factorDirection: "multiply",
+    });
+    const pack = unit({
+      id: "pk",
+      symbol: "pk",
+      name: "Pack",
+      contains: 12,
+      factorDirection: "multiply",
+    });
+    const product = { unit: "pc", sellUnits: [piece, pack] } as Product;
+    expect(formatMixedQty(product, 103)).toBe("8 Pack + 7 Piece");
+  });
 });

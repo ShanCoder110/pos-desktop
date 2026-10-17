@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   canOpenInvoicePosEdit,
+  canVoidInvoice,
   invoicePosEditBlockReason,
   invoicePosEditHref,
   invoicePosEditSearch,
+  invoiceVoidBlockReason,
 } from "@/utils/invoicePosEdit";
 
 describe("invoicePosEdit", () => {
@@ -27,5 +29,16 @@ describe("invoicePosEdit", () => {
       invoicePosEditBlockReason({ status: "COMPLETED", paymentStatus: "PARTIALLY_RETURNED" }),
     ).toMatch(/partially returned/i);
     expect(canOpenInvoicePosEdit({ status: "CANCELLED", paymentStatus: "PAID" })).toBe(false);
+  });
+
+  it("blocks void on returned invoices", () => {
+    expect(invoiceVoidBlockReason({ status: "COMPLETED", paymentStatus: "RETURNED" })).toMatch(
+      /voided/i,
+    );
+    expect(
+      invoiceVoidBlockReason({ status: "COMPLETED", paymentStatus: "PARTIALLY_RETURNED" }),
+    ).toMatch(/voided/i);
+    expect(canVoidInvoice({ status: "COMPLETED", paymentStatus: "PAID" })).toBe(true);
+    expect(canVoidInvoice({ status: "COMPLETED", paymentStatus: "RETURNED" })).toBe(false);
   });
 });

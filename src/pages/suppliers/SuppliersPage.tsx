@@ -46,6 +46,7 @@ import {
   adjustDelta,
   balanceInputDraft,
   cn,
+  formatTableDateTime,
   limitMoneyDraft,
   money,
   shortError,
@@ -423,14 +424,7 @@ function supplierQuery(
 }
 
 function when(iso: string) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatTableDateTime(iso);
 }
 
 export function SuppliersPage() {

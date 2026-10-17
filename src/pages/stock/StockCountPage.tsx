@@ -26,11 +26,13 @@ import { ensureSession } from "@/services/auth";
 import { listAllBranches, listAllUsers } from "@/services/org";
 import { countStock, listStock, listStockMovements, mapStockMovement } from "@/services/stock";
 import { isAbortError } from "@/utils/async";
-import { shortError } from "@/utils/format";
+import { formatTableDateTime, shortError } from "@/utils/format";
 import { formatStockQty } from "@/pages/products/productQty";
 import {
   displayedToBaseQty,
+  MAX_STOCK_COUNT_BASE_UNITS,
   stockCountAllowsFractions,
+  stockCountCountedError,
   stockCountDifference,
   STOCK_COUNT_REASON_MAX,
 } from "@/utils/stockCount";
@@ -81,15 +83,20 @@ export function StockCountPage() {
     product?.isLinear,
   );
   const countedNumber = Number(counted);
-  const countedValid =
-    counted.trim() !== "" && Number.isFinite(countedNumber) && countedNumber >= 0;
   const countedBase = unit
     ? displayedToBaseQty(
-        countedValid ? countedNumber : 0,
+        Number.isFinite(countedNumber) ? countedNumber : 0,
         unit.contains,
         unit.factorDirection === "divide" ? "divide" : "multiply",
       )
     : 0;
+  const countedFieldError = stockCountCountedError(counted, countedBase, allowsFractions);
+  const countedValid =
+    counted.trim() !== "" &&
+    Number.isFinite(countedNumber) &&
+    countedNumber >= 0 &&
+    countedBase <= MAX_STOCK_COUNT_BASE_UNITS &&
+    !countedFieldError;
   const difference = countedValid ? stockCountDifference(systemBase, countedBase) : 0;
   const systemInUnit =
     product && unit ? qtyInUnit(sellUnits, product.unit, unit, systemBase) : systemBase;
@@ -203,14 +210,16 @@ export function StockCountPage() {
       toaster.error(STOCK_COUNT_COPY.pickUnit);
       return;
     }
-    if (!countedValid) {
-      toaster.error(
-        countedNumber < 0 ? STOCK_COUNT_COPY.countedNegative : STOCK_COUNT_COPY.countedRequired,
-      );
+    if (counted.trim() === "") {
+      toaster.error(STOCK_COUNT_COPY.countedRequired);
       return;
     }
-    if (!allowsFractions && !Number.isInteger(countedNumber)) {
-      toaster.error("This unit only allows whole numbers");
+    if (countedFieldError) {
+      toaster.error(countedFieldError);
+      return;
+    }
+    if (!countedValid) {
+      toaster.error(STOCK_COUNT_COPY.countedRequired);
       return;
     }
     const trimmedReason = reason.trim();
@@ -340,7 +349,10 @@ export function StockCountPage() {
               disabled
             />
           </Field>
-          <Field label={STOCK_COUNT_COPY.counted}>
+          <Field
+            label={STOCK_COUNT_COPY.counted}
+            error={counted.trim() !== "" ? (countedFieldError ?? undefined) : undefined}
+          >
             <TextInput
               inputMode={allowsFractions ? "decimal" : "numeric"}
               maxLength={FIELD_LIMITS.qty}
@@ -455,7 +467,7 @@ export function StockCountPage() {
                     const diff = oldQty != null && newQty != null ? newQty - oldQty : row.quantity;
                     return (
                       <tr key={row.id}>
-                        <Td>{new Date(row.createdAt).toLocaleString()}</Td>
+                        <Td>{formatTableDateTime(row.createdAt)}</Td>
                         <Td>{row.productName ?? row.productId}</Td>
                         <Td>{row.displayedUnitName ?? "—"}</Td>
                         <Td numeric>{oldQty == null ? "—" : formatStockQty(oldQty)}</Td>

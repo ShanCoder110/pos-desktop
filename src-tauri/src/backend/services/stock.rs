@@ -49,6 +49,16 @@ impl StockService {
         context: &RequestContext,
         mut query: StockMovementListQuery,
     ) -> Result<Paginated<StockMovementResponse>, AppError> {
+        // Stock-count history filters ADJUSTMENT movements. Cashiers must not
+        // load that feed (403); product lot history without the filter stays open.
+        if query
+            .movement_type
+            .as_deref()
+            .map(|value| value.eq_ignore_ascii_case("ADJUSTMENT"))
+            .unwrap_or(false)
+        {
+            ensure_stock_count_permission(context)?;
+        }
         query.page = query.page.normalized();
         let (data, total) =
             StockRepository::list_movements(database, &query, Some(context.branch_id)).await?;
@@ -146,7 +156,7 @@ mod tests {
         db::connect_memory,
         dto::{
             CreateProductRequest, MasterRequest, OpeningStockInput, ProductUnitInput,
-            StockCountRequest,
+            StockCountRequest, StockMovementListQuery,
         },
         errors::AppError,
         repositories::{MasterKind, OrgRepository, StockCountRepository},
@@ -648,6 +658,102 @@ mod tests {
         assert!(
             matches!(forbidden, Err(AppError::Forbidden(_))),
             "cashier must get 403, got {forbidden:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stock_count_rejects_over_max_base_units() {
+        let database = connect_memory().await.expect("db");
+        seed_owner(&database).await;
+        let owner = ctx("OWNER");
+        let category_id = make_category(&database).await;
+        let pc = unit_id(&database, "pc").await;
+        let product = ProductService::create(
+            &database,
+            &owner,
+            CreateProductRequest {
+                name: "Max Count Widget".into(),
+                category_id,
+                base_unit_id: pc.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: pc,
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(1, 0),
+                    min: Decimal::new(1, 0),
+                    wholesale: Decimal::new(1, 0),
+                    price: Decimal::new(2, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(10, 0),
+                    cost: Decimal::new(1, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+
+        let err = StockService::count(
+            &database,
+            &owner,
+            StockCountRequest {
+                product_id: product.id,
+                branch_id: None,
+                product_unit_id: product.sell_units[0].id.clone(),
+                counted_quantity: Decimal::from(1_000_001),
+                reason: "too many".into(),
+                adjust_supplier_payable: false,
+                supplier_id: None,
+                supplier_amount: None,
+            },
+        )
+        .await
+        .expect_err("over max must 422");
+        assert!(
+            matches!(err, AppError::Validation(_)),
+            "expected validation, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stock_count_adjustment_history_cashier_forbidden() {
+        let database = connect_memory().await.expect("db");
+        seed_owner(&database).await;
+        let err = StockService::list_movements(
+            &database,
+            &ctx("CASHIER"),
+            StockMovementListQuery {
+                page: Default::default(),
+                product_id: None,
+                branch_id: None,
+                movement_type: Some("ADJUSTMENT".into()),
+            },
+        )
+        .await
+        .expect_err("cashier adjustment history must 403");
+        assert!(
+            matches!(err, AppError::Forbidden(_)),
+            "expected forbidden, got {err:?}"
         );
     }
 
