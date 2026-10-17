@@ -80,8 +80,10 @@ impl ProductService {
         context: &RequestContext,
         mut request: CreateProductRequest,
     ) -> Result<ProductResponse, AppError> {
-        normalize_create(&mut request);
+        // Validate raw input before normalize rewrites base contains to 1.
         request.validate()?;
+        validate_sell_unit_factors(&request.sell_units)?;
+        normalize_create(&mut request);
         validate_sell_units(&request.base_unit_id, &request.sell_units)?;
         let category_id = parse_uuid(&request.category_id, "categoryId")?;
         let base_unit_id = parse_uuid(&request.base_unit_id, "baseUnitId")?;
@@ -166,6 +168,9 @@ impl ProductService {
         id: Uuid,
         mut request: UpdateProductRequest,
     ) -> Result<ProductResponse, AppError> {
+        if let Some(units) = &request.sell_units {
+            validate_sell_unit_factors(units)?;
+        }
         if let Some(units) = &mut request.sell_units {
             for unit in units.iter_mut() {
                 unit.contains = quantity(unit.contains);
@@ -437,6 +442,17 @@ fn ensure_one_stock_unit(base_unit_id: &str, units: &mut [ProductUnitInput]) {
     }
 }
 
+fn validate_sell_unit_factors(units: &[ProductUnitInput]) -> Result<(), AppError> {
+    for unit in units {
+        if unit.contains <= Decimal::ZERO {
+            return Err(AppError::Validation(
+                "Unit conversion (contains) must be greater than zero.".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_sell_units(_base_unit_id: &str, units: &[ProductUnitInput]) -> Result<(), AppError> {
     let base_count = units.iter().filter(|unit| unit.is_base).count();
     if units.is_empty() || base_count != 1 {
@@ -449,6 +465,7 @@ fn validate_sell_units(_base_unit_id: &str, units: &[ProductUnitInput]) -> Resul
     if base.contains != Decimal::ONE {
         return Err(AppError::Validation(ERROR_BASE_UNIT_CONVERSION.into()));
     }
+    validate_sell_unit_factors(units)?;
     Ok(())
 }
 
@@ -643,6 +660,172 @@ mod tests {
         assert_eq!(product.cost, 10.0);
         assert_eq!(product.sell_units.len(), 1);
         let _ = Database::connect("sqlite::memory:").await;
+    }
+
+    #[tokio::test]
+    async fn rejects_sell_unit_contains_zero_before_normalize() {
+        let database = connect_memory().await.expect("memory db");
+        seed_test_owner(&database).await;
+        let context = RequestContext {
+            session_id: Uuid::new_v4(),
+            user_id: Uuid::parse_str(SEED_USER_ID).unwrap(),
+            branch_id: Uuid::parse_str(SEED_BRANCH_ID).unwrap(),
+            device_id: Uuid::parse_str(SEED_DEVICE_ID).unwrap(),
+            cash_session_id: None,
+            role: "OWNER".into(),
+            name: "Owner".into(),
+            username: "owner".into(),
+        };
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "ZeroContains".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("create category");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("load seeded units")
+            .data
+            .into_iter()
+            .find(|unit| unit.symbol.as_deref() == Some("pc"))
+            .expect("seeded Piece unit");
+        let request = CreateProductRequest {
+            name: "ZeroContainsBranch".into(),
+            category_id: category.id,
+            base_unit_id: unit.id.clone(),
+            created_by: None,
+            sku: None,
+            barcode: None,
+            is_manufactured: false,
+            track_lots: true,
+            track_expiry: false,
+            minimum_stock: Decimal::ZERO,
+            warranty_qty: None,
+            warranty_unit: None,
+            warranty_note: None,
+            sell_units: vec![ProductUnitInput {
+                id: None,
+                unit_id: unit.id,
+                name: "Piece".into(),
+                contains: Decimal::ZERO,
+                cost: Decimal::new(8, 0),
+                min: Decimal::new(10, 0),
+                wholesale: Decimal::new(12, 0),
+                price: Decimal::new(15, 0),
+                barcode: None,
+                factor_direction: None,
+                is_base: true,
+                is_default: true,
+            }],
+            opening_stock: None,
+            opening_stocks: vec![],
+        };
+        let err = ProductService::create(&database, &context, request)
+            .await
+            .expect_err("contains 0 must fail");
+        let message = err.to_string().to_lowercase();
+        assert!(
+            message.contains("contains")
+                || message.contains("positive")
+                || message.contains("greater")
+                || message.contains("validation"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn allows_create_with_zero_opening_stock() {
+        let database = connect_memory().await.expect("memory db");
+        seed_test_owner(&database).await;
+        let context = RequestContext {
+            session_id: Uuid::new_v4(),
+            user_id: Uuid::parse_str(SEED_USER_ID).unwrap(),
+            branch_id: Uuid::parse_str(SEED_BRANCH_ID).unwrap(),
+            device_id: Uuid::parse_str(SEED_DEVICE_ID).unwrap(),
+            cash_session_id: None,
+            role: "OWNER".into(),
+            name: "Owner".into(),
+            username: "owner".into(),
+        };
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "ZeroStock".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("create category");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("load seeded units")
+            .data
+            .into_iter()
+            .find(|unit| unit.symbol.as_deref() == Some("pc"))
+            .expect("seeded Piece unit");
+        let request = CreateProductRequest {
+            name: "ZeroStockProduct".into(),
+            category_id: category.id,
+            base_unit_id: unit.id.clone(),
+            created_by: None,
+            sku: None,
+            barcode: None,
+            is_manufactured: false,
+            track_lots: true,
+            track_expiry: false,
+            minimum_stock: Decimal::ZERO,
+            warranty_qty: None,
+            warranty_unit: None,
+            warranty_note: None,
+            sell_units: vec![ProductUnitInput {
+                id: None,
+                unit_id: unit.id,
+                name: "Piece".into(),
+                contains: Decimal::ONE,
+                cost: Decimal::new(8, 0),
+                min: Decimal::new(10, 0),
+                wholesale: Decimal::new(12, 0),
+                price: Decimal::new(15, 0),
+                barcode: None,
+                factor_direction: None,
+                is_base: true,
+                is_default: true,
+            }],
+            opening_stock: None,
+            opening_stocks: vec![],
+        };
+        let product = ProductService::create(&database, &context, request)
+            .await
+            .expect("create with zero opening stock");
+        assert_eq!(product.stock, 0.0);
+        assert_eq!(product.name, "ZeroStockProduct");
     }
 
     #[tokio::test]

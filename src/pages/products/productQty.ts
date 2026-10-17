@@ -721,6 +721,15 @@ export function assignBaseSymbol(units: ProductSellUnit[], symbol: string): Prod
 export type SellUnitsValidationError =
   "unitNameRequired" | "unitNameDuplicate" | "unitFactorInvalid" | "unitBaseRequired";
 
+/**
+ * Opening stock on create: zero is allowed (receive later via lots).
+ * Negatives are rejected.
+ */
+export function validateOpeningStock(stock: number): "openingQty" | null {
+  if (!Number.isFinite(stock) || stock < 0) return "openingQty";
+  return null;
+}
+
 /** Positive factors, unique names, exactly one preferred base. */
 export function validateSellUnits(units: ProductSellUnit[]): SellUnitsValidationError | null {
   const list = qtyUnits(units);
@@ -735,6 +744,7 @@ export function validateSellUnits(units: ProductSellUnit[]): SellUnitsValidation
     if (!name) return "unitNameRequired";
     if (seen.has(name)) return "unitNameDuplicate";
     seen.add(name);
+    // Non-stock units must have contains > 0 (0 and negatives are invalid).
     if (stock && unit.id !== stock.id && !(unit.contains > 0)) return "unitFactorInvalid";
   }
   return null;
