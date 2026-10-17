@@ -187,6 +187,7 @@ impl OrgRepository {
         .unwrap_or(false))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_user(
         database: &DatabaseConnection,
         id: Uuid,
@@ -227,6 +228,7 @@ impl OrgRepository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_user(
         database: &DatabaseConnection,
         id: Uuid,
@@ -422,6 +424,7 @@ impl OrgRepository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_branch(
         database: &DatabaseConnection,
         id: Uuid,
@@ -458,6 +461,7 @@ impl OrgRepository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_branch(
         database: &DatabaseConnection,
         id: Uuid,
@@ -493,6 +497,7 @@ impl OrgRepository {
         Ok(result.rows_affected() > 0)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn upsert_branch_settings(
         database: &DatabaseConnection,
         settings_id: Uuid,
@@ -673,6 +678,7 @@ impl OrgRepository {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn upsert_device_printer(
         database: &DatabaseConnection,
         id: Uuid,

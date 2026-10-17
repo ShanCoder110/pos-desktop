@@ -629,6 +629,7 @@ impl PurchasingRepository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn apply_lot_to_open_po(
         transaction: &DatabaseTransaction,
         context: &RequestContext,
@@ -1276,7 +1277,7 @@ async fn load_unit(
 
     if let Some(row) = UnitRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        &format!("{UNIT_SELECT} AND id = ? LIMIT 1"),
+        format!("{UNIT_SELECT} AND id = ? LIMIT 1"),
         [product_id.into(), unit_id.into()],
     ))
     .one(database)
@@ -1287,7 +1288,7 @@ async fn load_unit(
 
     if let Some(row) = UnitRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        &format!("{UNIT_SELECT} AND unit_id = ? LIMIT 1"),
+        format!("{UNIT_SELECT} AND unit_id = ? LIMIT 1"),
         [product_id.into(), unit_id.into()],
     ))
     .one(database)
@@ -1298,7 +1299,7 @@ async fn load_unit(
 
     UnitRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        &format!("{UNIT_SELECT} AND is_base = 1 LIMIT 1"),
+        format!("{UNIT_SELECT} AND is_base = 1 LIMIT 1"),
         [product_id.into()],
     ))
     .one(database)

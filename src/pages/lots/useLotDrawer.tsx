@@ -401,7 +401,7 @@ export function useLotDrawer() {
           : Math.round(next.remainingQuantity * 10000) / 10000;
       await updateLot(next.id, {
         supplierId: next.supplierId || undefined,
-        originalQuantity: next.originalQuantity,
+        // Original qty is immutable after movements — omit so a stale client cannot desync.
         remainingQuantity,
         damagedQuantity: next.damagedQuantity,
         cost: next.purchasePrice,

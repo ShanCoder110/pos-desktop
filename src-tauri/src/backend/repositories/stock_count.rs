@@ -397,6 +397,7 @@ async fn lot_max_remaining(
     Ok(quantity(original - sold - damaged - returned).max(Decimal::ZERO))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn insert_movement(
     transaction: &DatabaseTransaction,
     context: &RequestContext,
@@ -446,6 +447,7 @@ async fn insert_movement(
     Ok(movement_id)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn consume_fifo_down(
     transaction: &DatabaseTransaction,
     context: &RequestContext,
@@ -535,6 +537,7 @@ async fn consume_fifo_down(
     Ok(movement_ids)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn increase_stock(
     transaction: &DatabaseTransaction,
     context: &RequestContext,

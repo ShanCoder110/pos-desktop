@@ -690,9 +690,10 @@ export function LotForm({
                     left={lot.remainingQuantity}
                     damaged={lot.damagedQuantity}
                     showLeft={!isNew}
+                    lockReceived={!isNew}
                     showQuantity
                     showPricing
-                    onReceived={applyReceivedQuantity}
+                    onReceived={isNew ? applyReceivedQuantity : undefined}
                     onLeft={applyRemainingQuantity}
                     onDamaged={(quantity) =>
                       patch({

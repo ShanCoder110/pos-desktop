@@ -11,7 +11,7 @@
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use chrono::Utc;
@@ -172,18 +172,18 @@ fn take_db_flag(args: &mut Vec<String>) -> Option<PathBuf> {
     None
 }
 
-async fn migrate(path: &PathBuf) -> Result<(), String> {
+async fn migrate(path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let _db = connect_path(path.clone())
+    let _db = connect_path(path.to_path_buf())
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-async fn seed(path: &PathBuf) -> Result<(), String> {
-    let db = connect_path(path.clone())
+async fn seed(path: &Path) -> Result<(), String> {
+    let db = connect_path(path.to_path_buf())
         .await
         .map_err(|e| e.to_string())?;
     // Shop seed is also a migration; re-apply SQL with INSERT OR IGNORE for idempotent refresh.
@@ -201,12 +201,12 @@ async fn seed(path: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-async fn status(path: &PathBuf) -> Result<(), String> {
+async fn status(path: &Path) -> Result<(), String> {
     if !path.exists() {
         println!("Database not found: {}", path.display());
         return Ok(());
     }
-    let db = connect_path(path.clone())
+    let db = connect_path(path.to_path_buf())
         .await
         .map_err(|e| e.to_string())?;
     println!("Database: {}", path.display());

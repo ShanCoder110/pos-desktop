@@ -167,6 +167,7 @@ impl LedgerRepository {
         Ok(balance_after)
     }
 
+    #[allow(clippy::too_many_arguments)]
     /// Signed amount: positive increases payable/owes (debit), negative is advance (credit).
     pub async fn post_signed_amount(
         database: &impl ConnectionTrait,

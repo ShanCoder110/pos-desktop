@@ -1121,6 +1121,7 @@ impl CreditRepository {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn allocate_fifo(
     transaction: &DatabaseTransaction,
     context: &RequestContext,

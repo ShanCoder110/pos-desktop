@@ -1,0 +1,61 @@
+=== Step 26 hygiene evidence ===
+Date: 2026-10-17T14:02:25Z
+
+=== cargo fmt --check ===
+(exit 0 — clean)
+
+=== cargo clippy --all-targets -- -D warnings ===
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.35s
+
+=== prettier (touched files) ===
+LotFields.tsx LotForm.tsx useLotDrawer.tsx productQty.test.ts quotations-finding.md — prettier --write (unchanged or formatted)
+
+=== eslint --fix (touched TS/TSX) ===
+
+/workspace/src/pages/lots/LotForm.tsx
+  307:6  warning  React Hook useEffect has missing dependencies: 'lot.branchAllocations', 'lot.branchId', 'lot.originalQuantity', 'lot.remainingQuantity', and 'patch'. Either include them or remove the dependency array                                    react-hooks/exhaustive-deps
+  318:6  warning  React Hook useEffect has a missing dependency: 'lot'. Either include it or remove the dependency array                                                                                                                                      react-hooks/exhaustive-deps
+  343:6  warning  React Hook useEffect has a missing dependency: 'product'. Either include it or remove the dependency array                                                                                                                                  react-hooks/exhaustive-deps
+  569:6  warning  React Hook useEffect has missing dependencies: 'onClose' and 'save'. Either include them or remove the dependency array. If 'onClose' changes too often, find the parent component that defines it and wrap that definition in useCallback  react-hooks/exhaustive-deps
+
+/workspace/src/pages/products/LotFields.tsx
+  337:6  warning  React Hook useEffect has missing dependencies: 'stockSymbol', 'units', and 'value'. Either include them or remove the dependency array. If 'setPrices' needs the current value of 'units', you can also switch to useReducer instead of useState and read 'units' in the reducer  react-hooks/exhaustive-deps
+
+✖ 5 problems (0 errors, 5 warnings)
+
+
+=== npm audit (after non-breaking npm audit fix) ===
+# npm audit report
+
+@vitest/mocker  2.1.0 - 4.1.10
+Severity: moderate
+Vitest: Path Traversal / Arbitrary File Read via @vitest/mocker Redirect Mock - https://github.com/advisories/GHSA-82fw-gwwq-j7x9
+fix available via `npm audit fix --force`
+Will install vitest@5.0.5, which is a breaking change
+node_modules/@vitest/mocker
+  vitest  0.0.95 - 4.1.10
+  Depends on vulnerable versions of @vitest/mocker
+  Depends on vulnerable versions of tinypool
+  node_modules/vitest
+
+tinypool  <=2.1.1
+Severity: critical
+Tinypool: Prototype Pollution gadget in worker options leads to Remote Code Execution - https://github.com/advisories/GHSA-5gmw-xhrv-c9v3
+Tinypool: Prototype Pollution Gadget to RCE in run() options - https://github.com/advisories/GHSA-85c8-ppgw-ccpr
+fix available via `npm audit fix --force`
+Will install vitest@5.0.5, which is a breaking change
+node_modules/tinypool
+
+
+3 vulnerabilities (1 moderate, 2 critical)
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+=== Remaining vulnerabilities (not fixed) ===
+- CRITICAL tinypool (<=2.1.1) via vitest@3.2.7 — fix requires vitest@5.0.5 (major / breaking). Left unfixed.
+- CRITICAL/MODERATE vitest / @vitest/mocker path — same; only npm audit fix --force upgrades to vitest 5. Left unfixed.
+- HIGH source-map-js — FIXED by non-breaking npm audit fix (1.2.1 → 1.2.2).

@@ -568,7 +568,7 @@ async fn hydrate(
         .into_iter()
         .map(|row| {
             let mut units = units_by_product.remove(&row.id).unwrap_or_default();
-            units.sort_by(|left, right| left.sort_order.cmp(&right.sort_order));
+            units.sort_by_key(|left| left.sort_order);
             let base = units
                 .iter()
                 .find(|unit| unit.is_base)

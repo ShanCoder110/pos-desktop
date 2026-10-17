@@ -330,6 +330,27 @@ describe("gaz in 1 roll prices", () => {
     expect(formatMixedQty(product, 103)).toBe("8 Pack + 7 Piece");
   });
 
+  it("shows 7 pieces of a 10-pack as 7 Piece (not 0.7 Pack) — Step 26 lot Qty lock display", () => {
+    const piece = unit({
+      id: "pc",
+      symbol: "pc",
+      name: "Piece",
+      contains: 1,
+      isBase: true,
+      factorDirection: "multiply",
+    });
+    const pack = unit({
+      id: "pk",
+      symbol: "pk",
+      name: "Pack",
+      contains: 10,
+      factorDirection: "multiply",
+    });
+    const product = { unit: "pc", sellUnits: [piece, pack] } as Product;
+    expect(formatMixedQty(product, 7)).toBe("7 Piece");
+    expect(formatMixedQty(product, 7)).not.toMatch(/0\.7/);
+  });
+
   it("formatLinkedQty uses whole packs + pieces (not decimal Pack)", () => {
     const piece = unit({
       id: "pc",

@@ -141,7 +141,7 @@ impl ProductService {
         .await?;
 
         let mut units = request.sell_units.clone();
-        units.sort_by(|left, right| right.contains.cmp(&left.contains));
+        units.sort_by_key(|left| std::cmp::Reverse(left.contains));
         for (sort_order, unit) in units.into_iter().enumerate() {
             ProductRepository::insert_unit(
                 &transaction,
@@ -253,7 +253,7 @@ impl ProductService {
                 }
             }
             let mut units = sell_units;
-            units.sort_by(|left, right| right.is_base.cmp(&left.is_base));
+            units.sort_by_key(|left| std::cmp::Reverse(left.is_base));
             let models = units
                 .into_iter()
                 .enumerate()

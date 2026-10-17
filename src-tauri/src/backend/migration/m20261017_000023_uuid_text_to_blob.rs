@@ -171,7 +171,7 @@ async fn uuid_like_columns(conn: &impl ConnectionTrait, table: &str) -> Result<V
 
 fn is_uuid_column(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    if SKIP_COLUMNS.iter().any(|skip| *skip == lower.as_str()) {
+    if SKIP_COLUMNS.contains(&lower.as_str()) {
         return false;
     }
     lower == "id" || lower.ends_with("_id")

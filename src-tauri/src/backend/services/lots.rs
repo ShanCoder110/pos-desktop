@@ -666,6 +666,38 @@ mod tests {
         .expect("clear expiry");
         assert!(cleared.expiry_date.is_none());
 
+        // Step 26: original qty locked once stock movements exist (opening receive counts).
+        let original_locked = LotService::update(
+            &database,
+            &context,
+            lot_id,
+            UpdateLotRequest {
+                supplier_id: None,
+                original_quantity: Some(Decimal::new(999, 0)),
+                remaining_quantity: None,
+                damaged_quantity: None,
+                cost: None,
+                min: None,
+                wholesale: None,
+                retail: None,
+                expiry_date: None,
+                branch_allocations: vec![],
+            },
+        )
+        .await;
+        match original_locked {
+            Err(AppError::Validation(message)) => {
+                assert!(
+                    message.contains("Original quantity is locked")
+                        || message.to_lowercase().contains("stock count"),
+                    "unexpected original-lock message: {message}"
+                );
+            }
+            other => panic!("expected original qty locked 422, got {other:?}"),
+        }
+        let unchanged = LotService::get(&database, lot_id).await.expect("get");
+        assert_eq!(unchanged.original_base_quantity, 50.0);
+
         #[derive(Debug, FromQueryResult)]
         struct AuditCount {
             count: i64,

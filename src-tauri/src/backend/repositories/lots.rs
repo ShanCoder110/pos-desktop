@@ -9,10 +9,10 @@ use crate::backend::{
     constants::{
         DEFAULT_TRANSFER_PREFIX, ERROR_INVALID_CATEGORY_ID, ERROR_LOT_ALLOCATION_MISMATCH_PREFIX,
         ERROR_LOT_EXPIRY_BEFORE_RECEIVED, ERROR_LOT_EXPIRY_INVALID, ERROR_LOT_NOT_FOUND,
-        ERROR_LOT_ORIGINAL_BELOW_COMMITTED, ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE,
-        ERROR_LOT_REMAINING_LOCKED, ERROR_PRODUCT_NOT_FOUND, ERROR_SUPPLIER_REQUIRED,
-        INVOICE_STATUS_COMPLETED, LEDGER_PURCHASE, LOT_SOURCE_OPENING, LOT_SOURCE_PURCHASE,
-        REFERENCE_GOODS_RECEIPT, REFERENCE_INVOICE, REFERENCE_PRODUCT_OPENING,
+        ERROR_LOT_ORIGINAL_BELOW_COMMITTED, ERROR_LOT_ORIGINAL_LOCKED,
+        ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE, ERROR_LOT_REMAINING_LOCKED, ERROR_PRODUCT_NOT_FOUND,
+        ERROR_SUPPLIER_REQUIRED, INVOICE_STATUS_COMPLETED, LEDGER_PURCHASE, LOT_SOURCE_OPENING,
+        LOT_SOURCE_PURCHASE, REFERENCE_GOODS_RECEIPT, REFERENCE_INVOICE, REFERENCE_PRODUCT_OPENING,
         SEQUENCE_KIND_TRANSFER, STOCK_MOVEMENT_ADJUSTMENT, STOCK_MOVEMENT_PRODUCTION_USE,
         STOCK_MOVEMENT_PRODUCTION_WASTE, STOCK_MOVEMENT_PURCHASE, STOCK_MOVEMENT_REPAIR_USE,
         STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN, STOCK_MOVEMENT_SALE,
@@ -228,6 +228,11 @@ impl LotRepository {
                 "Quantities cannot be negative.".into(),
             ));
         }
+        // Once any stock movement exists for this lot, original qty is immutable —
+        // changing it would desync stock from the movement ledger. Use stock count.
+        if next_original != original && lot_has_any_movement(transaction, id).await? {
+            return Err(AppError::Validation(ERROR_LOT_ORIGINAL_LOCKED.into()));
+        }
         if next_original < committed + next_damaged {
             return Err(AppError::Validation(format!(
                 "{ERROR_LOT_ORIGINAL_BELOW_COMMITTED} Original must be at least sold ({sold}) + damaged ({next_damaged}) + returned to supplier ({returned_to_supplier})."
@@ -297,14 +302,14 @@ impl LotRepository {
                     next_damaged.into(),
                     next_cost.into(),
                     i64::from(next_expiry.is_some()).into(),
-                    next_expiry.clone().flatten().into(),
+                    next_expiry.flatten().into(),
                     now.into(),
                     id.into(),
                 ],
             ))
             .await?;
         if expiry_changed {
-            let after = next_expiry.clone().flatten();
+            let after = next_expiry.flatten();
             let before_json = serde_json::json!({
                 "expiryDate": previous_expiry.map(|d| d.to_string()),
             })
@@ -963,6 +968,21 @@ async fn apply_product_unit_prices_from_receive(
     apply_product_unit_prices(transaction, product_id, &update, now).await
 }
 
+/// True when this lot already has any stock_movements row (receive, sale, count, …).
+pub(crate) async fn lot_has_any_movement(
+    database: &impl ConnectionTrait,
+    lot_id: Uuid,
+) -> Result<bool, AppError> {
+    let row = CountRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT COUNT(*) AS count FROM stock_movements WHERE product_lot_id = ?",
+        [lot_id.into()],
+    ))
+    .one(database)
+    .await?;
+    Ok(row.map(|r| r.count > 0).unwrap_or(false))
+}
+
 /// Sold quantity committed by stock movements / sale consumptions for this lot.
 /// Never derived from the editable remaining field.
 pub(crate) async fn lot_committed_sold(
@@ -1226,6 +1246,7 @@ async fn apply_branch_reallocation(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_completed_transfer(
     transaction: &DatabaseTransaction,
     context: &RequestContext,

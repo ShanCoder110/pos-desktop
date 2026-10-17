@@ -207,6 +207,8 @@ pub const ERROR_LOT_EXPIRY_BEFORE_RECEIVED: &str =
 pub const ERROR_LOT_EXPIRY_INVALID: &str = "Expiry date must be a valid YYYY-MM-DD date.";
 pub const ERROR_LOT_REMAINING_LOCKED: &str =
     "Remaining quantity is locked. Use stock count to change on-hand quantity.";
+pub const ERROR_LOT_ORIGINAL_LOCKED: &str =
+    "Original quantity is locked after stock movements. Use stock count to change quantity.";
 pub const ERROR_LOT_ALLOCATION_MISMATCH_PREFIX: &str = "Branch allocations sum to";
 pub const ERROR_STOCK_COUNT_DENIED: &str = "Only owners and managers can count stock.";
 pub const ERROR_STOCK_COUNT_REASON_REQUIRED: &str =

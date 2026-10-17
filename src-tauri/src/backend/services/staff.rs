@@ -64,6 +64,6 @@ fn ensure_payout_permission(context: &RequestContext) -> Result<(), AppError> {
     if matches!(context.role.as_str(), "OWNER" | "MANAGER") {
         Ok(())
     } else {
-        Err(AppError::Forbidden(ERROR_STAFF_PAYOUT_DENIED.into()))
+        Err(AppError::Forbidden(ERROR_STAFF_PAYOUT_DENIED))
     }
 }

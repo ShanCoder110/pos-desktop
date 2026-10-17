@@ -76,12 +76,7 @@ impl Config {
         let supabase_service_role_key = optional("SUPABASE_SERVICE_ROLE_KEY").map(SecretString);
 
         if cloud_sync_enabled {
-            if supabase_url
-                .as_ref()
-                .map(String::as_str)
-                .unwrap_or("")
-                .is_empty()
-            {
+            if supabase_url.as_deref().unwrap_or("").is_empty() {
                 return Err("CLOUD_SYNC_ENABLED=true requires SUPABASE_URL".into());
             }
             if supabase_service_role_key

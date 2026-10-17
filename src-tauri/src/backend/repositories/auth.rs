@@ -149,6 +149,7 @@ impl AuthRepository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_session(
         database: &DatabaseConnection,
         id: Uuid,
