@@ -5,6 +5,7 @@ use sea_orm::{
 use uuid::Uuid;
 
 use crate::backend::{
+    accounting::line_gross_profit,
     constants::{
         ERROR_BELOW_MINIMUM, ERROR_HOLD_NOT_FOUND, ERROR_INVOICE_ALREADY_VOIDED,
         ERROR_INVOICE_NOT_FOUND, ERROR_INVOICE_RETURNED_CANNOT_VOID, ERROR_WALK_IN_CREDIT,
@@ -319,6 +320,14 @@ impl SalesRepository {
             ))
             .await?;
 
+        // Bill discount share is proportional to pre-tax line revenue
+        // (unit×qty − line discount). Invoice `subtotal` includes line tax.
+        let discount_base = money_value(
+            prepared_items
+                .iter()
+                .map(|p| p.unit_price * p.displayed - p.discount)
+                .sum::<Decimal>(),
+        );
         for prepared in prepared_items {
             let item_id = Uuid::new_v4();
             let fifo = allocate_fifo_with_branch_fallback(
@@ -337,7 +346,14 @@ impl SalesRepository {
             )
             .await?;
             let fifo_cost = money_value(fifo.fifo_cost);
-            let gross_profit = money_value(prepared.line_total - fifo_cost);
+            let gross_profit = line_gross_profit(
+                prepared.unit_price,
+                prepared.displayed,
+                prepared.discount,
+                fifo_cost,
+                discount,
+                discount_base,
+            );
             transaction
                 .execute_raw(Statement::from_sql_and_values(
                     DbBackend::Sqlite,

@@ -113,8 +113,9 @@ struct LotSoldRow {
 struct LotSaleMoneyRow {
     product_lot_id: Uuid,
     consumed: Decimal,
-    cogs: Decimal,
     revenue: Decimal,
+    /// Allocated from invoice_items.gross_profit (includes bill-discount share).
+    profit: Decimal,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -848,14 +849,20 @@ async fn lot_sale_metrics_batch(
     let money_sql = format!(
         "SELECT lc.product_lot_id AS product_lot_id,
                 CAST(COALESCE(SUM(lc.base_quantity), 0) AS REAL) AS consumed,
-                CAST(COALESCE(SUM(lc.total_cost), 0) AS REAL) AS cogs,
                 CAST(COALESCE(SUM(
                   lc.base_quantity * (
                     SELECT CAST(SUM(ii.line_total) AS REAL) / NULLIF(CAST(SUM(ii.base_quantity) AS REAL), 0)
                     FROM invoice_items ii
                     WHERE ii.invoice_id = lc.reference_id AND ii.product_id = lc.product_id
                   )
-                ), 0) AS REAL) AS revenue
+                ), 0) AS REAL) AS revenue,
+                CAST(COALESCE(SUM(
+                  lc.base_quantity * (
+                    SELECT CAST(SUM(ii.gross_profit) AS REAL) / NULLIF(CAST(SUM(ii.base_quantity) AS REAL), 0)
+                    FROM invoice_items ii
+                    WHERE ii.invoice_id = lc.reference_id AND ii.product_id = lc.product_id
+                  )
+                ), 0) AS REAL) AS profit
          FROM lot_consumptions lc
          INNER JOIN invoices i ON i.id = lc.reference_id
            AND i.status = ?
@@ -878,18 +885,18 @@ async fn lot_sale_metrics_batch(
         if let Some(metric) = metrics.get_mut(&row.product_lot_id) {
             let consumed = quantity(row.consumed);
             let mut revenue = money_value(row.revenue);
-            let mut cogs = money_value(row.cogs);
+            let mut profit = money_value(row.profit);
             // Scale to net committed sold when returns reduced movement sold below consumptions.
             if consumed > Decimal::ZERO && metric.sold < consumed {
                 let factor = metric.sold / consumed;
                 revenue = money_value(revenue * factor);
-                cogs = money_value(cogs * factor);
+                profit = money_value(profit * factor);
             } else if metric.sold <= Decimal::ZERO {
                 revenue = Decimal::ZERO;
-                cogs = Decimal::ZERO;
+                profit = Decimal::ZERO;
             }
             metric.revenue = revenue;
-            metric.profit = money_value(revenue - cogs);
+            metric.profit = profit;
         }
     }
 

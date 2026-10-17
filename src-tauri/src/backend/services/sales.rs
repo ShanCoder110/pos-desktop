@@ -3468,4 +3468,167 @@ mod tests {
             "CANCELLED must be excluded from profit on hold"
         );
     }
+
+    /// Step 27: bill discount must allocate into line gross_profit (was: line_total − fifo only).
+    #[tokio::test]
+    async fn bill_discount_allocates_into_line_gross_profit() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let context = ctx();
+
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "BillDiscQA".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .next()
+            .expect("seed unit");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Bill Disc Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(8, 0),
+                    wholesale: Decimal::new(15, 0),
+                    price: Decimal::new(20, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(100, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let unit_id = product.sell_units[0].id.clone();
+
+        let session = AuthService::open_cash_session(
+            &database,
+            &context,
+            CashSessionOpenRequest {
+                opening_float: Decimal::ZERO,
+            },
+        )
+        .await
+        .expect("open cash session");
+        let mut context = context;
+        context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
+
+        // A: 10@20=200 fifo 80 (cost 8); B: 5@30=150 fifo 40.
+        // Hand: subtotal 350, bill disc 35 → shares 20/15 → GP 100+95=195
+        // (pre-fix sum would be 230 = line_total − fifo with no bill share).
+        let sale = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "bill-disc-gp".into(),
+                customer_id: None,
+                items: vec![
+                    SaleItemInput {
+                        product_id: product.id.clone(),
+                        product_unit_id: unit_id.clone(),
+                        quantity: Decimal::new(10, 0),
+                        unit_price: Decimal::new(20, 0),
+                        price_mode: "RETAIL".into(),
+                        sold_below_minimum: false,
+                        authorized_by: None,
+                        discount: Decimal::ZERO,
+                        tax: Decimal::ZERO,
+                    },
+                    SaleItemInput {
+                        product_id: product.id.clone(),
+                        product_unit_id: unit_id.clone(),
+                        quantity: Decimal::new(5, 0),
+                        unit_price: Decimal::new(30, 0),
+                        price_mode: "RETAIL".into(),
+                        sold_below_minimum: false,
+                        authorized_by: None,
+                        discount: Decimal::ZERO,
+                        tax: Decimal::ZERO,
+                    },
+                ],
+                payments: vec![SalePaymentInput {
+                    amount: Decimal::new(315, 0),
+                    amount_tendered: Some(Decimal::new(315, 0)),
+                    payment_method: "CASH".into(),
+                    reference_number: None,
+                    notes: None,
+                    client_request_id: None,
+                }],
+                discount: Decimal::new(35, 0),
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("sale with bill discount");
+
+        assert_eq!(sale.subtotal, 350.0);
+        assert_eq!(sale.discount, 35.0);
+        assert_eq!(sale.total, 315.0);
+        assert_eq!(sale.items.len(), 2);
+        let gp0 = sale.items[0].gross_profit;
+        let gp1 = sale.items[1].gross_profit;
+        let gp_sum: f64 = sale.items.iter().map(|i| i.gross_profit).sum();
+        assert!(
+            (gp0 - 100.0).abs() < 0.02,
+            "line A GP expected 100 got {gp0}"
+        );
+        assert!((gp1 - 95.0).abs() < 0.02, "line B GP expected 95 got {gp1}");
+        assert!(
+            (gp_sum - 195.0).abs() < 0.02,
+            "sum GP expected 195 (not pre-fix 230), got {gp_sum}"
+        );
+        // Sanity: fifo costs match opening cost × base qty
+        assert!((sale.items[0].fifo_cost - 80.0).abs() < 0.02);
+        assert!((sale.items[1].fifo_cost - 40.0).abs() < 0.02);
+    }
 }

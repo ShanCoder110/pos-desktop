@@ -3,6 +3,7 @@ use sea_orm::{ConnectionTrait, DatabaseTransaction, DbBackend, FromQueryResult, 
 use uuid::Uuid;
 
 use crate::backend::{
+    accounting::line_gross_profit,
     constants::{
         ERROR_BELOW_MINIMUM, ERROR_INVOICE_ALREADY_VOIDED, ERROR_INVOICE_HAS_RETURNS,
         ERROR_INVOICE_NOT_FOUND, ERROR_REVISE_BELOW_ALLOCATED, ERROR_WALK_IN_CREDIT,
@@ -277,6 +278,12 @@ pub async fn revise_invoice(
         ))
         .await?;
 
+    let discount_base = money_value(
+        prepared_items
+            .iter()
+            .map(|p| p.unit_price * p.displayed - p.discount)
+            .sum::<Decimal>(),
+    );
     for prepared in prepared_items {
         let item_id = Uuid::new_v4();
         let fifo = allocate_fifo_with_branch_fallback(
@@ -295,7 +302,14 @@ pub async fn revise_invoice(
         )
         .await?;
         let fifo_cost = money_value(fifo.fifo_cost);
-        let gross_profit = money_value(prepared.line_total - fifo_cost);
+        let gross_profit = line_gross_profit(
+            prepared.unit_price,
+            prepared.displayed,
+            prepared.discount,
+            fifo_cost,
+            discount,
+            discount_base,
+        );
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
