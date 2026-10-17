@@ -210,9 +210,7 @@ export function LotDetailDrawer({
               <dt>Shrinkage</dt>
               <dd>
                 <DetailQtyDisplay product={product} qty={shrunk} />
-                {shrunk > 0 ? (
-                  <span className="product-detail-fact-note"> · cost {money(shrinkCost)}</span>
-                ) : null}
+                {shrunk > 0 ? ` · cost ${money(shrinkCost)}` : null}
               </dd>
             </div>
           </dl>

@@ -64,6 +64,7 @@ export function invoiceNetRemaining(invoice: InvoiceRow): number {
  * RETURNED with paid=0,credit=0 → 0 (not “fully paid”).
  */
 export function calculateInvoiceRemainingProfit(invoice: InvoiceRow): number {
+  if (invoice.status === "CANCELLED") return 0;
   if (invoice.total <= 0) return 0;
   const grossProfit = calculateInvoiceGrossProfit(invoice);
   if (grossProfit <= 0) return 0;
