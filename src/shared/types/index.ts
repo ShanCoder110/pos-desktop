@@ -43,10 +43,18 @@ export interface ShopSettings {
   tagline: string;
   contactLine: string;
   promoUrdu: string;
+  /** Line-item table grid borders on the slip (dukan default off). */
+  itemsTableBordered: boolean;
   printerName: string;
   printerPaperWidth: PaperWidth;
   copies: number;
   splitLongBill: boolean;
+  /** Products on first cut slip when split is on (dukan default 12). */
+  splitFirstPageItems: number;
+  /** Products on middle continuation slips (dukan default 15). */
+  splitMiddlePageItems: number;
+  /** Products on last slip with totals (dukan default 12). */
+  splitLastPageItems: number;
 }
 
 export interface Shop {

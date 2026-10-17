@@ -4,6 +4,8 @@ import { cn } from "@/utils/format";
 export type UnitSegmentOption = {
   id: string;
   label: string;
+  meta?: string;
+  tone?: "default" | "danger" | "warning";
 };
 
 function moveSelection(
@@ -73,9 +75,19 @@ export function UnitSegmentedControl({
             tabIndex={active ? 0 : -1}
             aria-pressed={active}
             className={cn(
-              "flex-1 rounded-md border-0 px-2 font-bold transition-colors",
+              "flex min-w-0 flex-1 flex-col items-center justify-center rounded-md border px-2 font-bold transition-colors",
               compact ? "min-h-6 text-[10px]" : "min-h-7 text-[11px]",
-              active ? "bg-accent text-white" : "bg-transparent text-sub hover:bg-bg",
+              active
+                ? unit.tone === "danger"
+                  ? "border-danger bg-danger text-white"
+                  : unit.tone === "warning"
+                    ? "border-warn bg-warn text-white"
+                    : "border-accent bg-accent text-white"
+                : unit.tone === "danger"
+                  ? "border-danger/45 bg-danger/10 text-danger hover:bg-danger/15"
+                  : unit.tone === "warning"
+                    ? "border-warn/45 bg-warn/10 text-warn-ink hover:bg-warn/15"
+                    : "border-transparent bg-transparent text-sub hover:bg-bg",
             )}
             onClick={() => onChange(unit.id)}
             onKeyDown={(event) => {
@@ -83,7 +95,14 @@ export function UnitSegmentedControl({
               if (!event.defaultPrevented) moveSelection(event, index, units, onChange);
             }}
           >
-            {unit.label}
+            <span className="truncate">{unit.label}</span>
+            {unit.meta ? (
+              <small
+                className={cn("text-[8px] leading-none", active ? "text-white/85" : "opacity-80")}
+              >
+                {unit.meta}
+              </small>
+            ) : null}
           </button>
         );
       })}

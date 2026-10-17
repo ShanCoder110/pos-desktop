@@ -2,10 +2,11 @@ import type { Customer, InvoiceLine } from "@/shared/types";
 import type { ShopSettings } from "@/shared/types";
 import { money } from "@/utils/format";
 
+/** On-screen slip width (wider than physical printable for readability). */
 export function thermalWidthPx(paper: ShopSettings["paperWidth"] | undefined) {
-  if (paper === "MM_58") return 220;
+  if (paper === "MM_58") return 280;
   if (paper === "A4") return 560;
-  return 280;
+  return 380;
 }
 
 export function thermalLabel(paper: ShopSettings["paperWidth"] | undefined) {
@@ -53,6 +54,17 @@ export function whatsAppShareUrl(phone: string, text: string) {
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
 }
 
+function waitForPrintFonts(doc: Document): Promise<void> {
+  const fonts = doc.fonts;
+  if (!fonts?.ready) return Promise.resolve();
+  return fonts
+    .load("16px 'Jameel Noori Nastaleeq'")
+    .catch(() => undefined)
+    .then(() => fonts.ready)
+    .then(() => undefined);
+}
+
+/** Print HTML after Jameel Noori (and other) fonts are ready so Urdu is not substituted. */
 export function printReceiptHtml(html: string) {
   const frame = document.createElement("iframe");
   frame.style.position = "fixed";
@@ -61,6 +73,7 @@ export function printReceiptHtml(html: string) {
   frame.style.width = "0";
   frame.style.height = "0";
   frame.style.border = "0";
+  frame.setAttribute("aria-hidden", "true");
   document.body.appendChild(frame);
   const doc = frame.contentDocument ?? frame.contentWindow?.document;
   if (!doc) {
@@ -71,7 +84,13 @@ export function printReceiptHtml(html: string) {
   doc.open();
   doc.write(html);
   doc.close();
-  frame.contentWindow?.focus();
-  frame.contentWindow?.print();
-  window.setTimeout(() => document.body.removeChild(frame), 1000);
+
+  const win = frame.contentWindow;
+  void waitForPrintFonts(doc).then(() => {
+    win?.focus();
+    win?.print();
+    window.setTimeout(() => {
+      if (frame.parentNode) document.body.removeChild(frame);
+    }, 60_000);
+  });
 }

@@ -183,10 +183,13 @@ export function SearchableSelect({
   }
 
   return (
-    <div className={cn("ui-combo [position:relative] [width:100%]", className)} ref={root}>
+    <div
+      className={cn("ui-combo [position:relative] [width:100%] [min-width:0]", className)}
+      ref={root}
+    >
       <div
         className={cn(
-          "ui-combo-field [display:flex] [align-items:center] [gap:4px] [width:100%] [height:38px] [padding:0_8px_0_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [transition:border-color_0.15s,_box-shadow_0.15s,_background_0.15s]",
+          "ui-combo-field [display:flex] [align-items:center] [gap:4px] [width:100%] [min-width:0] [box-sizing:border-box] [height:38px] [padding:0_8px_0_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [transition:border-color_0.15s,_box-shadow_0.15s,_background_0.15s]",
           open && "is-open",
           disabled && "is-disabled",
           invalid && "is-invalid",

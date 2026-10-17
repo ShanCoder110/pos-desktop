@@ -132,10 +132,9 @@ export const PRODUCT_COPY = {
   unitPricesInvalid: "Fix unit prices before saving",
   unitPriceRequired: "Enter a price",
   openingQtyRequired: "Enter opening quantity",
-  lowStockAlert: "Low stock alert",
+  lowStockAlert: "Low stock alert (optional)",
   lowStockHint:
     "Alerts when overall stock — total remaining qty from all open lots (all branches) — reaches this or below.",
-  lowStockRequired: "Enter a low stock quantity",
   unitPricesIncomplete: "Enter all prices on every unit",
   detailTitle: "Product details",
   detailSubtitle: "Stock, prices, lots, and branch quantity",

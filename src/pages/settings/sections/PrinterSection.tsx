@@ -4,7 +4,21 @@ import { SettingsSection } from "@/pages/settings/SettingsSection";
 import { useSettingsForm } from "@/shared/settings";
 import type { PaperWidth } from "@/shared/types";
 
-const KEYS = ["printerName", "printerPaperWidth", "copies", "autoPrint", "splitLongBill"] as const;
+const KEYS = [
+  "printerName",
+  "printerPaperWidth",
+  "copies",
+  "autoPrint",
+  "splitLongBill",
+  "splitFirstPageItems",
+  "splitMiddlePageItems",
+  "splitLastPageItems",
+] as const;
+
+function pageCount(raw: string, fallback: number) {
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) && n > 0 ? Math.min(40, n) : fallback;
+}
 
 export function PrinterSection() {
   const { draft, patch, dirty, save, reset } = useSettingsForm(KEYS);
@@ -12,7 +26,7 @@ export function PrinterSection() {
   return (
     <SettingsSection
       title="Printer"
-      hint="This till’s printer. Slip layout stays under Invoice Settings"
+      hint="This till’s printer, split cuts, and products per page"
       dirty={dirty}
       onSave={save}
       onReset={reset}
@@ -53,6 +67,47 @@ export function PrinterSection() {
         onChange={(v) => patch({ splitLongBill: v })}
         label="Split long bills"
       />
+      {draft.splitLongBill ? (
+        <p className="settings-inline-hint">
+          Cut long thermal bills into pages. Products per page below. Ignored for A4.
+        </p>
+      ) : null}
+      {draft.splitLongBill ? (
+        <div className="settings-row">
+          <Field label="First page items" hint="Products on the first cut (default 12)">
+            <TextInput
+              inputMode="numeric"
+              maxLength={2}
+              value={String(draft.splitFirstPageItems)}
+              onChange={(e) =>
+                patch({ splitFirstPageItems: pageCount(e.target.value, draft.splitFirstPageItems) })
+              }
+            />
+          </Field>
+          <Field label="Middle page items" hint="Continuation pages (default 15)">
+            <TextInput
+              inputMode="numeric"
+              maxLength={2}
+              value={String(draft.splitMiddlePageItems)}
+              onChange={(e) =>
+                patch({
+                  splitMiddlePageItems: pageCount(e.target.value, draft.splitMiddlePageItems),
+                })
+              }
+            />
+          </Field>
+          <Field label="Last page items" hint="Last cut with totals (default 12)">
+            <TextInput
+              inputMode="numeric"
+              maxLength={2}
+              value={String(draft.splitLastPageItems)}
+              onChange={(e) =>
+                patch({ splitLastPageItems: pageCount(e.target.value, draft.splitLastPageItems) })
+              }
+            />
+          </Field>
+        </div>
+      ) : null}
     </SettingsSection>
   );
 }

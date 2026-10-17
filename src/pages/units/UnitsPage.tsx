@@ -21,6 +21,7 @@ import {
   TextInput,
   THead,
   Th,
+  toaster,
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { applyFilterChip } from "@/utils/filterChips";
@@ -30,9 +31,15 @@ import type { UnitRow } from "@/shared/domain/types";
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { UNIT_TABLE_COLUMNS } from "@/shared/constants/products";
 import { FIELD_LIMITS, FORM_COPY } from "@/shared/constants/fields";
-import { listMasterRecords } from "@/services/masters";
+import {
+  createMasterRecord,
+  deleteMasterRecord,
+  listMasterRecords,
+  updateMasterRecord,
+} from "@/services/masters";
 import { useAppForm } from "@/hooks/useAppForm";
 import { fieldMessage, requiredTrim } from "@/utils/form";
+import { shortError } from "@/utils/format";
 
 const UNIT_FORM_ID = "unit-form";
 const blank: UnitRow = { id: "", name: "", symbol: "" };
@@ -75,7 +82,7 @@ function UnitEditForm({
 }
 
 export function UnitsPage() {
-  const { setActions, sectionKpi, products } = useProductsHub();
+  const { setActions, sectionKpi, products, refreshHub } = useProductsHub();
   const [rows, setRows] = useState<UnitRow[]>([]);
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
@@ -86,7 +93,15 @@ export function UnitsPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [edit, setEdit] = useState<UnitRow | null>(null);
   const [remove, setRemove] = useState<UnitRow | null>(null);
-  const [loading, setLoading] = useState({ page: true });
+  const [loading, setLoading] = useState({ page: true, saving: false, deleting: false });
+
+  async function reloadUnits() {
+    const response = await listMasterRecords("units", {
+      perPage: MAX_PAGE_SIZE,
+      isActive: true,
+    });
+    setRows(response.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" })));
+  }
 
   useEffect(() => {
     setPage(1);
@@ -128,11 +143,7 @@ export function UnitsPage() {
             { label: "Symbol", value: (row) => row.symbol },
           ]}
         />
-        <Button
-          variant="primary"
-          icon={<Plus size={14} />}
-          onClick={() => setEdit({ ...blank, id: crypto.randomUUID() })}
-        >
+        <Button variant="primary" icon={<Plus size={14} />} onClick={() => setEdit({ ...blank })}>
           Add unit
         </Button>
       </>,
@@ -151,6 +162,46 @@ export function UnitsPage() {
     }))
     .sort((a, b) => b.value - a.value);
   const allShownSelected = shown.length > 0 && shown.every((r) => selected.includes(r.id));
+
+  async function saveUnit(values: { name: string; symbol: string }) {
+    if (!edit) return;
+    const isNew = !edit.id;
+    setLoading((current) => ({ ...current, saving: true }));
+    try {
+      const payload = {
+        name: values.name.trim(),
+        symbol: values.symbol.trim(),
+        precision: 3,
+        isActive: true,
+      };
+      if (isNew) await createMasterRecord("units", payload);
+      else await updateMasterRecord("units", edit.id, payload);
+      await reloadUnits();
+      await refreshHub();
+      setEdit(null);
+      toaster.success(isNew ? "Unit added" : "Unit saved");
+    } catch (error) {
+      toaster.error(shortError(error, "Could not save unit"));
+    } finally {
+      setLoading((current) => ({ ...current, saving: false }));
+    }
+  }
+
+  async function deleteUnits(ids: string[]) {
+    if (ids.length === 0) return;
+    setLoading((current) => ({ ...current, deleting: true }));
+    try {
+      await Promise.all(ids.map((id) => deleteMasterRecord("units", id)));
+      setRows((current) => current.filter((row) => !ids.includes(row.id)));
+      setSelected((current) => current.filter((id) => !ids.includes(id)));
+      await refreshHub();
+      toaster.success(ids.length === 1 ? "Unit deleted" : "Units deleted");
+    } catch (error) {
+      toaster.error(shortError(error, "Could not delete unit"));
+    } finally {
+      setLoading((current) => ({ ...current, deleting: false }));
+    }
+  }
 
   return (
     <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
@@ -192,8 +243,7 @@ export function UnitsPage() {
                     danger
                     icon={<Trash2 size={14} />}
                     onClick={() => {
-                      setRows((p) => p.filter((r) => !selected.includes(r.id)));
-                      setSelected([]);
+                      if (!loading.deleting) void deleteUnits(selected);
                     }}
                   >
                     Delete
@@ -278,44 +328,33 @@ export function UnitsPage() {
       <Drawer
         open={Boolean(edit)}
         title={edit?.name ? "Edit unit" : "Add unit"}
-        onClose={() => setEdit(null)}
+        onClose={() => {
+          if (!loading.saving) setEdit(null);
+        }}
         footer={
           <>
-            <Button onClick={() => setEdit(null)}>Cancel</Button>
-            <Button variant="primary" type="submit" form={UNIT_FORM_ID}>
-              Save
+            <Button onClick={() => setEdit(null)} disabled={loading.saving}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" form={UNIT_FORM_ID} disabled={loading.saving}>
+              {loading.saving ? "Saving…" : "Save"}
             </Button>
           </>
         }
       >
         {edit ? (
-          <UnitEditForm
-            key={edit.id}
-            row={edit}
-            onValid={(values) => {
-              const next = { ...edit, name: values.name.trim(), symbol: values.symbol.trim() };
-              setRows((p) =>
-                p.some((r) => r.id === next.id)
-                  ? p.map((r) => (r.id === next.id ? next : r))
-                  : [...p, next],
-              );
-              setEdit(null);
-            }}
-          />
+          <UnitEditForm key={edit.id} row={edit} onValid={(values) => void saveUnit(values)} />
         ) : null}
       </Drawer>
 
       <ConfirmDialog
         open={Boolean(remove)}
         title="Delete unit?"
-        body="Products still using this unit as base_unit_id cannot be saved in the live app."
+        body="This removes the unit from future selection. Existing product history stays safe."
         onCancel={() => setRemove(null)}
         onConfirm={() => {
-          if (remove) {
-            setRows((p) => p.filter((r) => r.id !== remove.id));
-            setSelected((s) => s.filter((id) => id !== remove.id));
-          }
-          setRemove(null);
+          if (remove && !loading.deleting)
+            void deleteUnits([remove.id]).then(() => setRemove(null));
         }}
       />
     </div>

@@ -1,8 +1,8 @@
 import { useMemo, useRef } from "react";
 import { MessageCircle, Printer, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { InvoiceThermalReceipt } from "@/components/print/InvoiceThermalReceipt";
 import { useSettings } from "@/shared/settings";
-import { money } from "@/utils/format";
 import type { Customer, InvoiceLine } from "@/shared/types";
 import {
   buildReceiptText,
@@ -11,6 +11,9 @@ import {
   thermalWidthPx,
   whatsAppShareUrl,
 } from "@/utils/receiptShare";
+import { jameelNooriFontFaceCss } from "@/utils/receiptPrintFonts";
+import { RECEIPT_THERMAL_CSS } from "@/utils/receiptThermalStyles";
+import { shouldSplitThermalBill, splitBillPages } from "@/utils/splitBillPages";
 
 export function PrintPreview({
   open,
@@ -23,6 +26,7 @@ export function PrintPreview({
   balanceAfter,
   duplicate,
   invoiceNumber,
+  splitOverride,
 }: {
   open: boolean;
   onClose: () => void;
@@ -34,12 +38,39 @@ export function PrintPreview({
   balanceAfter: number;
   duplicate?: boolean;
   invoiceNumber?: string;
+  /** POS F10 session toggle; falls back to settings.splitLongBill */
+  splitOverride?: boolean;
 }) {
   const { settings } = useSettings();
   const slipRef = useRef<HTMLDivElement>(null);
   const paper = settings.printerPaperWidth ?? settings.paperWidth;
   const thermal = settings.printSize === "thermal";
   const widthPx = thermal ? thermalWidthPx(paper) : 560;
+  const splitOn = shouldSplitThermalBill(splitOverride ?? settings.splitLongBill, paper);
+  const pages = useMemo(
+    () =>
+      splitOn
+        ? splitBillPages(lines, {
+            first: settings.splitFirstPageItems,
+            middle: settings.splitMiddlePageItems,
+            last: settings.splitLastPageItems,
+          })
+        : [
+            {
+              items: lines,
+              kind: "single" as const,
+              pageIndex: 1,
+              pageCount: 1,
+            },
+          ],
+    [
+      lines,
+      splitOn,
+      settings.splitFirstPageItems,
+      settings.splitMiddlePageItems,
+      settings.splitLastPageItems,
+    ],
+  );
 
   const receiptText = useMemo(
     () =>
@@ -66,9 +97,15 @@ export function PrintPreview({
       window.print();
       return;
     }
-    const html = `<!DOCTYPE html><html><head><title>Receipt</title><style>
-      @page { margin: 4mm; }
-      body { font-family: ui-monospace, Menlo, monospace; font-size: ${thermal ? 11 : 13}px; width: ${widthPx}px; }
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>Receipt</title><style>
+      ${jameelNooriFontFaceCss()}
+      @page { size: 72mm auto; margin: 0; }
+      html, body { width: 72mm; max-width: 72mm; margin: 0; padding: 0; background: #fff; }
+      .slip-page { break-after: page; width: 100%; }
+      .slip-page:last-child { break-after: auto; }
+      .thermal-receipt-preview { width: 100%; max-width: 100%; }
+      .receipt-inner { width: 100%; max-width: 100%; box-sizing: border-box; }
+      ${RECEIPT_THERMAL_CSS}
     </style></head><body>${node.innerHTML}</body></html>`;
     printReceiptHtml(html);
   }
@@ -79,75 +116,29 @@ export function PrintPreview({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/50 p-8 pt-10">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-slate-900/50 p-8 pt-10">
+      <style>{`${jameelNooriFontFaceCss()}${RECEIPT_THERMAL_CSS}`}</style>
       <div className="flex gap-4">
-        <div
-          ref={slipRef}
-          className="relative bg-white text-slate-900 shadow-2xl"
-          style={{
-            width: widthPx,
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-            fontSize: thermal ? 11 : 13,
-          }}
-        >
-          {duplicate ? (
-            <div className="pointer-events-none absolute inset-0 grid place-items-center text-4xl font-bold tracking-widest text-rose-200/80">
-              COPY
+        <div ref={slipRef} className="relative flex flex-col gap-4" style={{ width: widthPx }}>
+          {pages.map((page) => (
+            <div
+              key={`${page.pageIndex}-${page.kind}`}
+              className="slip-page relative bg-white shadow-2xl"
+            >
+              <InvoiceThermalReceipt
+                settings={settings}
+                customer={customer}
+                lines={lines}
+                total={total}
+                paid={paid}
+                balanceBefore={balanceBefore}
+                balanceAfter={balanceAfter}
+                duplicate={duplicate}
+                invoiceNumber={invoiceNumber}
+                page={page}
+              />
             </div>
-          ) : null}
-          <div className="p-4">
-            <p className="text-center text-sm font-bold">
-              {settings.receiptShopName || settings.shopName}
-            </p>
-            <p className="text-center text-[10px] text-slate-500">{settings.address}</p>
-            {invoiceNumber ? (
-              <p className="mt-1 text-center text-[10px] font-semibold">{invoiceNumber}</p>
-            ) : null}
-            <p className="mt-2 text-center text-[10px]">
-              {duplicate ? "Duplicate" : "Original"} · {new Date().toLocaleString("en-GB")}
-            </p>
-            <div className="my-2 border-t border-dashed border-slate-400" />
-            <p>Cust: {customer.name}</p>
-            {customer.phone ? <p>Ph: {customer.phone}</p> : null}
-            <div className="my-2 border-t border-dashed border-slate-400" />
-            {lines.map((line) => (
-              <div key={line.id} className="flex justify-between gap-2">
-                <span>
-                  {line.qty} {line.unit} {line.name}
-                </span>
-                <span>{money(line.qty * line.price)}</span>
-              </div>
-            ))}
-            <div className="my-2 border-t border-dashed border-slate-400" />
-            <div className="flex justify-between font-semibold">
-              <span>Total</span>
-              <span>{money(total)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Paid</span>
-              <span>{money(paid)}</span>
-            </div>
-            {settings.showBalanceOnSlip ? (
-              <>
-                <div className="flex justify-between">
-                  <span>Previous balance</span>
-                  <span>
-                    {money(Math.abs(balanceBefore))}{" "}
-                    {balanceBefore < 0 ? "owe" : balanceBefore > 0 ? "adv" : ""}
-                  </span>
-                </div>
-                <div className="flex justify-between font-semibold">
-                  <span>Balance after</span>
-                  <span>
-                    {money(Math.abs(balanceAfter))}{" "}
-                    {balanceAfter < 0 ? "owe" : balanceAfter > 0 ? "adv" : ""}
-                  </span>
-                </div>
-              </>
-            ) : null}
-            <div className="my-2 border-t border-dashed border-slate-400" />
-            <p className="text-center text-[10px] text-slate-500">{settings.footer}</p>
-          </div>
+          ))}
         </div>
         <div className="flex w-52 flex-col gap-2 rounded-lg bg-white p-3">
           <div className="flex items-center justify-between">
@@ -158,6 +149,7 @@ export function PrintPreview({
           </div>
           <p className="text-[12px] text-slate-500">
             {thermal ? thermalLabel(paper) : "A4"} · {duplicate ? "Duplicate" : "First print"}
+            {splitOn && pages.length > 1 ? ` · ${pages.length} pages` : ""}
           </p>
           <Button variant="primary" icon={<Printer size={14} />} onClick={handlePrint}>
             Print
@@ -171,7 +163,7 @@ export function PrintPreview({
             </p>
           ) : null}
           <p className="text-[10px] text-slate-400">
-            If the printer is offline, use Print to open the system dialog or save as PDF.
+            Split cuts use Printer settings (products per page). F10 toggles for this sale.
           </p>
         </div>
       </div>

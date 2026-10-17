@@ -16,6 +16,7 @@ import {
 } from "@/components/common";
 import { STORAGE_KEYS, MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
+import { uniqueUnitSymbol } from "@/shared/constants/units";
 import {
   PRODUCT_COPY,
   PRODUCT_FORM_SECTIONS,
@@ -90,10 +91,8 @@ function numStr(n: number) {
 function validationToastMessage(field: string): string {
   const messages: Record<string, string> = {
     name: "Name is required",
-    category: PRODUCT_COPY.categoryRequired,
     unit: PRODUCT_COPY.unitRequired,
     openingQty: PRODUCT_COPY.openingQtyRequired,
-    lowStock: PRODUCT_COPY.lowStockRequired,
     cost: PRODUCT_COPY.unitPriceRequired,
     min: PRODUCT_COPY.unitPriceRequired,
     wholesale: PRODUCT_COPY.unitPriceRequired,
@@ -207,6 +206,7 @@ export function ProductForm({
     { id: string; name: string; isActive: boolean }[]
   >([]);
   const [creatingCategory, setCreatingCategory] = useState(false);
+  const [creatingUnit, setCreatingUnit] = useState(false);
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [sessionBranchId, setSessionBranchId] = useState("");
   const categoryOptions = useMemo(() => {
@@ -215,7 +215,11 @@ export function ProductForm({
     if (product.category) names.add(product.category);
     return [...names].sort((a, b) => a.localeCompare(b));
   }, [hubCategories, localCategories, product.category]);
-  const unitRows = hubUnits.length ? hubUnits : localUnits;
+  const unitRows = useMemo(() => {
+    const rows = new Map<string, { id: string; name: string; symbol: string }>();
+    for (const row of [...hubUnits, ...localUnits]) rows.set(row.id, row);
+    return [...rows.values()];
+  }, [hubUnits, localUnits]);
   const suppliers = hubSuppliers.length ? hubSuppliers : localSuppliers;
   const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.name ?? "";
 
@@ -443,7 +447,7 @@ export function ProductForm({
         '.product-small-top input[inputmode="decimal"]',
       );
       // New rows are blank — pick unit first; then type conversion.
-      const target = combo?.value ? factor ?? combo : combo ?? factor;
+      const target = combo?.value ? (factor ?? combo) : (combo ?? factor);
       target?.focus();
       target?.select();
     });
@@ -516,6 +520,57 @@ export function ProductForm({
     }
   }
 
+  async function addUnit(name: string, targetUnitId?: string) {
+    const trimmed = name.trim();
+    if (!trimmed || creatingUnit) return;
+    setCreatingUnit(true);
+    try {
+      const symbol = uniqueUnitSymbol(
+        trimmed,
+        unitRows.map((row) => row.symbol),
+      );
+      const created = await createMasterRecord("units", {
+        name: trimmed,
+        symbol,
+        precision: 3,
+        isActive: true,
+      });
+      const nextUnit = { id: created.id, name: created.name, symbol: created.symbol ?? symbol };
+      setLocalUnits((current) =>
+        current.some((row) => row.id === nextUnit.id) ? current : [...current, nextUnit],
+      );
+
+      const currentUnits = qtyUnits(defaultSellUnits(productRef.current));
+      const target = targetUnitId
+        ? currentUnits.find((unit) => unit.id === targetUnitId)
+        : canonicalUnit(currentUnits);
+      if (!target || target.isBase) {
+        setInventoryUnit(nextUnit.symbol, nextUnit.name);
+      } else {
+        const updated = currentUnits.map((unit) =>
+          unit.id === target.id
+            ? {
+                ...unit,
+                symbol: nextUnit.symbol,
+                name: nextUnit.name,
+                kind: extraKind(nextUnit.symbol),
+                factorDirection: isSubdivisionSymbol(nextUnit.symbol)
+                  ? ("divide" as const)
+                  : ("multiply" as const),
+              }
+            : unit,
+        );
+        patch({ sellUnits: deriveAll(updated) });
+      }
+      await refreshHub();
+      toaster.success("Unit added");
+    } catch (error) {
+      toaster.error(shortError(error, "Could not add unit"));
+    } finally {
+      setCreatingUnit(false);
+    }
+  }
+
   function setKeep(value: boolean) {
     setKeepAdding(value);
     sessionStorage.setItem(STORAGE_KEYS.keepAddingProducts, value ? "1" : "0");
@@ -557,7 +612,7 @@ export function ProductForm({
     });
   }
 
-  function setInventoryUnit(v: string) {
+  function setInventoryUnit(v: string, displayName = unitLabel(v)) {
     const current = productRef.current;
     const existing = sellUnits.find(
       (unit) => (unit.symbol || "").trim().toLowerCase() === v.trim().toLowerCase(),
@@ -570,7 +625,7 @@ export function ProductForm({
             ? {
                 ...unit,
                 symbol: v,
-                name: unitLabel(v),
+                name: displayName,
                 contains: 1,
                 factorDirection: "multiply" as const,
                 isBase: true,
@@ -687,10 +742,8 @@ export function ProductForm({
 
   function validate(): string | null {
     if (!product.name.trim()) return "name";
-    if (!product.category) return "category";
     if (!(base?.symbol || product.unit)) return "unit";
     if (isNew && product.stock <= 0) return "openingQty";
-    if ((product.minimumStock ?? 0) <= 0) return "lowStock";
     if (isNew && base) {
       if (base.cost <= 0) return "cost";
       if (base.min <= 0) return "min";
@@ -719,10 +772,8 @@ export function ProductForm({
       setError(field);
       const jump: Record<string, ProductFormSection> = {
         name: "details",
-        category: "details",
         unit: "details",
         openingQty: "details",
-        lowStock: "details",
         cost: "details",
         min: "details",
         wholesale: "details",
@@ -932,16 +983,11 @@ export function ProductForm({
 
   const typeValue = product.isManufactured ? "manufactured" : "standard";
   const lowStockField = (
-    <Field
-      label={PRODUCT_COPY.lowStockAlert}
-      hint={PRODUCT_COPY.lowStockHint}
-      error={error === "lowStock" ? PRODUCT_COPY.lowStockRequired : undefined}
-    >
+    <Field label={PRODUCT_COPY.lowStockAlert} hint={PRODUCT_COPY.lowStockHint}>
       <TextInput
-        data-field="lowStock"
         inputMode="decimal"
         maxLength={FIELD_LIMITS.qty}
-        placeholder="e.g. 5"
+        placeholder="Optional"
         value={numStr(product.minimumStock ?? 0)}
         onChange={(event) => setLowStock(event.target.value)}
       />
@@ -1022,13 +1068,17 @@ export function ProductForm({
                 onChange={(e) => patch({ name: e.target.value })}
               />
             </Field>
-            <Field label="Category" error={error === "category" ? "Choose a category" : undefined}>
+            <Field label="Category" hint="Uses Other when left empty.">
               <SearchableSelect
                 name="category"
-                invalid={error === "category"}
                 value={product.category}
-                onChange={(v) => patch({ category: v })}
-                placeholder="Choose category"
+                onChange={(v) => {
+                  const selected = [...hubCategories, ...localCategories].find(
+                    (row) => row.name === v,
+                  );
+                  patch({ category: v, categoryId: selected?.id });
+                }}
+                placeholder="Other (automatic)"
                 searchPlaceholder="Type to search or add"
                 options={categoryOptions.map((c) => ({ value: c, label: c }))}
                 clearable={false}
@@ -1069,6 +1119,7 @@ export function ProductForm({
                   units={unitRows.map((unit) => ({ value: unit.symbol, label: unit.name }))}
                   onQuantityChange={setOpeningQty}
                   onUnitChange={setInventoryUnit}
+                  onCreateUnit={(label) => void addUnit(label)}
                 />
               </Field>
             ) : (
@@ -1368,12 +1419,12 @@ export function ProductForm({
                   }
                 >
                   <div
-                    className={cn(
-                      "product-small-top grid items-start gap-3",
-                      isCanonical
-                        ? "grid-cols-[minmax(0,1.2fr)_minmax(120px,0.8fr)_150px]"
-                        : "grid-cols-[minmax(0,1.2fr)_minmax(140px,0.8fr)_150px_36px]",
-                    )}
+                    className="product-small-top grid items-start gap-3"
+                    style={{
+                      gridTemplateColumns: isCanonical
+                        ? "minmax(0, 1.2fr) minmax(120px, 0.8fr) 150px"
+                        : "minmax(0, 1.2fr) minmax(140px, 0.8fr) 150px 36px",
+                    }}
                   >
                     <Field
                       label={
@@ -1417,6 +1468,9 @@ export function ProductForm({
                         searchPlaceholder="Type to search"
                         options={sellUnitOptions(row, sellUnits, unitRows)}
                         clearable={false}
+                        disabled={creatingUnit}
+                        onCreate={(label) => void addUnit(label, row.id)}
+                        createLabel="Add unit"
                       />
                     </Field>
                     {isCanonical ? (

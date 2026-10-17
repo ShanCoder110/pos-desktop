@@ -12,6 +12,7 @@ export function UnitQuantityEntry({
   units,
   onQuantityChange,
   onUnitChange,
+  onCreateUnit,
   quantityPlaceholder = "0",
   unitPlaceholder = "Choose unit",
   disabled = false,
@@ -23,6 +24,7 @@ export function UnitQuantityEntry({
   units: UnitQuantityOption[];
   onQuantityChange: (quantity: string) => void;
   onUnitChange: (unit: string) => void;
+  onCreateUnit?: (label: string) => void;
   quantityPlaceholder?: string;
   unitPlaceholder?: string;
   disabled?: boolean;
@@ -50,6 +52,8 @@ export function UnitQuantityEntry({
         searchPlaceholder="Search units"
         clearable={false}
         disabled={disabled}
+        onCreate={onCreateUnit}
+        createLabel="Add unit"
       />
     </div>
   );

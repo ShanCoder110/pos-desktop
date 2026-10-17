@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { RECEIPT_BRANDING } from "@/shared/constants/receiptBranding";
 import type { PaperWidth, PrintSize, ShopSettings } from "@/shared/types";
 
 export const defaultSettings: ShopSettings = {
@@ -7,7 +8,7 @@ export const defaultSettings: ShopSettings = {
   phone: "042 1110001",
   email: "",
   address: "Hall Road, Lahore",
-  footer: "Thank you. Goods once sold are not returned without receipt.",
+  footer: RECEIPT_BRANDING.notValidForCourt,
   showBalanceOnSlip: true,
   printSize: "thermal",
   autoPrint: true,
@@ -32,13 +33,17 @@ export const defaultSettings: ShopSettings = {
   showLogo: true,
   showCashierName: true,
   showItemDiscount: false,
-  tagline: "",
-  contactLine: "",
-  promoUrdu: "",
+  tagline: RECEIPT_BRANDING.tagline,
+  contactLine: RECEIPT_BRANDING.contactLine,
+  promoUrdu: RECEIPT_BRANDING.promoUrdu,
+  itemsTableBordered: false,
   printerName: "XP-80C",
   printerPaperWidth: "MM_80",
   copies: 1,
   splitLongBill: false,
+  splitFirstPageItems: 12,
+  splitMiddlePageItems: 15,
+  splitLastPageItems: 12,
 };
 
 export function printSizeFromPaper(width: PaperWidth): PrintSize {

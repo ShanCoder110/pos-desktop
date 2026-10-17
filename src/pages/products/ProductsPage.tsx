@@ -97,6 +97,7 @@ import {
   resolveCategoryId,
 } from "@/pages/products/productPayload";
 import { listAllInvoices } from "@/services/sales";
+import { createMasterRecord } from "@/services/masters";
 import {
   buildProductSalesStats,
   formatInsightMetricValue,
@@ -619,17 +620,21 @@ export function ProductsPage() {
 
   async function commit(next: Product): Promise<boolean> {
     const isNewRow = !rows.some((r) => r.id === next.id);
-    const category = resolveCategoryId(next, categories);
-    if (!category) {
-      toaster.error(PRODUCT_COPY.categoryRequired);
-      return false;
-    }
     if (!units.some((row) => row.symbol === next.unit)) {
       toaster.error(PRODUCT_COPY.unitRequired);
       return false;
     }
     setProductLoading((current) => ({ ...current, saving: true }));
     try {
+      let category = resolveCategoryId(next, categories);
+      if (!category) {
+        const existingOther = categories.find((row) => row.name.trim().toLowerCase() === "other");
+        category =
+          existingOther ??
+          (await createMasterRecord("categories", { name: "Other", isActive: true }));
+        next.category = category.name;
+        next.categoryId = category.id;
+      }
       const session = await ensureSession();
       if (isNewRow) {
         const payload = buildCreateProductPayload(next, {

@@ -16,6 +16,7 @@ mod m20260921_000013_purchase_order_fk_repair;
 mod m20261003_000014_customer_credit_book;
 mod m20261015_000015_unit_factor_direction;
 mod m20261015_000016_restore_qa_customer;
+mod m20261017_000017_default_other_category;
 
 pub struct Migrator;
 
@@ -39,6 +40,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261003_000014_customer_credit_book::Migration),
             Box::new(m20261015_000015_unit_factor_direction::Migration),
             Box::new(m20261015_000016_restore_qa_customer::Migration),
+            Box::new(m20261017_000017_default_other_category::Migration),
         ]
     }
 }
@@ -87,11 +89,11 @@ mod tests {
             .expect("count seeded units")
             .expect("unit count row");
         let count: i64 = row.try_get("", "count").expect("read unit count");
-        assert_eq!(count, 16);
+        assert_eq!(count, 7);
         let units = MasterService::list(&database, MasterKind::Unit, PageQuery::default())
             .await
             .expect("load seeded units through service");
-        assert_eq!(units.data.len(), 16);
+        assert_eq!(units.data.len(), 7);
         assert!(units
             .data
             .iter()
