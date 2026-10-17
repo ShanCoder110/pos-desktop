@@ -32,7 +32,6 @@ pub struct Config {
     pub database_path: PathBuf,
     pub access_token_ttl_minutes: i64,
     pub refresh_token_ttl_days: i64,
-    pub default_staff_password: SecretString,
     pub cloud_sync_enabled: bool,
     pub supabase_url: Option<String>,
     pub supabase_anon_key: Option<SecretString>,
@@ -40,7 +39,8 @@ pub struct Config {
 }
 
 impl Config {
-    /// Load `.env` (if present), then require every local-mode var. Call once before serving.
+    /// Load `.env` overrides when present, otherwise use safe desktop defaults.
+    /// Packaged applications do not ship a `.env` file.
     pub fn load() -> Result<&'static Config, String> {
         if CONFIG.get().is_some() {
             return Ok(CONFIG.get().expect("config set"));
@@ -67,7 +67,7 @@ impl Config {
     }
 
     fn from_env() -> Result<Self, String> {
-        let app_env = required("APP_ENV")?;
+        let app_env = value_or("APP_ENV", "production");
         let cloud_sync_enabled =
             parse_bool(&optional("CLOUD_SYNC_ENABLED").unwrap_or_else(|| "false".into()))?;
 
@@ -92,13 +92,15 @@ impl Config {
 
         Ok(Self {
             app_env,
-            log_level: required("LOG_LEVEL")?,
-            api_host: required("API_HOST")?,
-            api_port: parse_port(&required("API_PORT")?)?,
-            database_path: PathBuf::from(required("DUKAN_DB_PATH")?),
-            access_token_ttl_minutes: parse_duration_minutes(&required("ACCESS_TOKEN_EXPIRY")?)?,
-            refresh_token_ttl_days: parse_duration_days(&required("REFRESH_TOKEN_EXPIRY")?)?,
-            default_staff_password: SecretString(required("DEFAULT_STAFF_PASSWORD")?),
+            log_level: value_or("LOG_LEVEL", "info"),
+            api_host: value_or("API_HOST", "127.0.0.1"),
+            api_port: parse_port(&value_or("API_PORT", "38472"))?,
+            database_path: PathBuf::from(value_or("DUKAN_DB_PATH", "./data/dukan-pos.sqlite3")),
+            access_token_ttl_minutes: parse_duration_minutes(&value_or(
+                "ACCESS_TOKEN_EXPIRY",
+                "60m",
+            ))?,
+            refresh_token_ttl_days: parse_duration_days(&value_or("REFRESH_TOKEN_EXPIRY", "30d"))?,
             cloud_sync_enabled,
             supabase_url,
             supabase_anon_key,
@@ -107,17 +109,8 @@ impl Config {
     }
 }
 
-fn required(key: &str) -> Result<String, String> {
-    std::env::var(key)
-        .map_err(|_| format!("missing required env var `{key}` (see .env.example)"))
-        .and_then(|value| {
-            let trimmed = value.trim().to_owned();
-            if trimmed.is_empty() {
-                Err(format!("env var `{key}` is empty (see .env.example)"))
-            } else {
-                Ok(trimmed)
-            }
-        })
+fn value_or(key: &str, default: &str) -> String {
+    optional(key).unwrap_or_else(|| default.to_owned())
 }
 
 fn optional(key: &str) -> Option<String> {

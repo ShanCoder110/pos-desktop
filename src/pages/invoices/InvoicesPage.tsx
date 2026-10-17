@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import { routes } from "@/shared/constants/routes";
 import {
   Badge,
-  Button,
   toaster,
   DetailToolbar,
   DetailToolbarButton,

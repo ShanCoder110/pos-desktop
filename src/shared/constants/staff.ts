@@ -1,9 +1,6 @@
 import type { ColumnOption } from "@/components/common/ColumnPicker";
 import type { UserAccessRole } from "@/shared/domain/types";
 
-/** Public Vite env only — never put signing secrets here. Prefer requiring a password in the UI. */
-export const DEFAULT_STAFF_PASSWORD = String(import.meta.env.VITE_DEFAULT_STAFF_PASSWORD ?? "");
-
 export const STAFF_TAB_EMPLOYEES = "employees";
 export const STAFF_TAB_LEDGER = "ledger";
 

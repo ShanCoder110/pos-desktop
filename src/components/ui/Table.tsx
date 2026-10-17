@@ -22,7 +22,12 @@ export function Th({ className, ...props }: ThHTMLAttributes<HTMLTableCellElemen
 }
 
 export function Td({ className, ...props }: TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn("border-t border-slate-100 px-3 py-1.5 align-middle", className)} {...props} />;
+  return (
+    <td
+      className={cn("border-t border-slate-100 px-3 py-1.5 align-middle", className)}
+      {...props}
+    />
+  );
 }
 
 export function MoneyCell({ n, muted }: { n: number; muted?: boolean }) {

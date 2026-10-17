@@ -16,16 +16,13 @@ export function ProfileSection() {
       onSave={save}
       onReset={reset}
     >
-      <Field
-        label="POS name"
-        hint="Main brand name for the app sidebar and browser tab. Leave empty to use shop name below."
-      >
+      <Field label="Sidebar shop name" hint="Your business name shown below the Dukan logo.">
         <TextInput value={draft.shopName} onChange={(e) => patch({ shopName: e.target.value })} />
       </Field>
       <div className="settings-row">
         <Field
           label="Shop name"
-          hint="Printed at the top of the slip. Can differ from the POS name."
+          hint="Printed at the top of the slip. Can differ from the sidebar shop name."
         >
           <TextInput
             value={draft.receiptShopName}

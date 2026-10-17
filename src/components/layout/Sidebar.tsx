@@ -40,10 +40,10 @@ export function Sidebar() {
           <img src={posMark} alt="" />
           <div className="mgmt-brand-copy [min-width:0] mgmt-label [overflow:hidden] [white-space:nowrap] [opacity:1] [max-width:150px] [transition:opacity_0.14s_ease,_max-width_0.2s_ease]">
             <p className="mgmt-brand-name [font-size:12px] [font-weight:800] [letter-spacing:-0.02em] [color:#fff] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis]">
-              {settings.shopName || "POS"}
+              Dukan
             </p>
             <p className="mgmt-brand-tag [margin-top:1px] [font-size:9px] [font-weight:600] [color:#64748b] [letter-spacing:0.04em] [text-transform:uppercase]">
-              Shop counter
+              {settings.shopName || "Shop counter"}
             </p>
           </div>
         </div>

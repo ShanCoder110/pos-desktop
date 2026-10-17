@@ -60,12 +60,13 @@ export function ReceiptSection() {
               </SelectInput>
             </Field>
           </div>
-          <Field label="Invoice font" hint="Applies to slip preview and print (Urdu stays Nastaleeq)">
+          <Field
+            label="Invoice font"
+            hint="Applies to slip preview and print (Urdu stays Nastaleeq)"
+          >
             <SelectInput
               value={draft.receiptFontFamily}
-              onChange={(e) =>
-                patch({ receiptFontFamily: e.target.value as ReceiptFontFamily })
-              }
+              onChange={(e) => patch({ receiptFontFamily: e.target.value as ReceiptFontFamily })}
             >
               {RECEIPT_FONT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -98,7 +99,11 @@ export function ReceiptSection() {
               onChange={(e) => patch({ promoUrdu: e.target.value })}
             />
           </Field>
-          <Toggle checked={draft.showLogo} onChange={(v) => patch({ showLogo: v })} label="Show logo" />
+          <Toggle
+            checked={draft.showLogo}
+            onChange={(v) => patch({ showLogo: v })}
+            label="Show logo"
+          />
           <Toggle
             checked={draft.showCashierName}
             onChange={(v) => patch({ showCashierName: v })}

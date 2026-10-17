@@ -7,8 +7,7 @@ export function jameelNooriFontUrl(origin?: string): string {
   return `${base}/fonts/JameelNooriNastaleeq-Regular.ttf`;
 }
 
-export const JAMEEL_NOORI_FONT_FAMILY =
-  "'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', serif";
+export const JAMEEL_NOORI_FONT_FAMILY = "'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', serif";
 
 /**
  * URL-based @font-face for print + preview.

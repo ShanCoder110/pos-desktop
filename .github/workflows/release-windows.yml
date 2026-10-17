@@ -1,10 +1,14 @@
-name: Release Windows POS
+name: Release Dukan for Windows
 
 on:
   workflow_dispatch:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+
+concurrency:
+  group: windows-production-release
+  cancel-in-progress: false
 
 jobs:
   release-windows:
@@ -33,8 +37,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify frontend
-        run: npm run lint && npm test -- --run
+      - name: Verify application
+        run: npm run check && npm test -- --run && npm run build
+
+      - name: Test Rust backend
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Create unique release version
+        run: node scripts/set-ci-release-version.mjs "${{ github.run_number }}"
 
       - name: Build, sign, and publish Windows update
         uses: tauri-apps/tauri-action@v1
@@ -44,8 +54,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
-          releaseName: POS v__VERSION__
-          releaseBody: Download the installer or allow the installed POS to update automatically.
+          releaseName: Dukan v__VERSION__
+          releaseBody: Download the installer or allow Dukan to update automatically.
           releaseDraft: false
           prerelease: false
           args: --bundles nsis

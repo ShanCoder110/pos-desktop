@@ -3,7 +3,6 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::backend::{
-    config::Config,
     constants::{
         CODE_USERNAME_DUPLICATE, CODE_USER_EMAIL_DUPLICATE, CODE_USER_PHONE_DUPLICATE,
         DEFAULT_INVOICE_PREFIX, DEFAULT_LOT_PREFIX, DEFAULT_PRODUCTION_PREFIX,
@@ -64,7 +63,8 @@ impl OrgService {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| Config::get().default_staff_password.expose());
+            .map(str::to_owned)
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
         let email = trimmed(&request.email)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| AppError::Validation(ERROR_USER_EMAIL_REQUIRED.into()))?;
@@ -84,7 +84,7 @@ impl OrgService {
             id,
             request.name.trim(),
             &username,
-            &hash_password(password)?,
+            &hash_password(&password)?,
             Some(&phone),
             Some(&email),
             &role,

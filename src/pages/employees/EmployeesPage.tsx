@@ -88,7 +88,6 @@ import { listEmptyMessage } from "@/shared/constants/empty";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { CUSTOMER_PAY_METHODS } from "@/shared/constants/customers";
 import {
-  DEFAULT_STAFF_PASSWORD,
   EMPLOYEE_COPY,
   EMPLOYEE_SEARCH_PLACEHOLDER,
   EMPLOYEE_TABLE_COLUMNS,
@@ -510,7 +509,6 @@ export function EmployeesPage() {
         await createUser({
           ...payload,
           email: staffEmailForCreate(edit.id, values.name.trim()),
-          password: DEFAULT_STAFF_PASSWORD,
         });
       } else {
         await updateUser(edit.id, {

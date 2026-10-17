@@ -16,7 +16,6 @@ import { shortError } from "@/utils/format";
 import { formatPkMobile } from "@/utils/phone";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import {
-  DEFAULT_STAFF_PASSWORD,
   USER_ACCESS_ROLES,
   USERS_COPY,
   defaultPermissionsForRole,
@@ -127,9 +126,7 @@ export function UserForm({
         />
         <Field
           label={isNew ? "Password" : "New password"}
-          hint={
-            isNew ? `Leave blank to use ${DEFAULT_STAFF_PASSWORD}` : "Leave blank to keep current"
-          }
+          hint={isNew ? "Required for the new user's login" : "Leave blank to keep current"}
           error={fieldMessage(errors, "password")}
         >
           <PasswordInput
@@ -137,7 +134,10 @@ export function UserForm({
             placeholder={isNew ? "Enter password" : "Enter new password"}
             maxLength={FIELD_LIMITS.password}
             autoComplete={isNew ? "new-password" : "new-password"}
-            {...register("password")}
+            {...register("password", {
+              validate: (value) =>
+                !isNew || value.trim().length >= 6 ? true : "Enter at least 6 characters",
+            })}
           />
         </Field>
         {!isNew ? (

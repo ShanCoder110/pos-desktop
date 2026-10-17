@@ -55,7 +55,9 @@ export function DevicesSection() {
               <Td>{device.lastSeenAt ?? "—"}</Td>
               <Td>{device.lastSyncedAt ?? "—"}</Td>
               <Td>
-                <Badge tone={device.isActive ? "ok" : "danger"}>{device.isActive ? "Yes" : "No"}</Badge>
+                <Badge tone={device.isActive ? "ok" : "danger"}>
+                  {device.isActive ? "Yes" : "No"}
+                </Badge>
               </Td>
               <Td>—</Td>
             </tr>

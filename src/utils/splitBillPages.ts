@@ -78,7 +78,13 @@ export function splitBillPages<T>(
     const slice = items.slice(offset, offset + count) as T[];
     offset += count;
     const kind: SplitBillPageKind =
-      pageCount === 1 ? "single" : index === 0 ? "first" : index === pageCount - 1 ? "last" : "middle";
+      pageCount === 1
+        ? "single"
+        : index === 0
+          ? "first"
+          : index === pageCount - 1
+            ? "last"
+            : "middle";
     return {
       items: slice,
       kind,

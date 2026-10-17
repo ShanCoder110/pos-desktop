@@ -1,4 +1,5 @@
 import { isTauri } from "@tauri-apps/api/core";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 
 export type AppUpdateProgress =
@@ -36,5 +37,7 @@ export async function installAvailableDesktopUpdate(
     }
   });
 
+  onProgress?.({ phase: "installing", version: update.version });
+  await relaunch();
   return { installed: true as const, version: update.version };
 }

@@ -39,7 +39,10 @@ export function Tooltip({
     const rect = tip.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
     const top = placement === "top" ? mouse.current.y - rect.height - GAP : mouse.current.y + GAP;
-    const left = Math.max(PAD, Math.min(mouse.current.x - rect.width / 2, window.innerWidth - rect.width - PAD));
+    const left = Math.max(
+      PAD,
+      Math.min(mouse.current.x - rect.width / 2, window.innerWidth - rect.width - PAD),
+    );
     return { top, left };
   }, [placement]);
 
@@ -83,13 +86,23 @@ export function Tooltip({
 
   const style: CSSProperties =
     coords == null
-      ? { position: "fixed", top: 0, left: 0, visibility: "hidden", pointerEvents: "none", zIndex: 80 }
+      ? {
+          position: "fixed",
+          top: 0,
+          left: 0,
+          visibility: "hidden",
+          pointerEvents: "none",
+          zIndex: 80,
+        }
       : { position: "fixed", top: coords.top, left: coords.left, zIndex: 80 };
 
   return (
     <>
       <span
-        className={cn("ui-tooltip-trigger [display:inline-flex] [max-width:100%] [min-width:0]", className)}
+        className={cn(
+          "ui-tooltip-trigger [display:inline-flex] [max-width:100%] [min-width:0]",
+          className,
+        )}
         tabIndex={0}
         onMouseEnter={show}
         onMouseMove={(e) => {
@@ -104,7 +117,12 @@ export function Tooltip({
       </span>
       {open
         ? createPortal(
-            <div ref={tipRef} role="tooltip" style={style} className="ui-tooltip [max-width:min(280px,_calc(100vw_-_16px))] [padding:8px_10px] [border-radius:8px] [background:var(--header)] [color:#fff] [font-size:12px] [font-weight:600] [line-height:1.35] [box-shadow:0_8px_20px_rgba(15,_23,_42,_0.2)] [pointer-events:none] [white-space:normal]">
+            <div
+              ref={tipRef}
+              role="tooltip"
+              style={style}
+              className="ui-tooltip [max-width:min(280px,_calc(100vw_-_16px))] [padding:8px_10px] [border-radius:8px] [background:var(--header)] [color:#fff] [font-size:12px] [font-weight:600] [line-height:1.35] [box-shadow:0_8px_20px_rgba(15,_23,_42,_0.2)] [pointer-events:none] [white-space:normal]"
+            >
               {content}
             </div>,
             document.body,
@@ -117,7 +135,14 @@ export function Tooltip({
 export function TruncatedTooltip({ text, className }: { text: string; className?: string }) {
   return (
     <Tooltip content={text}>
-      <span className={cn("ui-truncate [display:block] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [max-width:100%]", className)}>{text || "—"}</span>
+      <span
+        className={cn(
+          "ui-truncate [display:block] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [max-width:100%]",
+          className,
+        )}
+      >
+        {text || "—"}
+      </span>
     </Tooltip>
   );
 }

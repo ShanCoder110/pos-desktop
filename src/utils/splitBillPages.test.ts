@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { splitBillItemCounts, splitBillPages, shouldSplitThermalBill } from "@/utils/splitBillPages";
+import {
+  splitBillItemCounts,
+  splitBillPages,
+  shouldSplitThermalBill,
+} from "@/utils/splitBillPages";
 
 describe("splitBillPages", () => {
   it("keeps short bills on one page", () => {

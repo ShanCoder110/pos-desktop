@@ -10,7 +10,9 @@ const MgmtLayoutContext = createContext<{
 });
 
 export function MgmtLayoutProvider({ children }: { children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(STORAGE_KEYS.managementSidebarCollapsed) === "1");
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem(STORAGE_KEYS.managementSidebarCollapsed) === "1",
+  );
   const value = useMemo(
     () => ({
       collapsed,

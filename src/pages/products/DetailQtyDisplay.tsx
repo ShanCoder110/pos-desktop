@@ -41,7 +41,9 @@ export function DetailQtyDisplay({
 
   return (
     <span className="product-detail-qty-block">
-      <span className={mode === "branch" ? "product-detail-qty-exact tabular-nums" : "tabular-nums"}>
+      <span
+        className={mode === "branch" ? "product-detail-qty-exact tabular-nums" : "tabular-nums"}
+      >
         {stockLine}
       </span>
       <small className="product-detail-qty-sub tabular-nums">{sub}</small>

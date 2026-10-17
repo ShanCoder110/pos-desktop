@@ -1,14 +1,10 @@
 import type { CSSProperties } from "react";
-import {
-  RECEIPT_BRANDING,
-  receiptFontFamilyCss,
-} from "@/shared/constants/receiptBranding";
+import { RECEIPT_BRANDING, receiptFontFamilyCss } from "@/shared/constants/receiptBranding";
 import type { Customer, InvoiceLine, ShopSettings } from "@/shared/types";
 import { moneyNum } from "@/utils/format";
 import type { SplitBillPageKind } from "@/utils/splitBillPages";
 
-const URDU_SCRIPT =
-  /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+const URDU_SCRIPT = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
 
 function textContainsUrdu(value: string | null | undefined) {
   return URDU_SCRIPT.test(String(value ?? ""));
@@ -75,7 +71,9 @@ export function InvoiceThermalReceipt({
   const pageItemsTotal = pageLines.reduce((sum, line) => sum + line.qty * line.price, 0);
   const totalItems = lines.length;
   const showBalances =
-    settings.showBalanceOnSlip && !customer.isWalking && (balanceBefore !== 0 || balanceAfter !== 0);
+    settings.showBalanceOnSlip &&
+    !customer.isWalking &&
+    (balanceBefore !== 0 || balanceAfter !== 0);
   const due = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
   const now = new Date();
@@ -88,10 +86,7 @@ export function InvoiceThermalReceipt({
     hour12: true,
   });
 
-  const itemFrom =
-    page && isSplit
-      ? lines.findIndex((l) => l.id === page.items[0]?.id) + 1
-      : 1;
+  const itemFrom = page && isSplit ? lines.findIndex((l) => l.id === page.items[0]?.id) + 1 : 1;
   const itemTo = page && isSplit ? itemFrom + page.items.length - 1 : totalItems;
 
   return (
@@ -103,17 +98,25 @@ export function InvoiceThermalReceipt({
         <div className="receipt-header">
           {showBrandHeader ? (
             <>
-              <h1 className={["receipt-shop-name", receiptUrduClass(shop)].filter(Boolean).join(" ")}>
+              <h1
+                className={["receipt-shop-name", receiptUrduClass(shop)].filter(Boolean).join(" ")}
+              >
                 {shop}
               </h1>
               {tagline ? (
-                <p className={["receipt-tagline", receiptUrduClass(tagline)].filter(Boolean).join(" ")}>
+                <p
+                  className={["receipt-tagline", receiptUrduClass(tagline)]
+                    .filter(Boolean)
+                    .join(" ")}
+                >
                   {tagline}
                 </p>
               ) : null}
               {contact ? (
                 <p
-                  className={["receipt-contact-line", receiptUrduClass(contact)].filter(Boolean).join(" ")}
+                  className={["receipt-contact-line", receiptUrduClass(contact)]
+                    .filter(Boolean)
+                    .join(" ")}
                 >
                   {contact}
                 </p>
@@ -164,7 +167,9 @@ export function InvoiceThermalReceipt({
           <div className="receipt-meta-row">
             <span>Customer:</span>
             <span
-              className={["receipt-bold", receiptUrduClass(customer.name)].filter(Boolean).join(" ")}
+              className={["receipt-bold", receiptUrduClass(customer.name)]
+                .filter(Boolean)
+                .join(" ")}
             >
               {customer.name}
               {customer.phone ? ` · ${customer.phone}` : ""}
@@ -194,14 +199,18 @@ export function InvoiceThermalReceipt({
               return (
                 <tr key={line.id}>
                   <td className="receipt-col-item receipt-item-name">
-                    <div className={nameUrdu ? "receipt-item-name-urdu" : undefined}>{line.name}</div>
+                    <div className={nameUrdu ? "receipt-item-name-urdu" : undefined}>
+                      {line.name}
+                    </div>
                     {settings.showItemDiscount ? (
                       <div className="receipt-item-detail">Disc 0</div>
                     ) : null}
                   </td>
                   <td className="receipt-col-qty">{formatQty(line.qty, line.unit)}</td>
                   <td className="receipt-col-price">{formatRs(line.price)}</td>
-                  <td className="receipt-col-total receipt-bold">{formatRs(line.qty * line.price)}</td>
+                  <td className="receipt-col-total receipt-bold">
+                    {formatRs(line.qty * line.price)}
+                  </td>
                 </tr>
               );
             })}
@@ -225,9 +234,7 @@ export function InvoiceThermalReceipt({
               <div className="receipt-totals">
                 <div className="receipt-grand-total-row">
                   <span>
-                    {isSplit
-                      ? `TOTAL (all ${totalItems} items)`
-                      : `TOTAL (${totalItems} items)`}
+                    {isSplit ? `TOTAL (all ${totalItems} items)` : `TOTAL (${totalItems} items)`}
                   </span>
                   <span>Rs. {formatRs(total)}</span>
                 </div>
@@ -256,9 +263,7 @@ export function InvoiceThermalReceipt({
               <>
                 <div className="receipt-grand-total-row">
                   <span>
-                    {isSplit
-                      ? `TOTAL (all ${totalItems} items)`
-                      : `TOTAL (${totalItems} items)`}
+                    {isSplit ? `TOTAL (all ${totalItems} items)` : `TOTAL (${totalItems} items)`}
                   </span>
                   <span>Rs. {formatRs(total)}</span>
                 </div>
