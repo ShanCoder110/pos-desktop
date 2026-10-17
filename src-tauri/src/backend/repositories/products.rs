@@ -428,9 +428,14 @@ fn build_conditions(
         values.push(active.into());
     }
     if let Some(search) = &query.page.search {
-        parts.push("(lower(p.name) LIKE ? OR lower(p.sku) LIKE ? OR lower(p.barcode) LIKE ? OR lower(c.name) LIKE ?)".to_owned());
+        // Match product fields and any sell-unit barcode without duplicating product rows.
+        parts.push(
+            "(lower(p.name) LIKE ? OR lower(p.sku) LIKE ? OR lower(p.barcode) LIKE ? OR lower(c.name) LIKE ? OR EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.deleted_at IS NULL AND lower(COALESCE(pu.barcode, '')) LIKE ?))"
+                .to_owned(),
+        );
         let needle = format!("%{}%", search.to_lowercase());
         values.extend([
+            needle.clone().into(),
             needle.clone().into(),
             needle.clone().into(),
             needle.clone().into(),
@@ -655,6 +660,7 @@ async fn hydrate(
                 branch_stock,
                 components: Vec::new(),
                 sell_units,
+                matched_unit_id: None,
                 is_active: row.is_active,
                 created_at: row.created_at.to_rfc3339(),
                 updated_at: row.updated_at.to_rfc3339(),

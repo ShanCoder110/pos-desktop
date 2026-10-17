@@ -158,6 +158,8 @@ export interface Product {
   branchStock?: ProductBranchStock[];
   components: BomLine[];
   sellUnits?: ProductSellUnit[];
+  /** Set by product search when a sell-unit barcode matched exactly. */
+  matchedUnitId?: string | null;
   isActive?: boolean;
   createdAt?: string;
   updatedAt?: string;

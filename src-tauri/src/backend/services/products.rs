@@ -60,9 +60,11 @@ impl ProductService {
         if let Some(branch_id) = branch_id {
             list_query.branch_id = Some(branch_id.to_string());
         }
-        ProductRepository::list(database, &list_query)
+        let mut products = ProductRepository::list(database, &list_query)
             .await
-            .map(|result| result.0)
+            .map(|result| result.0)?;
+        annotate_matched_units(&mut products, query);
+        Ok(products)
     }
 
     pub async fn get(
@@ -489,6 +491,26 @@ fn normalize_create(request: &mut CreateProductRequest) {
     for opening in &mut request.opening_stocks {
         opening.quantity = quantity(opening.quantity);
         opening.cost = money_value(opening.cost);
+    }
+}
+
+/// Exact product barcode → default unit (no matched_unit_id).
+/// Exact sell-unit barcode → that unit id for POS preselection.
+fn annotate_matched_units(products: &mut [ProductResponse], query: &str) {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return;
+    }
+    for product in products.iter_mut() {
+        if !product.barcode.is_empty() && product.barcode.to_lowercase() == needle {
+            product.matched_unit_id = None;
+            continue;
+        }
+        product.matched_unit_id = product
+            .sell_units
+            .iter()
+            .find(|unit| !unit.barcode.is_empty() && unit.barcode.to_lowercase() == needle)
+            .map(|unit| unit.id.clone());
     }
 }
 
@@ -988,5 +1010,159 @@ mod tests {
         assert_eq!(updated_again.sell_units.len(), 1);
         assert_eq!(updated_again.sell_units[0].id, unit_row_id);
         assert_eq!(updated_again.sell_units[0].cost, 12.0);
+    }
+
+    #[tokio::test]
+    async fn search_matches_unit_barcodes_and_annotates_matched_unit() {
+        let database = connect_memory().await.expect("memory db");
+        seed_test_owner(&database).await;
+        let context = RequestContext {
+            session_id: Uuid::new_v4(),
+            user_id: Uuid::parse_str(SEED_USER_ID).unwrap(),
+            branch_id: Uuid::parse_str(SEED_BRANCH_ID).unwrap(),
+            device_id: Uuid::parse_str(SEED_DEVICE_ID).unwrap(),
+            cash_session_id: None,
+            role: "OWNER".into(),
+            name: "Owner".into(),
+            username: "owner".into(),
+        };
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "BarcodeQA".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("create category");
+        let units = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("load seeded units")
+            .data;
+        let piece_master = units
+            .iter()
+            .find(|unit| unit.symbol.as_deref() == Some("pc"))
+            .expect("seeded Piece unit");
+        let pack_master = units
+            .iter()
+            .find(|unit| unit.symbol.as_deref() == Some("pk"))
+            .expect("seeded Pack unit");
+
+        const PIECE_BARCODE: &str = "6281000000001";
+        const PACK_BARCODE: &str = "6281000000012";
+
+        let created = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "QA Barcode Widget".into(),
+                category_id: category.id,
+                base_unit_id: piece_master.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: Some(PIECE_BARCODE.into()),
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![
+                    ProductUnitInput {
+                        id: None,
+                        unit_id: piece_master.id.clone(),
+                        name: "Piece".into(),
+                        contains: Decimal::ONE,
+                        cost: Decimal::new(8, 0),
+                        min: Decimal::new(10, 0),
+                        wholesale: Decimal::new(12, 0),
+                        price: Decimal::new(15, 0),
+                        barcode: Some(PIECE_BARCODE.into()),
+                        factor_direction: None,
+                        is_base: true,
+                        is_default: true,
+                    },
+                    ProductUnitInput {
+                        id: None,
+                        unit_id: pack_master.id.clone(),
+                        name: "Pack".into(),
+                        contains: Decimal::new(10, 0),
+                        cost: Decimal::new(80, 0),
+                        min: Decimal::new(100, 0),
+                        wholesale: Decimal::new(114, 0),
+                        price: Decimal::new(140, 0),
+                        barcode: Some(PACK_BARCODE.into()),
+                        factor_direction: Some("multiply".into()),
+                        is_base: false,
+                        is_default: false,
+                    },
+                ],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(100, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("create product with piece/pack barcodes");
+
+        let piece_unit = created
+            .sell_units
+            .iter()
+            .find(|unit| unit.is_base)
+            .expect("piece unit");
+        let pack_unit = created
+            .sell_units
+            .iter()
+            .find(|unit| unit.name == "Pack")
+            .expect("pack unit");
+
+        let by_piece = ProductService::search(&database, PIECE_BARCODE, Some(context.branch_id))
+            .await
+            .expect("search piece barcode");
+        assert_eq!(by_piece.len(), 1);
+        assert_eq!(by_piece[0].id, created.id);
+        // Product barcode matches → default unit (no matched_unit_id).
+        assert_eq!(by_piece[0].matched_unit_id, None);
+        assert!(
+            by_piece[0]
+                .sell_units
+                .iter()
+                .any(|unit| unit.id == piece_unit.id && unit.is_default),
+            "piece remains the default sale unit"
+        );
+
+        let by_pack = ProductService::search(&database, PACK_BARCODE, Some(context.branch_id))
+            .await
+            .expect("search pack barcode");
+        assert_eq!(by_pack.len(), 1);
+        assert_eq!(by_pack[0].id, created.id);
+        assert_eq!(
+            by_pack[0].matched_unit_id.as_deref(),
+            Some(pack_unit.id.as_str())
+        );
+
+        let unknown = ProductService::search(&database, "6281999999999", Some(context.branch_id))
+            .await
+            .expect("search unknown barcode");
+        assert!(unknown.is_empty());
     }
 }

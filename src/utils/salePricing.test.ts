@@ -9,6 +9,8 @@ import {
   lineProfit,
   lineTotal,
   posTierPrice,
+  productMatchesQuery,
+  resolveMatchedUnitId,
   resolveSellUnit,
   unitTierPrice,
 } from "@/utils/salePricing";
@@ -21,7 +23,7 @@ const piece: ProductSellUnit = {
   min: 90,
   wholesale: 95,
   price: 100,
-  barcode: "",
+  barcode: "6281000000001",
   isBase: true,
   kind: "base",
 };
@@ -34,7 +36,7 @@ const pack: ProductSellUnit = {
   min: 1080,
   wholesale: 1140,
   price: 1200,
-  barcode: "",
+  barcode: "6281000000012",
   kind: "bigger",
 };
 
@@ -54,6 +56,7 @@ const product: Product = {
   id: "p1",
   name: "Widget",
   sku: "W1",
+  barcode: "6281000000001",
   category: "Test",
   unit: "pc",
   packQty: 12,
@@ -137,6 +140,25 @@ describe("resolveSellUnit", () => {
       sellUnits: [piece, { ...pack, isDefault: true }],
     };
     expect(resolveSellUnit(withDefault)?.id).toBe("u-pack");
+  });
+});
+
+describe("resolveMatchedUnitId / productMatchesQuery", () => {
+  it("product barcode keeps default unit; pack barcode preselects Pack", () => {
+    expect(resolveMatchedUnitId(product, "6281000000001")).toBeUndefined();
+    expect(resolveMatchedUnitId(product, "6281000000012")).toBe("u-pack");
+    expect(resolveMatchedUnitId(product, "6281000000012", "u-pack")).toBe("u-pack");
+    expect(resolveSellUnit(product, resolveMatchedUnitId(product, "6281000000012"))?.name).toBe(
+      "Pack",
+    );
+    expect(posTierPrice(product, "u-pack", "retail")).toBe(1200);
+  });
+
+  it("matches unit barcodes in search and ignores unknown codes", () => {
+    expect(productMatchesQuery(product, "6281000000012")).toBe(true);
+    expect(productMatchesQuery(product, "6281000000001")).toBe(true);
+    expect(productMatchesQuery(product, "6281999999999")).toBe(false);
+    expect(productMatchesQuery(product, "Widget")).toBe(true);
   });
 });
 

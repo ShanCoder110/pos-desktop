@@ -12,6 +12,8 @@ import {
   displayToBaseQty,
   stockPerUnit,
   toBaseQty,
+  productMatchesQuery,
+  resolveMatchedUnitId,
   resolveSellUnit,
   cartLineTierPrices,
   convertLineToUnit,
@@ -588,12 +590,7 @@ export function PosWorkspace() {
     const q = debounced.trim().toLowerCase();
     if (!q) return [];
     return categoryProducts
-      .filter(
-        (p) =>
-          (p.name ?? "").toLowerCase().includes(q) ||
-          (p.sku ?? "").toLowerCase().includes(q) ||
-          (p.barcode ?? "").toLowerCase().includes(q),
-      )
+      .filter((p) => productMatchesQuery(p, q))
       .slice(0, selectedCategory ? categoryProducts.length : 40);
   }, [query, debounced, products, categoryProducts, recentProductIds, selectedCategory]);
 
@@ -789,12 +786,17 @@ export function PosWorkspace() {
     }
   }
 
-  function selectProduct(product: Product) {
+  function selectProduct(product: Product, preferredUnitId?: string) {
     if (productTotalStock(product) <= 0) {
       showToast("Out of stock");
       return;
     }
-    const unit = resolveSellUnit(product);
+    const matchedId = resolveMatchedUnitId(
+      product,
+      preferredUnitId ? "" : query,
+      preferredUnitId ?? product.matchedUnitId,
+    );
+    const unit = resolveSellUnit(product, matchedId);
     setPending(product);
     setPendingProductUnitId(unit?.id ?? "");
     setSellUnit("base");
@@ -1409,13 +1411,16 @@ export function PosWorkspace() {
       setMenuOpen(true);
       return;
     }
-    const exact = results.find(
-      (p) =>
-        (p.sku ?? "").toLowerCase() === query.trim().toLowerCase() ||
-        (p.name ?? "").toLowerCase() === query.trim().toLowerCase() ||
-        (p.barcode ?? "").toLowerCase() === query.trim().toLowerCase(),
-    );
-    selectProduct(exact || results[hit] || results[0]);
+    const needle = query.trim().toLowerCase();
+    const exact = results.find((p) => {
+      if ((p.sku ?? "").toLowerCase() === needle) return true;
+      if ((p.name ?? "").toLowerCase() === needle) return true;
+      if ((p.barcode ?? "").toLowerCase() === needle) return true;
+      return (p.sellUnits ?? []).some((u) => (u.barcode ?? "").toLowerCase() === needle);
+    });
+    const chosen = exact || results[hit] || results[0];
+    const unitId = resolveMatchedUnitId(chosen, query, chosen.matchedUnitId);
+    selectProduct(chosen, unitId);
   }
 
   useEffect(() => {

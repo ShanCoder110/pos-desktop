@@ -177,6 +177,10 @@ pub struct ProductResponse {
     pub branch_stock: Vec<ProductBranchStockResponse>,
     pub components: Vec<serde_json::Value>,
     pub sell_units: Vec<ProductSellUnitResponse>,
+    /// When search matched a sell-unit barcode exactly, the unit id to preselect in POS.
+    /// Absent when the product barcode (or name/SKU) matched — POS keeps the default unit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_unit_id: Option<String>,
     pub is_active: bool,
     pub created_at: String,
     pub updated_at: String,

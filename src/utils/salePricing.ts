@@ -23,6 +23,34 @@ export function resolveSellUnit(product: Product, unitId?: string): ProductSellU
   return defaultTransactionUnit(product, units);
 }
 
+/** Exact product barcode → undefined (default unit). Exact sell-unit barcode → that unit. */
+export function resolveMatchedUnitId(
+  product: Product,
+  query: string,
+  matchedUnitId?: string | null,
+): string | undefined {
+  if (matchedUnitId) {
+    const hit = resolveSellUnit(product, matchedUnitId);
+    if (hit?.id) return hit.id;
+  }
+  const needle = query.trim().toLowerCase();
+  if (!needle) return undefined;
+  if ((product.barcode ?? "").toLowerCase() === needle) return undefined;
+  const unit = unitsForProduct(product).find(
+    (u) => (u.barcode ?? "").trim().toLowerCase() === needle,
+  );
+  return unit?.id;
+}
+
+export function productMatchesQuery(product: Product, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return false;
+  if ((product.name ?? "").toLowerCase().includes(q)) return true;
+  if ((product.sku ?? "").toLowerCase().includes(q)) return true;
+  if ((product.barcode ?? "").toLowerCase().includes(q)) return true;
+  return unitsForProduct(product).some((u) => (u.barcode ?? "").toLowerCase().includes(q));
+}
+
 /** Selling price for one displayed unit at the given tier (uses product_units row, not base×factor). */
 export function unitTierPrice(unit: ProductSellUnit | undefined, tier: SalePriceTier): number {
   if (!unit) return 0;
