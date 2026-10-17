@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Package, Plus } from "lucide-react";
 import {
   Button,
@@ -13,6 +14,7 @@ import {
 } from "@/components/common";
 import { LotBranchFields, type LotBranchRow } from "@/pages/lots/LotBranchFields";
 import { LotUnitLines } from "@/pages/products/LotFields";
+import { productsHref } from "@/shared/constants/products";
 import {
   baseUnit,
   biggerUnit,
@@ -164,6 +166,7 @@ export function LotForm({
   onSave: (lot: ProductLotRow, sellUnits?: ProductSellUnit[]) => void;
   onClose: () => void;
 }) {
+  const navigate = useNavigate();
   const rootRef = useRef<HTMLDivElement>(null);
   const draftUnitRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<LotTab>("lot");
@@ -677,6 +680,10 @@ export function LotForm({
                       })
                     }
                     onUnitPrice={setUnitPrice}
+                    onOpenStockCount={() => {
+                      onClose();
+                      navigate(productsHref("stock-count"));
+                    }}
                   />
                 </div>
                 {draftUnit && onAddProductUnit ? (

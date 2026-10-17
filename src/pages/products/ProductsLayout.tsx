@@ -31,6 +31,7 @@ import { useQueryTab } from "@/hooks/useQueryTab";
 import {
   PRODUCT_SECTION_TABS,
   PRODUCT_TAB_ALL,
+  STOCK_COUNT_ROLES,
   type ProductHealth,
   type ProductSectionTab,
 } from "@/shared/constants/products";
@@ -51,7 +52,7 @@ import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { Outlet } from "react-router-dom";
 
 export type HubSection =
-  "catalog" | "lots" | "units" | "categories" | "transfers" | "reorders" | "low";
+  "catalog" | "lots" | "stock-count" | "units" | "categories" | "transfers" | "reorders" | "low";
 
 export function matchesHealth(row: Product, kpi: ProductHealth) {
   if (kpi === "healthy") return row.stock >= (row.minimumStock ?? 20);
@@ -63,6 +64,7 @@ export function matchesHealth(row: Product, kpi: ProductHealth) {
 export function hubSection(tab: string): HubSection {
   if (
     tab === "lots" ||
+    tab === "stock-count" ||
     tab === "units" ||
     tab === "categories" ||
     tab === "transfers" ||
@@ -564,6 +566,7 @@ function ProductHubKpis() {
     );
   }
   if (section === "lots") return <LotsKpis />;
+  if (section === "stock-count") return null;
   if (section === "units") return <UnitsKpis />;
   if (section === "categories") return <CategoriesKpis />;
   if (section === "transfers") return <TransfersKpis />;
@@ -573,7 +576,16 @@ function ProductHubKpis() {
 }
 
 export function ProductsLayout() {
-  const [tab, setTab] = useQueryTab(PRODUCT_SECTION_TABS, PRODUCT_TAB_ALL);
+  const [viewerRole, setViewerRole] = useState<string | null>(null);
+  const sectionTabs = useMemo(
+    () =>
+      PRODUCT_SECTION_TABS.filter(
+        (item) =>
+          item.id !== "stock-count" || viewerRole === null || STOCK_COUNT_ROLES.has(viewerRole),
+      ),
+    [viewerRole],
+  );
+  const [tab, setTab] = useQueryTab(sectionTabs, PRODUCT_TAB_ALL);
   const section = hubSection(tab);
   const [actions, setActions] = useState<ReactNode>(null);
   const [health, setHealth] = useState<ProductHealth | null>(null);
@@ -732,6 +744,20 @@ export function ProductsLayout() {
 
   useEffect(() => {
     const controller = new AbortController();
+    void ensureSession(controller.signal)
+      .then((session) => setViewerRole(session?.user.role ?? null))
+      .catch(() => setViewerRole(null));
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (tab === "stock-count" && viewerRole && !STOCK_COUNT_ROLES.has(viewerRole)) {
+      setTab(PRODUCT_TAB_ALL);
+    }
+  }, [tab, viewerRole, setTab]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     const guard = createLoadGuard();
     void refreshHub(controller.signal, guard);
     return () => {
@@ -753,7 +779,7 @@ export function ProductsLayout() {
         <TabSheet
           tabs={
             <Tabs
-              items={[...PRODUCT_SECTION_TABS]}
+              items={[...sectionTabs]}
               value={tab}
               onChange={(id) => setTab(id as ProductSectionTab)}
               ariaLabel="Products sections"

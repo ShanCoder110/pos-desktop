@@ -14,6 +14,7 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | Repair / production / replacement FIFO still **single branch** | 🟡 not using fallback |
 | Unit tests for FIFO consume / split lots | 🔴 still missing |
 | Stock count / adjust API (`POST /stock/count`) — FIFO down, newest-lot/ADJUSTMENT-lot up | ✅ Step 10 backend |
+| Stock count UI (Products → Stock count; owner/manager; history; Left locked hint) | ✅ Step 11 |
 | Lot raw `remaining` edit locked; quantity changes via stock count | ✅ |
 | Reconcile `product.stock` = Σ branch_lots = Σ lot remaining (+ migration repair) | ✅ |
 

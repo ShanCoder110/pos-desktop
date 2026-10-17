@@ -53,6 +53,8 @@ export const API_ROUTES = {
   lotsReceive: "/lots/receive",
   stock: "/stock",
   stockMovements: "/stock/movements",
+  stockCount: "/stock/count",
+  stockReconcile: "/stock/reconcile",
   purchaseOrders: "/purchase-orders",
   purchaseOrderById: (id: string) => `/purchase-orders/${encodeURIComponent(id)}`,
   purchaseOrderOrder: (id: string) => `/purchase-orders/${encodeURIComponent(id)}/order`,

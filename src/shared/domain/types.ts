@@ -194,11 +194,15 @@ export interface StockMovementRow {
   branchId: string;
   type: StockMoveType;
   quantity: number;
+  quantityBefore?: number | null;
+  quantityAfter?: number | null;
+  displayedUnitName?: string;
   referenceType: string;
   referenceId: string;
   notes: string;
   createdBy: string;
   createdAt: string;
+  productName?: string;
 }
 
 export interface StockTransferItemRow {

@@ -22,6 +22,7 @@ export const FIELD_LIMITS = {
   longNotes: 2000,
   search: 80,
   qty: 12,
+  stockCountReason: 200,
   copies: 2,
   shortNumber: 4,
   moneyInteger: 10,

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Field, MoneyInput, SelectInput, TextInput } from "@/components/common";
 import { cn } from "@/utils/format";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
+import { STOCK_COUNT_COPY } from "@/shared/constants/products";
 import type { ProductSellUnit } from "@/shared/types";
 import {
   baseUnit,
@@ -133,6 +134,7 @@ export function LotUnitLines({
   onLeft,
   onDamaged,
   onUnitPrice,
+  onOpenStockCount,
 }: {
   units: ProductSellUnit[];
   stockSymbol: string;
@@ -146,6 +148,7 @@ export function LotUnitLines({
   onLeft?: (qty: number) => void;
   onDamaged?: (qty: number) => void;
   onUnitPrice?: (unitId: string, key: UnitPriceKey, value: number) => void;
+  onOpenStockCount?: () => void;
 }) {
   const ordered = qtyUnits(units);
   const [qtyEdit, setQtyEdit] = useState<{ id: string; field: QtyField } | null>(null);
@@ -217,14 +220,23 @@ export function LotUnitLines({
                     inputMode="decimal"
                     maxLength={FIELD_LIMITS.qty}
                     placeholder="0"
-                    value={qtyValue("left", unit)}
-                    onFocus={() => {
-                      setQtyEdit({ id: unit.id, field: "left" });
-                      setQtyDraft(displayQty(qtyInUnit(units, stockSymbol, unit, left)));
-                    }}
-                    onBlur={() => setQtyEdit(null)}
-                    onChange={(event) => setQty("left", unit, event.target.value)}
+                    value={displayQty(displayQtyFromStock(units, stockSymbol, unit, left))}
+                    disabled
+                    readOnly
                   />
+                  {onOpenStockCount ? (
+                    <button
+                      type="button"
+                      className="text-left text-[11px] font-semibold text-accent-deep underline-offset-2 hover:underline"
+                      onClick={onOpenStockCount}
+                    >
+                      {STOCK_COUNT_COPY.leftLockedHint}
+                    </button>
+                  ) : (
+                    <span className="field-hint text-[11px] text-muted">
+                      {STOCK_COUNT_COPY.leftLockedHint}
+                    </span>
+                  )}
                 </Field>
               ) : null}
               <Field label="Damaged">
