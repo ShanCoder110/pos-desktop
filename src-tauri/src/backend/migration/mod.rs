@@ -61,9 +61,7 @@ mod tests {
 
     #[tokio::test]
     async fn initial_migration_creates_core_and_transaction_tables() {
-        let database = Database::connect("sqlite::memory:")
-            .await
-            .expect("connect in-memory sqlite");
+        let database = connect_sqlite_single("sqlite::memory:").await;
         Migrator::up(&database, None)
             .await
             .expect("apply initial migration");
@@ -134,14 +132,21 @@ mod tests {
         assert_eq!(count, 0, "owner is created during onboarding, not seed");
     }
 
+    async fn connect_sqlite_single(url: &str) -> sea_orm::DatabaseConnection {
+        let mut options = sea_orm::ConnectOptions::new(url.to_owned());
+        options
+            .max_connections(1)
+            .min_connections(1)
+            .sqlx_logging(false);
+        Database::connect(options).await.expect("connect sqlite")
+    }
+
     /// Confirms m20261017_000019 ran on a DB that already had invoice rows: CHECK
     /// accepts RETURNED / PARTIALLY_RETURNED, and the backfill rewrites stale PAID
     /// full-return rows (credit 0, paid 0, with a sale_return) to RETURNED.
     #[tokio::test]
     async fn invoice_return_payment_status_migration_accepts_and_backfills() {
-        let database = Database::connect("sqlite::memory:")
-            .await
-            .expect("connect in-memory sqlite");
+        let database = connect_sqlite_single("sqlite::memory:").await;
         Migrator::up(&database, None)
             .await
             .expect("apply all migrations including return payment_status");
@@ -256,5 +261,171 @@ mod tests {
             .await
             .expect("PARTIALLY_RETURNED must satisfy invoices CHECK after migration");
         eprintln!("ok: PARTIALLY_RETURNED accepted by post-migration CHECK");
+    }
+
+    /// Rebuild invoices while child FK rows exist (the QA failure mode).
+    /// Applies migrations through 000018, inserts invoice + children with FKs on,
+    /// then applies 000019/000020 and asserts counts + empty foreign_key_check.
+    #[tokio::test]
+    async fn invoice_rebuild_survives_child_foreign_keys() {
+        let path = std::env::temp_dir().join(format!(
+            "pos-mig-fk-{}.sqlite3",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let url = format!("sqlite://{}?mode=rwc", path.display());
+        let database = connect_sqlite_single(&url).await;
+
+        // 18 migrations through m20261017_000018_recompute_ledger_balances.
+        Migrator::up(&database, Some(18))
+            .await
+            .expect("apply migrations through 000018");
+
+        // Seed uses blob UUIDs — pick them via subqueries so FKs stay valid.
+        database
+            .execute_unprepared(
+                "INSERT INTO users (id, name, username, password_hash, role, is_active, created_at, updated_at)
+                 VALUES (X'20000000000040008000000000000002', 'Owner', 'owner-fk', 'x', 'OWNER', 1,
+                         '2026-10-17T00:00:00Z', '2026-10-17T00:00:00Z')",
+            )
+            .await
+            .expect("user");
+        database
+            .execute_unprepared(
+                "INSERT INTO products (
+                    id, category_id, base_unit_id, name, sku, barcode, product_type,
+                    track_lots, track_expiry, minimum_stock, is_active, created_by,
+                    version, created_at, updated_at
+                 )
+                 SELECT X'cccccccccccc4ccc8ccccccccccccccccc', c.id, u.id,
+                        'FK Mig Product', 'FK-SKU-1', '890000000001',
+                        'STANDARD', 1, 0, 0, 1, X'20000000000040008000000000000002',
+                        1, '2026-10-17T00:00:00Z', '2026-10-17T00:00:00Z'
+                 FROM product_categories c, units u
+                 WHERE c.deleted_at IS NULL AND u.symbol = 'pc' AND u.deleted_at IS NULL
+                 LIMIT 1",
+            )
+            .await
+            .expect("product");
+        database
+            .execute_unprepared(
+                "INSERT INTO invoices (
+                    id, branch_id, customer_id, invoice_number, status, payment_status,
+                    subtotal, discount, tax, total, paid_amount, credit_amount, change_amount,
+                    created_by, cashier_name_snapshot, client_request_id,
+                    version, created_at, updated_at
+                 )
+                 SELECT X'aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaaaa', b.id, NULL, 'INV-FK-1',
+                        'COMPLETED', 'PAID', 100, 0, 0, 100, 100, 0, 0,
+                        X'20000000000040008000000000000002', 'Owner', 'mig-fk-1',
+                        1, '2026-10-17T00:00:00Z', '2026-10-17T00:00:00Z'
+                 FROM branches b WHERE b.deleted_at IS NULL LIMIT 1",
+            )
+            .await
+            .expect("invoice");
+        database
+            .execute_unprepared(
+                "INSERT INTO invoice_items (
+                    id, invoice_id, product_id, product_name, sku, unit_name,
+                    displayed_quantity, conversion_to_base, base_quantity,
+                    unit_price, minimum_price_snapshot, line_total, created_at
+                 ) VALUES (
+                    X'dddddddddddd4ddd8ddddddddddddddddd',
+                    X'aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaaaa',
+                    X'cccccccccccc4ccc8ccccccccccccccccc',
+                    'FK Mig Product', 'FK-SKU-1', 'pc',
+                    1, 1, 1, 100, 100, 100, '2026-10-17T00:00:00Z'
+                 )",
+            )
+            .await
+            .expect("invoice_item");
+        database
+            .execute_unprepared(
+                "INSERT INTO payments (
+                    id, branch_id, customer_id, invoice_id, amount, change_amount,
+                    payment_method, direction, status, received_by, paid_at,
+                    client_request_id, created_at
+                 )
+                 SELECT X'eeeeeeeeeeee4eee8eeeeeeeeeeeeeeeee', b.id, NULL,
+                        X'aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaaaa', 100, 0,
+                        'CASH', 'IN', 'COMPLETED', X'20000000000040008000000000000002',
+                        '2026-10-17T00:00:00Z', 'pay-fk-1', '2026-10-17T00:00:00Z'
+                 FROM branches b WHERE b.deleted_at IS NULL LIMIT 1",
+            )
+            .await
+            .expect("payment");
+        database
+            .execute_unprepared(
+                "INSERT INTO sale_returns (
+                    id, return_number, invoice_id, branch_id, customer_id, type, status,
+                    reason, refund_amount, created_by, created_at
+                 )
+                 SELECT X'ffffffffffff4fff8fffffffffffffffff', 'RET-FK-1',
+                        X'aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaaaa', b.id, NULL,
+                        'REFUND', 'COMPLETED', 'qa fk rebuild', 0,
+                        X'20000000000040008000000000000002', '2026-10-17T00:00:00Z'
+                 FROM branches b WHERE b.deleted_at IS NULL LIMIT 1",
+            )
+            .await
+            .expect("sale_return");
+
+        async fn count(db: &sea_orm::DatabaseConnection, table: &str) -> i64 {
+            let row = db
+                .query_one_raw(sea_orm::Statement::from_string(
+                    sea_orm::DbBackend::Sqlite,
+                    format!("SELECT COUNT(*) AS c FROM {table}"),
+                ))
+                .await
+                .expect("count query")
+                .expect("count row");
+            row.try_get("", "c").expect("c")
+        }
+
+        let before_invoices = count(&database, "invoices").await;
+        let before_items = count(&database, "invoice_items").await;
+        let before_payments = count(&database, "payments").await;
+        let before_returns = count(&database, "sale_returns").await;
+        eprintln!(
+            "before 000019: invoices={before_invoices} items={before_items} payments={before_payments} returns={before_returns}"
+        );
+        assert!(before_invoices >= 1);
+        assert!(before_items >= 1);
+        assert!(before_payments >= 1);
+        assert!(before_returns >= 1);
+
+        Migrator::up(&database, None)
+            .await
+            .expect("apply 000019/000020 with child FK rows present");
+
+        let after_invoices = count(&database, "invoices").await;
+        let after_items = count(&database, "invoice_items").await;
+        let after_payments = count(&database, "payments").await;
+        let after_returns = count(&database, "sale_returns").await;
+        eprintln!(
+            "after 000020: invoices={after_invoices} items={after_items} payments={after_payments} returns={after_returns}"
+        );
+        assert_eq!(after_invoices, before_invoices);
+        assert_eq!(after_items, before_items);
+        assert_eq!(after_payments, before_payments);
+        assert_eq!(after_returns, before_returns);
+
+        let violations = database
+            .query_all_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "PRAGMA foreign_key_check".to_owned(),
+            ))
+            .await
+            .expect("foreign_key_check");
+        assert!(
+            violations.is_empty(),
+            "foreign_key_check must be empty after rebuild, got {}",
+            violations.len()
+        );
+        eprintln!("ok: foreign_key_check empty after invoices rebuild with children");
+
+        let _ = std::fs::remove_file(&path);
     }
 }
