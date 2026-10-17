@@ -45,7 +45,10 @@ from older code, manual SQL, or fixtures that inserted string UUIDs.
 2. Stock-count INSERT paths use `uuid_blob` for all UUID columns.
 3. Migration `m20261017_000023_uuid_text_to_blob` — FK off, transaction,
    convert text32/36 + blob36 → `unhex(...)` 16-byte blob on `id`/`*_id`,
-   `foreign_key_check`, idempotent.
+   fail only on **new** `foreign_key_check` violations (pre-existing orphans
+   do not block upgrade), idempotent.
+
+AFTER scan: `text36=0 blob36=0` on all `id`/`*_id`; migration recorded.
 
 ### Acceptance
 - Fresh DB + upgraded QA DB with stock counts: POS, Products, lot drawer no 500.
