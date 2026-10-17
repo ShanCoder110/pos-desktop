@@ -73,6 +73,7 @@ export interface LotListParams {
 
 export interface UpdateLotPayload {
   supplierId?: string;
+  originalQuantity?: number;
   remainingQuantity?: number;
   damagedQuantity?: number;
   cost?: number;

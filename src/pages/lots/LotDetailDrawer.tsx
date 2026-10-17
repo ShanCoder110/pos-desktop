@@ -33,6 +33,7 @@ export function LotDetailDrawer({
   onEdit,
   onReorder,
   onUnlink,
+  canEdit = true,
 }: {
   lot: ProductLotRow | null;
   product?: Product;
@@ -41,6 +42,7 @@ export function LotDetailDrawer({
   onEdit: (row: ProductLotRow) => void;
   onReorder: (productId: string) => void;
   onUnlink?: (lot: ProductLotRow) => void;
+  canEdit?: boolean;
 }) {
   const [branches, setBranches] = useState<BranchResponse[]>([]);
   const [sessionBranchId, setSessionBranchId] = useState("");
@@ -81,16 +83,18 @@ export function LotDetailDrawer({
     >
       <div className="product-detail">
         <DetailToolbar>
-          <DetailToolbarButton
-            variant="edit"
-            icon={<Pencil size={15} />}
-            onClick={() => {
-              onClose();
-              onEdit(lot);
-            }}
-          >
-            {LOT_COPY.editAction}
-          </DetailToolbarButton>
+          {canEdit ? (
+            <DetailToolbarButton
+              variant="edit"
+              icon={<Pencil size={15} />}
+              onClick={() => {
+                onClose();
+                onEdit(lot);
+              }}
+            >
+              {LOT_COPY.editAction}
+            </DetailToolbarButton>
+          ) : null}
           <DetailToolbarButton
             variant="accent"
             icon={<ShoppingCart size={15} />}

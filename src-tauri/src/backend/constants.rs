@@ -190,6 +190,11 @@ pub const ERROR_UNIT_NOT_FOUND: &str = "Unit not found.";
 pub const ERROR_SUPPLIER_NOT_FOUND: &str = "Supplier not found.";
 pub const ERROR_CUSTOMER_NOT_FOUND: &str = "Customer not found.";
 pub const ERROR_LOT_NOT_FOUND: &str = "Lot not found.";
+pub const ERROR_LOT_EDIT_DENIED: &str = "Only owners and managers can edit lots.";
+pub const ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE: &str =
+    "Remaining cannot exceed original minus sold minus damaged.";
+pub const ERROR_LOT_ORIGINAL_BELOW_COMMITTED: &str =
+    "Original quantity cannot be less than sold plus damaged.";
 pub const ERROR_INVOICE_NOT_FOUND: &str = "Invoice not found.";
 pub const ERROR_USER_NOT_FOUND: &str = "User not found.";
 pub const ERROR_BRANCH_NOT_FOUND: &str = "Branch not found.";

@@ -29,6 +29,7 @@ import { applyFilterChip, chipValuesForField } from "@/utils/filterChips";
 import { chipCsv, chipCsvFromNames, chipMinNumber } from "@/utils/filterQuery";
 import { createLoadGuard, isAbortError } from "@/utils/async";
 import { listAllLots, listLots, mapLotResponse } from "@/services/lots";
+import { ensureSession } from "@/services/auth";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { LotDetailDrawer } from "@/pages/lots/LotDetailDrawer";
 import { useLotDrawer } from "@/pages/lots/useLotDrawer";
@@ -48,6 +49,10 @@ import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import { LOT_COPY, LOT_FILTER_FIELDS, LOT_TABLE_COLUMNS } from "@/shared/constants/products";
 import type { ProductLotRow } from "@/shared/domain/types";
 import { money } from "@/utils/format";
+
+function canEditLots(role: string | null | undefined) {
+  return role === "OWNER" || role === "MANAGER";
+}
 
 function LotQty({
   product,
@@ -142,6 +147,16 @@ export function LotsPage() {
   const [reorderLotId, setReorderLotId] = useState<string | null>(null);
   const [chartProductId, setChartProductId] = useState("");
   const [chartLotId, setChartLotId] = useState("");
+  const [viewerRole, setViewerRole] = useState<string | null>(null);
+  const lotEditAllowed = canEditLots(viewerRole);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void ensureSession(controller.signal)
+      .then((session) => setViewerRole(session?.user.role ?? null))
+      .catch(() => setViewerRole(null));
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (!chartProductId && products[0]) setChartProductId(products[0].id);
@@ -685,9 +700,11 @@ export function LotsPage() {
                         >
                           {REORDER_COPY.createAction}
                         </MenuItem>
-                        <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
-                          Edit
-                        </MenuItem>
+                        {lotEditAllowed ? (
+                          <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
+                            {LOT_COPY.editAction}
+                          </MenuItem>
+                        ) : null}
                         <MenuItem danger icon={<Trash2 size={14} />} onClick={() => removeRow(row)}>
                           Delete
                         </MenuItem>
@@ -707,7 +724,9 @@ export function LotsPage() {
         product={detail ? productOf(detail.productId) : undefined}
         supplierLabel={detail ? supplierLabel(detail.supplierId) : undefined}
         onClose={() => setDetail(null)}
+        canEdit={lotEditAllowed}
         onEdit={(row) => {
+          if (!lotEditAllowed) return;
           setDetail(null);
           openEdit(row);
         }}

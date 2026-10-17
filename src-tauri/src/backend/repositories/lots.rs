@@ -8,9 +8,12 @@ use uuid::Uuid;
 use crate::backend::{
     constants::{
         DEFAULT_TRANSFER_PREFIX, ERROR_INVALID_CATEGORY_ID, ERROR_LOT_NOT_FOUND,
+        ERROR_LOT_ORIGINAL_BELOW_COMMITTED, ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE,
         ERROR_PRODUCT_NOT_FOUND, ERROR_SUPPLIER_REQUIRED, LEDGER_PURCHASE, LOT_SOURCE_OPENING,
         LOT_SOURCE_PURCHASE, REFERENCE_GOODS_RECEIPT, REFERENCE_PRODUCT_OPENING,
-        SEQUENCE_KIND_TRANSFER, STOCK_MOVEMENT_ADJUSTMENT, STOCK_MOVEMENT_PURCHASE,
+        SEQUENCE_KIND_TRANSFER, STOCK_MOVEMENT_ADJUSTMENT, STOCK_MOVEMENT_PRODUCTION_USE,
+        STOCK_MOVEMENT_PRODUCTION_WASTE, STOCK_MOVEMENT_PURCHASE, STOCK_MOVEMENT_REPAIR_USE,
+        STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN, STOCK_MOVEMENT_SALE,
     },
     context::RequestContext,
     dto::{
@@ -76,6 +79,21 @@ struct LotUpdateRow {
 struct BranchLotRemainingRow {
     branch_id: Uuid,
     remaining: Decimal,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct BranchLotSyncRow {
+    id: Uuid,
+    #[allow(dead_code)]
+    branch_id: Uuid,
+    remaining: Decimal,
+    #[allow(dead_code)]
+    damaged: Decimal,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct QtyRow {
+    qty: Decimal,
 }
 
 pub struct LotRepository;
@@ -161,23 +179,49 @@ impl LotRepository {
         let original = quantity(row.original_base_quantity);
         let remaining = quantity(row.remaining_base_quantity);
         let damaged = quantity(row.damaged_base_quantity);
-        let sold = original - remaining - damaged;
+        // Sold is committed history from movements — never derived from the editable remaining.
+        let sold = lot_committed_sold(transaction, id).await?;
+        let returned_to_supplier = lot_returned_to_supplier(transaction, id).await?;
+        let committed = sold + returned_to_supplier;
+
+        let next_original = request.original_quantity.map(quantity).unwrap_or(original);
         let next_damaged = request.damaged_quantity.map(quantity).unwrap_or(damaged);
-        let next_remaining = if let Some(remaining) = request.remaining_quantity {
-            quantity(remaining)
-        } else {
-            original - sold - next_damaged
-        };
-        if next_damaged < Decimal::ZERO || next_remaining < Decimal::ZERO {
+        if next_original < Decimal::ZERO
+            || next_damaged < Decimal::ZERO
+            || request
+                .remaining_quantity
+                .map(|value| quantity(value) < Decimal::ZERO)
+                .unwrap_or(false)
+        {
             return Err(AppError::Validation(
                 "Quantities cannot be negative.".into(),
             ));
         }
-        if next_damaged + next_remaining > original {
+        if next_original < committed + next_damaged {
+            return Err(AppError::Validation(format!(
+                "{ERROR_LOT_ORIGINAL_BELOW_COMMITTED} Original must be at least sold ({sold}) + damaged ({next_damaged}) + returned to supplier ({returned_to_supplier})."
+            )));
+        }
+        let max_remaining = quantity(next_original - committed - next_damaged);
+        let next_remaining = if let Some(value) = request.remaining_quantity {
+            quantity(value)
+        } else if request.original_quantity.is_some() || request.damaged_quantity.is_some() {
+            // Keep remaining within the new ceiling when original/damaged change.
+            remaining.min(max_remaining)
+        } else {
+            remaining
+        };
+        if next_remaining < Decimal::ZERO {
             return Err(AppError::Validation(
-                "Remaining and damaged quantities cannot exceed the original lot quantity.".into(),
+                "Remaining quantity cannot be negative.".into(),
             ));
         }
+        if next_remaining > max_remaining {
+            return Err(AppError::Validation(format!(
+                "{ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE} Sold {sold}, damaged {next_damaged}, returned to supplier {returned_to_supplier}. Maximum remaining is {max_remaining}."
+            )));
+        }
+
         let now = now_utc();
         let supplier_id = if request.supplier_id.is_some() {
             parse_optional_uuid(request.supplier_id.as_deref(), "supplierId")?
@@ -188,9 +232,10 @@ impl LotRepository {
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "UPDATE product_lots SET supplier_id = ?, remaining_base_quantity = ?, damaged_base_quantity = ?, purchase_price_per_base = COALESCE(?, purchase_price_per_base), version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+                "UPDATE product_lots SET supplier_id = ?, original_base_quantity = ?, remaining_base_quantity = ?, damaged_base_quantity = ?, purchase_price_per_base = COALESCE(?, purchase_price_per_base), version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
                 [
                     supplier_id.into(),
+                    next_original.into(),
                     next_remaining.into(),
                     next_damaged.into(),
                     next_cost.into(),
@@ -210,6 +255,10 @@ impl LotRepository {
                 &request.branch_allocations,
             )
             .await?;
+            sync_branch_lots_damaged(transaction, id, next_damaged, now).await?;
+        } else if next_remaining != remaining || next_damaged != damaged {
+            // Keep branch_lots (and therefore product.stock) aligned with lot qty edits.
+            sync_branch_lots_quantities(transaction, id, next_remaining, next_damaged, now).await?;
         }
         Ok(id)
     }
@@ -650,6 +699,7 @@ async fn apply_product_unit_prices_from_receive(
     }
     let update = UpdateLotRequest {
         supplier_id: None,
+        original_quantity: None,
         remaining_quantity: None,
         damaged_quantity: None,
         cost: None,
@@ -659,6 +709,174 @@ async fn apply_product_unit_prices_from_receive(
         branch_allocations: Vec::new(),
     };
     apply_product_unit_prices(transaction, product_id, &update, now).await
+}
+
+/// Sold quantity committed by stock movements / sale consumptions for this lot.
+/// Never derived from the editable remaining field.
+async fn lot_committed_sold(
+    database: &impl ConnectionTrait,
+    lot_id: Uuid,
+) -> Result<Decimal, AppError> {
+    let outbound = QtyRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT CAST(COALESCE(SUM(-sm.base_quantity_delta), 0) AS REAL) AS qty
+         FROM stock_movements sm
+         WHERE sm.product_lot_id = ?
+           AND sm.type IN (?, ?, ?, ?, ?)",
+        [
+            lot_id.into(),
+            STOCK_MOVEMENT_SALE.into(),
+            STOCK_MOVEMENT_REPLACEMENT.into(),
+            STOCK_MOVEMENT_PRODUCTION_USE.into(),
+            STOCK_MOVEMENT_PRODUCTION_WASTE.into(),
+            STOCK_MOVEMENT_REPAIR_USE.into(),
+        ],
+    ))
+    .one(database)
+    .await?
+    .map(|row| quantity(row.qty))
+    .unwrap_or(Decimal::ZERO);
+
+    let returned = QtyRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT CAST(COALESCE(SUM(sm.base_quantity_delta), 0) AS REAL) AS qty
+         FROM stock_movements sm
+         WHERE sm.product_lot_id = ?
+           AND sm.type = ?
+           AND sm.base_quantity_delta > 0",
+        [lot_id.into(), STOCK_MOVEMENT_RETURN.into()],
+    ))
+    .one(database)
+    .await?
+    .map(|row| quantity(row.qty))
+    .unwrap_or(Decimal::ZERO);
+
+    Ok((outbound - returned).max(Decimal::ZERO))
+}
+
+/// Permanent removals to supplier (or similar) that are not the damaged field.
+async fn lot_returned_to_supplier(
+    database: &impl ConnectionTrait,
+    lot_id: Uuid,
+) -> Result<Decimal, AppError> {
+    let row = QtyRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT CAST(COALESCE(SUM(-sm.base_quantity_delta), 0) AS REAL) AS qty
+         FROM stock_movements sm
+         WHERE sm.product_lot_id = ?
+           AND sm.type = ?
+           AND sm.base_quantity_delta < 0
+           AND LOWER(COALESCE(sm.notes, '')) LIKE '%supplier%'",
+        [lot_id.into(), STOCK_MOVEMENT_ADJUSTMENT.into()],
+    ))
+    .one(database)
+    .await?;
+    Ok(row.map(|r| quantity(r.qty)).unwrap_or(Decimal::ZERO))
+}
+
+/// Align branch_lots remaining/damaged with product_lots so product.stock stays correct.
+async fn sync_branch_lots_quantities(
+    transaction: &DatabaseTransaction,
+    lot_id: Uuid,
+    next_remaining: Decimal,
+    next_damaged: Decimal,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), AppError> {
+    let rows = BranchLotSyncRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT id, branch_id, remaining_base_quantity AS remaining, damaged_base_quantity AS damaged
+         FROM branch_lots
+         WHERE product_lot_id = ?
+         ORDER BY remaining_base_quantity DESC, id ASC",
+        [lot_id.into()],
+    ))
+    .all(transaction)
+    .await?;
+    if rows.is_empty() {
+        return Err(AppError::Validation(
+            "This lot has no branch stock rows to keep in sync.".into(),
+        ));
+    }
+
+    let current_remaining: Decimal = rows
+        .iter()
+        .fold(Decimal::ZERO, |sum, row| sum + quantity(row.remaining));
+    let delta = next_remaining - current_remaining;
+
+    if delta < Decimal::ZERO {
+        let mut left = -delta;
+        for row in &rows {
+            if left <= Decimal::ZERO {
+                break;
+            }
+            let available = quantity(row.remaining);
+            let take = left.min(available);
+            if take <= Decimal::ZERO {
+                continue;
+            }
+            transaction
+                .execute_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "UPDATE branch_lots SET remaining_base_quantity = remaining_base_quantity - ?, updated_at = ? WHERE id = ?",
+                    [take.into(), now.into(), row.id.into()],
+                ))
+                .await?;
+            left -= take;
+        }
+        if left > Decimal::new(1, 6) {
+            return Err(AppError::Validation(
+                "Cannot reduce lot remaining below allocated branch stock.".into(),
+            ));
+        }
+    } else if delta > Decimal::ZERO {
+        let target_id = rows[0].id;
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE branch_lots SET remaining_base_quantity = remaining_base_quantity + ?, updated_at = ? WHERE id = ?",
+                [delta.into(), now.into(), target_id.into()],
+            ))
+            .await?;
+    }
+
+    sync_branch_lots_damaged(transaction, lot_id, next_damaged, now).await
+}
+
+async fn sync_branch_lots_damaged(
+    transaction: &DatabaseTransaction,
+    lot_id: Uuid,
+    next_damaged: Decimal,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), AppError> {
+    let rows = BranchLotSyncRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT id, branch_id, remaining_base_quantity AS remaining, damaged_base_quantity AS damaged
+         FROM branch_lots
+         WHERE product_lot_id = ?
+         ORDER BY damaged_base_quantity DESC, id ASC",
+        [lot_id.into()],
+    ))
+    .all(transaction)
+    .await?;
+    if rows.is_empty() {
+        return Ok(());
+    }
+    // Put all lot damaged on the first branch row; clear others.
+    for (index, row) in rows.iter().enumerate() {
+        let damaged = if index == 0 {
+            next_damaged
+        } else {
+            Decimal::ZERO
+        };
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE branch_lots SET damaged_base_quantity = ?, updated_at = ? WHERE id = ?",
+                [damaged.into(), now.into(), row.id.into()],
+            ))
+            .await?;
+    }
+    Ok(())
 }
 
 async fn apply_branch_reallocation(

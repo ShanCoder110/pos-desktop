@@ -83,6 +83,8 @@ pub struct BranchLotResponse {
 pub struct UpdateLotRequest {
     pub supplier_id: Option<String>,
     #[validate(custom(function = "non_negative_optional_decimal"))]
+    pub original_quantity: Option<Decimal>,
+    #[validate(custom(function = "non_negative_optional_decimal"))]
     pub remaining_quantity: Option<Decimal>,
     #[validate(custom(function = "non_negative_optional_decimal"))]
     pub damaged_quantity: Option<Decimal>,

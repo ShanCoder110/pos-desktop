@@ -401,6 +401,7 @@ export function useLotDrawer() {
           : Math.round(next.remainingQuantity * 10000) / 10000;
       await updateLot(next.id, {
         supplierId: next.supplierId || undefined,
+        originalQuantity: next.originalQuantity,
         remainingQuantity,
         damagedQuantity: next.damagedQuantity,
         cost: next.purchasePrice,

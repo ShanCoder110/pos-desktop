@@ -195,6 +195,7 @@ export const LOT_COPY = {
   transferDescription: "Move stock between branches",
   editAction: "Edit",
   editDescription: "Adjust quantities, supplier, and prices",
+  editDeniedCashier: "Only owners and managers can edit lots",
   branchStockTitle: "Branch stock",
   branchStockHint: "Quantity left in each branch for this lot",
   branchSplitTitle: "Split between branches",
