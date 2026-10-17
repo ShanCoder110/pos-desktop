@@ -23,6 +23,7 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | Cashier Products hub: catalog loads even if a side query fails; Stock count tab waits for role | ✅ Step 14 |
 | Invoice edit: preload customer/payments; block RETURNED/PARTIALLY_RETURNED (422); no walk-in credit switch | ✅ Step 15 |
 | Void blocked on RETURNED/PARTIALLY_RETURNED (UI + 422); stock-count max 1e6 base; Pack Left mixed qty; shared datetime; cashier GET /stock/movements?movementType=ADJUSTMENT → 403 | ✅ Step 16 |
+| No-op revise skips reverse/repost (0 ledger/payment/movement rows); split edit preloads CASH+MOBILE amounts | ✅ Step 17 |
 
 ## UI agent-mistakes audit (2026-09-19)
 

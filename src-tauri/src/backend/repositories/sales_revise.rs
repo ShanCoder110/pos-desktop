@@ -67,6 +67,12 @@ pub async fn revise_invoice(
         return Err(AppError::Validation(ERROR_INVOICE_HAS_RETURNS.into()));
     }
 
+    // Identical lines / payments / discounts / totals → skip reverse+repost so we
+    // do not write net-zero ADJUSTMENT+SALE ledger pairs or churn stock/payments.
+    if revise_request_is_noop(transaction, &header, invoice_id, request).await? {
+        return Ok(());
+    }
+
     let before_json = serde_json::json!({
         "subtotal": header.subtotal,
         "discount": header.discount,
@@ -440,6 +446,158 @@ pub async fn revise_invoice(
         .await?;
 
     Ok(())
+}
+
+#[derive(Debug, FromQueryResult)]
+struct ExistingItemRow {
+    product_id: Uuid,
+    product_unit_id: Option<Uuid>,
+    displayed_quantity: Decimal,
+    unit_price: Decimal,
+    price_mode: String,
+    discount: Decimal,
+    tax: Decimal,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct ExistingPaymentRow {
+    amount: Decimal,
+    payment_method: String,
+    status: String,
+}
+
+/// True when revise would rewrite the same bill (customer, lines, payments, discount/tax/total).
+async fn revise_request_is_noop(
+    transaction: &DatabaseTransaction,
+    header: &InvoiceHeader,
+    invoice_id: Uuid,
+    request: &CompleteSaleRequest,
+) -> Result<bool, AppError> {
+    let request_customer = parse_optional_uuid(request.customer_id.as_deref(), "customerId")?;
+    if request_customer != header.customer_id {
+        return Ok(false);
+    }
+    if money_value(request.discount) != money_value(header.discount) {
+        return Ok(false);
+    }
+    if money_value(request.tax) != money_value(header.tax) {
+        return Ok(false);
+    }
+    let request_notes = trimmed(&request.notes);
+    if request_notes != header.notes {
+        return Ok(false);
+    }
+
+    let existing_items = ExistingItemRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT product_id, product_unit_id, displayed_quantity, unit_price, price_mode, discount, tax FROM invoice_items WHERE invoice_id = ? ORDER BY created_at ASC, id ASC",
+        [invoice_id.into()],
+    ))
+    .all(transaction)
+    .await?;
+    if existing_items.len() != request.items.len() {
+        return Ok(false);
+    }
+
+    let mut existing_keys: Vec<(String, String, Decimal, Decimal, String, Decimal, Decimal)> =
+        existing_items
+            .into_iter()
+            .map(|row| {
+                (
+                    row.product_id.to_string(),
+                    row.product_unit_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_default(),
+                    quantity(row.displayed_quantity),
+                    money_value(row.unit_price),
+                    row.price_mode.trim().to_uppercase(),
+                    money_value(row.discount),
+                    money_value(row.tax),
+                )
+            })
+            .collect();
+    existing_keys.sort();
+
+    let mut request_keys: Vec<(String, String, Decimal, Decimal, String, Decimal, Decimal)> =
+        Vec::with_capacity(request.items.len());
+    let mut request_subtotal = Decimal::ZERO;
+    for item in &request.items {
+        let product_id = parse_uuid(&item.product_id, "items.productId")?;
+        let product_unit_id = parse_uuid(&item.product_unit_id, "items.productUnitId")?;
+        let displayed = quantity(item.quantity);
+        let unit_price = money_value(item.unit_price);
+        let line_discount = money_value(item.discount);
+        let line_tax = money_value(item.tax);
+        let line_total = money_value(unit_price * displayed - line_discount + line_tax);
+        request_subtotal += line_total;
+        request_keys.push((
+            product_id.to_string(),
+            product_unit_id.to_string(),
+            displayed,
+            unit_price,
+            item.price_mode.trim().to_uppercase(),
+            line_discount,
+            line_tax,
+        ));
+    }
+    request_keys.sort();
+    if existing_keys != request_keys {
+        return Ok(false);
+    }
+
+    let request_total =
+        money_value(request_subtotal - money_value(request.discount) + money_value(request.tax));
+    if request_total != money_value(header.total) {
+        return Ok(false);
+    }
+
+    let existing_payments = ExistingPaymentRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT amount, payment_method, status FROM payments WHERE invoice_id = ?",
+        [invoice_id.into()],
+    ))
+    .all(transaction)
+    .await?;
+    let mut existing_pay_keys: Vec<(String, Decimal)> = existing_payments
+        .into_iter()
+        .filter(|row| row.status != PAYMENT_STATUS_VOIDED)
+        .map(|row| {
+            (
+                row.payment_method.trim().to_uppercase(),
+                money_value(row.amount),
+            )
+        })
+        .collect();
+    existing_pay_keys.sort();
+
+    let mut request_pay_keys: Vec<(String, Decimal)> = request
+        .payments
+        .iter()
+        .map(|payment| {
+            (
+                payment.payment_method.trim().to_uppercase(),
+                money_value(payment.amount),
+            )
+        })
+        .collect();
+    request_pay_keys.sort();
+    if existing_pay_keys != request_pay_keys {
+        return Ok(false);
+    }
+
+    let request_paid: Decimal = request.payments.iter().fold(Decimal::ZERO, |sum, payment| {
+        sum + money_value(payment.amount)
+    });
+    let request_paid = money_value(request_paid.min(request_total));
+    if request_paid != money_value(header.paid_amount) {
+        return Ok(false);
+    }
+    let request_credit = money_value(request_total - request_paid);
+    if request_credit != money_value(header.credit_amount) {
+        return Ok(false);
+    }
+
+    Ok(true)
 }
 
 async fn reverse_stock(

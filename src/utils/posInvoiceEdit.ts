@@ -11,25 +11,39 @@ export type InvoiceEditPaymentPrefill = {
   onlineAmt: number;
 };
 
+function isOnlineMethod(method: string) {
+  const m = method.toUpperCase();
+  return m === "MOBILE" || m === "CARD" || m === "ONLINE" || m === "BANK";
+}
+
+function isCashMethod(method: string) {
+  return (method || "CASH").toUpperCase() === "CASH";
+}
+
+function activePayments(
+  payments:
+    { amount?: number; paymentMethod?: string | null; status?: string | null }[] | null | undefined,
+) {
+  return (payments ?? []).filter((p) => (p.status ?? "COMPLETED").toUpperCase() !== "VOIDED");
+}
+
 /** Derive cash/credit/split controls from invoice paid + credit (+ optional payment rows). */
 export function invoiceEditPaymentPrefill(invoice: {
   paidAmount: number;
   creditAmount: number;
   total: number;
-  payments?: { amount?: number; paymentMethod?: string | null }[] | null;
+  payments?: { amount?: number; paymentMethod?: string | null; status?: string | null }[] | null;
 }): InvoiceEditPaymentPrefill {
   const paid = Math.max(0, Number(invoice.paidAmount) || 0);
-  const payments = invoice.payments ?? [];
+  const payments = activePayments(invoice.payments);
   const cashFromRows = payments
-    .filter((p) => (p.paymentMethod ?? "CASH").toUpperCase() === "CASH")
+    .filter((p) => isCashMethod(p.paymentMethod ?? "CASH"))
     .reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const onlineFromRows = payments
-    .filter((p) => {
-      const m = (p.paymentMethod ?? "").toUpperCase();
-      return m === "MOBILE" || m === "CARD" || m === "ONLINE" || m === "BANK";
-    })
+    .filter((p) => isOnlineMethod(p.paymentMethod ?? ""))
     .reduce((s, p) => s + (Number(p.amount) || 0), 0);
 
+  // Split (cash + online), including when credit remains on the bill.
   if (cashFromRows > 0 && onlineFromRows > 0) {
     return {
       payMethod: "split",
@@ -46,6 +60,7 @@ export function invoiceEditPaymentPrefill(invoice: {
       onlineAmt: onlineFromRows || paid,
     };
   }
+  // Cash-only, credit-only (paid 0), or missing payment rows → cash tab.
   return {
     payMethod: "cash",
     received: paid,
@@ -74,7 +89,7 @@ export function invoiceEditLoadSnapshot(invoice: {
   paidAmount: number;
   creditAmount: number;
   total: number;
-  payments?: { amount?: number; paymentMethod?: string | null }[] | null;
+  payments?: { amount?: number; paymentMethod?: string | null; status?: string | null }[] | null;
 }) {
   const payment = invoiceEditPaymentPrefill(invoice);
   return {

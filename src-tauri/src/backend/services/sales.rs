@@ -247,6 +247,24 @@ mod tests {
         .collect()
     }
 
+    async fn count_rows(database: &DatabaseConnection, sql: &str, id: &str) -> i64 {
+        #[derive(Debug, FromQueryResult)]
+        struct CountRow {
+            count: i64,
+        }
+        let uid = Uuid::parse_str(id).unwrap();
+        CountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            sql.to_owned(),
+            [uid.into()],
+        ))
+        .one(database)
+        .await
+        .expect("count query")
+        .map(|row| row.count)
+        .unwrap_or(0)
+    }
+
     #[tokio::test]
     async fn credit_revise_then_new_sale_chains_balance_after() {
         let database = connect_memory().await.expect("memory db");
@@ -2124,6 +2142,24 @@ mod tests {
         assert_eq!(sale.credit_amount, 25.0);
 
         let ledger_before = ledger_balances(&database, &customer.id).await;
+        let ledger_count_before = count_rows(
+            &database,
+            "SELECT COUNT(*) AS count FROM customer_ledger_entries WHERE customer_id = ?",
+            &customer.id,
+        )
+        .await;
+        let payment_count_before = count_rows(
+            &database,
+            "SELECT COUNT(*) AS count FROM payments WHERE invoice_id = ?",
+            &sale.id,
+        )
+        .await;
+        let movement_count_before = count_rows(
+            &database,
+            "SELECT COUNT(*) AS count FROM stock_movements WHERE reference_type = 'Invoice' AND reference_id = ?",
+            &sale.id,
+        )
+        .await;
         let hold_before = MasterRepository::find(&database, MasterKind::Customer, cid)
             .await
             .expect("cust")
@@ -2170,8 +2206,38 @@ mod tests {
         assert_eq!(revised.total, 30.0);
         let ledger_after = ledger_balances(&database, &customer.id).await;
         assert_eq!(
-            ledger_after.last().copied().unwrap_or(0.0),
-            ledger_before.last().copied().unwrap_or(0.0)
+            ledger_after, ledger_before,
+            "balance_after chain must be identical on no-op revise"
+        );
+        assert_eq!(
+            count_rows(
+                &database,
+                "SELECT COUNT(*) AS count FROM customer_ledger_entries WHERE customer_id = ?",
+                &customer.id,
+            )
+            .await,
+            ledger_count_before,
+            "no-op revise must not add ledger rows"
+        );
+        assert_eq!(
+            count_rows(
+                &database,
+                "SELECT COUNT(*) AS count FROM payments WHERE invoice_id = ?",
+                &sale.id,
+            )
+            .await,
+            payment_count_before,
+            "no-op revise must not add payment rows"
+        );
+        assert_eq!(
+            count_rows(
+                &database,
+                "SELECT COUNT(*) AS count FROM stock_movements WHERE reference_type = 'Invoice' AND reference_id = ?",
+                &sale.id,
+            )
+            .await,
+            movement_count_before,
+            "no-op revise must not add stock movements"
         );
         let hold_after = MasterRepository::find(&database, MasterKind::Customer, cid)
             .await
@@ -2182,6 +2248,240 @@ mod tests {
         assert!(
             (hold_after - hold_before).abs() < 0.01,
             "profit hold changed: {hold_before} → {hold_after}"
+        );
+    }
+
+    #[tokio::test]
+    async fn revise_noop_split_keeps_payment_rows() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let context = ctx();
+
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "SplitNoop".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let customer = MasterService::create(
+            &database,
+            MasterKind::Customer,
+            MasterRequest {
+                name: "Split Noop Cust".into(),
+                symbol: None,
+                phone: Some("03006665544".into()),
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: Some(true),
+                previous_balance: None,
+            },
+            Some(&context),
+        )
+        .await
+        .expect("customer");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Split Noop Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(10, 0),
+                    wholesale: Decimal::new(15, 0),
+                    price: Decimal::new(20, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(100, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let unit_id = product.sell_units[0].id.clone();
+
+        let session = AuthService::open_cash_session(
+            &database,
+            &context,
+            CashSessionOpenRequest {
+                opening_float: Decimal::ZERO,
+            },
+        )
+        .await
+        .expect("cash");
+        let mut context = context;
+        context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
+
+        let sale = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "split-noop-sale".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::new(2, 0),
+                    unit_price: Decimal::new(20, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![
+                    crate::backend::dto::SalePaymentInput {
+                        amount: Decimal::new(20, 0),
+                        amount_tendered: Some(Decimal::new(20, 0)),
+                        payment_method: "CASH".into(),
+                        reference_number: None,
+                        notes: None,
+                        client_request_id: None,
+                    },
+                    crate::backend::dto::SalePaymentInput {
+                        amount: Decimal::new(20, 0),
+                        amount_tendered: None,
+                        payment_method: "MOBILE".into(),
+                        reference_number: None,
+                        notes: None,
+                        client_request_id: None,
+                    },
+                ],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("split sale");
+        assert_eq!(sale.total, 40.0);
+        assert_eq!(sale.paid_amount, 40.0);
+        assert_eq!(sale.payments.len(), 2);
+
+        let payment_count_before = count_rows(
+            &database,
+            "SELECT COUNT(*) AS count FROM payments WHERE invoice_id = ? AND status != 'VOIDED'",
+            &sale.id,
+        )
+        .await;
+        assert_eq!(payment_count_before, 2);
+
+        let revised = SalesService::revise(
+            &database,
+            &context,
+            Uuid::parse_str(&sale.id).unwrap(),
+            CompleteSaleRequest {
+                client_request_id: "split-noop-revise".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id,
+                    quantity: Decimal::new(2, 0),
+                    unit_price: Decimal::new(20, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![
+                    crate::backend::dto::SalePaymentInput {
+                        amount: Decimal::new(20, 0),
+                        amount_tendered: Some(Decimal::new(20, 0)),
+                        payment_method: "CASH".into(),
+                        reference_number: None,
+                        notes: None,
+                        client_request_id: None,
+                    },
+                    crate::backend::dto::SalePaymentInput {
+                        amount: Decimal::new(20, 0),
+                        amount_tendered: None,
+                        payment_method: "MOBILE".into(),
+                        reference_number: None,
+                        notes: None,
+                        client_request_id: None,
+                    },
+                ],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("split noop revise");
+
+        assert_eq!(revised.payments.len(), 2);
+        assert_eq!(
+            count_rows(
+                &database,
+                "SELECT COUNT(*) AS count FROM payments WHERE invoice_id = ? AND status != 'VOIDED'",
+                &sale.id,
+            )
+            .await,
+            2,
+            "split no-op must keep both payment rows"
+        );
+        assert_eq!(
+            count_rows(
+                &database,
+                "SELECT COUNT(*) AS count FROM payments WHERE invoice_id = ? AND status = 'VOIDED'",
+                &sale.id,
+            )
+            .await,
+            0,
+            "split no-op must not void payments"
         );
     }
 

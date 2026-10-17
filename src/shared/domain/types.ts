@@ -252,6 +252,17 @@ export interface SupplierRow {
   updatedAt?: string;
 }
 
+export interface InvoicePaymentRow {
+  id: string;
+  amount: number;
+  amountTendered?: number | null;
+  changeAmount?: number;
+  paymentMethod: string;
+  referenceNumber?: string | null;
+  status: string;
+  paidAt?: string;
+}
+
 export interface InvoiceRow {
   id: string;
   invoiceNumber: string;
@@ -268,6 +279,8 @@ export interface InvoiceRow {
   createdBy: string;
   createdAt: string;
   items: InvoiceItemRow[];
+  /** Completed tender rows — required for POS edit payment prefill (split/cash/online). */
+  payments?: InvoicePaymentRow[];
 }
 
 export interface InvoiceItemRow {
