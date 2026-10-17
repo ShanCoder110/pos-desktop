@@ -8,8 +8,8 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     /// Must not run inside a transaction: SQLite ignores PRAGMA foreign_keys
     /// changes while a transaction is open, and we need FK off to rebuild.
-    fn use_transaction(&self) -> bool {
-        false
+    fn use_transaction(&self) -> Option<bool> {
+        Some(false)
     }
 
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
