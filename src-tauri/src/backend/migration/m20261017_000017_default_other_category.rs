@@ -3,7 +3,9 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-const OTHER_CATEGORY_ID: &str = "20000000-0000-4000-8000-000000000001";
+/// Same UUID as the historical text insert (`20000000-0000-4000-8000-000000000001`),
+/// stored as a 16-byte BLOB so fresh installs never create TEXT(36) ids.
+const OTHER_CATEGORY_ID_BLOB: &str = "X'20000000000040008000000000000001'";
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
@@ -11,7 +13,7 @@ impl MigrationTrait for Migration {
         manager
             .get_connection()
             .execute_unprepared(&format!(
-                "INSERT OR IGNORE INTO product_categories (id, name, description, is_active, version, created_at, updated_at) VALUES ('{OTHER_CATEGORY_ID}', 'Other', 'Products without a selected category', 1, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+                "INSERT OR IGNORE INTO product_categories (id, name, description, is_active, version, created_at, updated_at) VALUES ({OTHER_CATEGORY_ID_BLOB}, 'Other', 'Products without a selected category', 1, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
             ))
             .await?;
         // Older installations received a larger seed list. Hide only unused legacy seeds;
@@ -29,7 +31,7 @@ impl MigrationTrait for Migration {
         manager
             .get_connection()
             .execute_unprepared(&format!(
-                "DELETE FROM product_categories WHERE id = '{OTHER_CATEGORY_ID}' AND NOT EXISTS (SELECT 1 FROM products WHERE category_id = '{OTHER_CATEGORY_ID}')"
+                "DELETE FROM product_categories WHERE id = {OTHER_CATEGORY_ID_BLOB} AND NOT EXISTS (SELECT 1 FROM products WHERE category_id = {OTHER_CATEGORY_ID_BLOB})"
             ))
             .await?;
         Ok(())

@@ -626,4 +626,134 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
     }
+
+    /// Fresh install: every UUID-like column value must be a 16-byte BLOB
+    /// (000017 Other category included — no TEXT(36) origin).
+    #[tokio::test]
+    async fn fresh_db_all_uuid_columns_are_16_byte_blobs() {
+        let path = std::env::temp_dir().join(format!(
+            "pos-mig-fresh-uuid-{}.sqlite3",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let url = format!("sqlite://{}?mode=rwc", path.display());
+        let database = connect_sqlite_single(&url).await;
+
+        Migrator::up(&database, None)
+            .await
+            .expect("apply all migrations on fresh DB");
+
+        const SKIP: &[&str] = &[
+            "client_request_id",
+            "reference_number",
+            "invoice_number",
+            "lot_number",
+            "adjustment_number",
+            "return_number",
+            "order_number",
+            "transfer_number",
+            "receipt_number",
+            "job_number",
+            "claim_number",
+            "held_number",
+            "po_number",
+            "grn_number",
+        ];
+
+        let tables = database
+            .query_all_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'table'
+                   AND name NOT LIKE 'sqlite_%'
+                   AND name != 'seaql_migrations'
+                 ORDER BY name"
+                    .to_owned(),
+            ))
+            .await
+            .expect("list tables");
+
+        let mut bad: Vec<String> = Vec::new();
+        let mut scanned = 0u64;
+        for table_row in &tables {
+            let table: String = table_row.try_get("", "name").expect("table name");
+            let cols = database
+                .query_all_raw(sea_orm::Statement::from_string(
+                    sea_orm::DbBackend::Sqlite,
+                    format!("PRAGMA table_info(\"{table}\")"),
+                ))
+                .await
+                .expect("table_info");
+            for col_row in cols {
+                let name: String = col_row
+                    .try_get_by_index(1)
+                    .or_else(|_| col_row.try_get("", "name"))
+                    .unwrap_or_default();
+                let lower = name.to_ascii_lowercase();
+                if SKIP.contains(&lower.as_str()) {
+                    continue;
+                }
+                if lower != "id" && !lower.ends_with("_id") {
+                    continue;
+                }
+                // INTEGER singleton keys (e.g. system_state.id) are not UUIDs.
+                // Flag only text/blob values that are not already 16-byte blobs.
+                let sql = format!(
+                    "SELECT COUNT(*) AS count FROM \"{table}\"
+                     WHERE \"{name}\" IS NOT NULL
+                       AND typeof(\"{name}\") IN ('text', 'blob')
+                       AND NOT (typeof(\"{name}\") = 'blob' AND length(\"{name}\") = 16)"
+                );
+                let row = database
+                    .query_one_raw(sea_orm::Statement::from_string(
+                        sea_orm::DbBackend::Sqlite,
+                        sql,
+                    ))
+                    .await
+                    .expect("scan query")
+                    .expect("scan row");
+                let count: i64 = row.try_get("", "count").unwrap_or(0);
+                scanned += 1;
+                if count > 0 {
+                    bad.push(format!("{table}.{name}={count}"));
+                }
+            }
+        }
+
+        // Other category must exist as blob16 after 000017 (+ 000023 no-op).
+        let other = database
+            .query_one_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "SELECT typeof(id) AS t, length(id) AS len FROM product_categories
+                 WHERE name = 'Other' LIMIT 1"
+                    .to_owned(),
+            ))
+            .await
+            .expect("other query")
+            .expect("Other category row");
+        let t: String = other.try_get("", "t").expect("typeof");
+        let len: i64 = other.try_get("", "len").expect("len");
+        assert_eq!(t, "blob", "Other category id must be blob on fresh install");
+        assert_eq!(len, 16, "Other category id must be 16 bytes");
+
+        assert!(
+            bad.is_empty(),
+            "non-blob16 UUID values after fresh migrate (scanned {scanned} cols): {bad:?}"
+        );
+
+        let report = format!(
+            "fresh_db_uuid_scan ok scanned_columns={scanned} bad=0 other_typeof={t} other_len={len}\n"
+        );
+        let _ = std::fs::create_dir_all("/opt/cursor/artifacts");
+        let _ = std::fs::write(
+            "/opt/cursor/artifacts/step28a-fresh-db-uuid-scan.txt",
+            &report,
+        );
+        eprintln!("{report}");
+
+        let _ = std::fs::remove_file(&path);
+    }
 }

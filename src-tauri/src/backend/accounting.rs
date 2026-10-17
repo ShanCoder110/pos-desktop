@@ -5,10 +5,6 @@
 
 use rust_decimal::Decimal;
 
-fn d(v: i64) -> Decimal {
-    Decimal::new(v, 0)
-}
-
 fn money(v: Decimal) -> Decimal {
     // Match backend money_value rounding to 2 dp for assertions in tests.
     v.round_dp(2)
@@ -76,6 +72,10 @@ pub fn shrinkage_loss(shrunk_base_qty: Decimal, cost_per_base: Decimal) -> Decim
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn d(v: i64) -> Decimal {
+        Decimal::new(v, 0)
+    }
 
     #[test]
     fn f1_line_gross_with_line_and_bill_discount() {

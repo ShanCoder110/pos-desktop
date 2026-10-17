@@ -27,7 +27,11 @@ import { toaster } from "@/components/common/Toast";
 import { PosProductSearch, type PosSearchResult } from "@/pages/pos/PosProductSearch";
 import { PosSaleEntryControls } from "@/pages/pos/PosSaleEntryControls";
 import { PosBillsMenu, PosFunctionBar, PosLoadingOverlay } from "@/pages/pos/PosChrome";
-import { convertBillDiscount, paymentStatusLabel } from "@/pages/pos/posBilling";
+import {
+  convertBillDiscount,
+  paymentStatusLabel,
+  wholesaleCartToast,
+} from "@/pages/pos/posBilling";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useSettings } from "@/shared/settings";
 import { routes } from "@/shared/constants/routes";
@@ -1236,10 +1240,10 @@ export function PosWorkspace() {
     );
     setRoundTarget(0);
     if (opts?.toast !== false) {
-      if (next === "wholesale" && fallbackCount > 0) {
-        showToast("Wholesale — retail used where wholesale is unset");
+      if (next === "wholesale") {
+        showToast(wholesaleCartToast(fallbackCount));
       } else {
-        showToast(next === "wholesale" ? "All items wholesale" : "All items retail");
+        showToast("All items retail");
       }
     }
   }

@@ -36,3 +36,11 @@ export function paymentStatusLabel({
   if (extra > 0.001) return returnChange ? "Paid · change due" : "Paid · extra to balance";
   return "Paid";
 }
+
+/** F11 / switch-all wholesale toast. `fallbackCount` = lines that kept retail. */
+export function wholesaleCartToast(fallbackCount: number): string {
+  if (fallbackCount <= 0) return "All items wholesale";
+  const n = fallbackCount;
+  const noun = n === 1 ? "item" : "items";
+  return `Wholesale applied; ${n} ${noun} kept retail (no wholesale price)`;
+}
