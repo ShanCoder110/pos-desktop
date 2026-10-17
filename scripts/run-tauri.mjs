@@ -4,15 +4,12 @@ import { fileURLToPath } from "node:url";
 import { cargoSpawn } from "./cargo.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const tauriBin = join(
-  root,
-  "node_modules",
-  ".bin",
-  process.platform === "win32" ? "tauri.cmd" : "tauri",
-);
+// Execute the CLI's JavaScript entrypoint directly. Spawning a `.cmd` shim
+// without a shell fails with EINVAL on Windows/Node 22 (including GitHub Actions).
+const tauriCli = join(root, "node_modules", "@tauri-apps", "cli", "tauri.js");
 const { env } = cargoSpawn();
 
-const child = spawn(tauriBin, process.argv.slice(2), {
+const child = spawn(process.execPath, [tauriCli, ...process.argv.slice(2)], {
   cwd: root,
   env,
   stdio: "inherit",
