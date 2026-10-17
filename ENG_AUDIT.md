@@ -26,7 +26,8 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | No-op revise skips reverse/repost (0 ledger/payment/movement rows); split edit preloads CASH+MOBILE amounts | ✅ Step 17 |
 | Edit prefill uses sale tenders only (not later payment allocations); revise preserves allocated paid; block total &lt; allocated | ✅ Step 18 |
 | Edit totals count allocated as paid (due/after-bill); walk-in customer switch resets price mode to retail | ✅ Step 19 |
-| SKU search case/partial/hyphen-insensitive (PMX-001); db:seed sets customer credit_limit idempotently | ✅ Step 20 |
+| SKU search case/partial/hyphen-insensitive (PMX-001) | ✅ Step 20 |
+| Customer credit caps removed (won't do / Shan); migration 000022 drops the column | ✅ Step 22 |
 | Edit Left stock = on-hand + this invoice base qty − cart holds (no double-add) | ✅ Step 20 |
 | POS stock refetch on edit load, after sale, and tab focus; backend rejects oversell | ✅ Step 21 |
 | Reorder PO create drawer: per-line unit selector; qty/cost → base on save | ✅ Step 21 |

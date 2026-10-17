@@ -21,6 +21,7 @@ mod m20261017_000018_recompute_ledger_balances;
 mod m20261017_000019_invoice_return_payment_status;
 mod m20261017_000020_stock_count_reconcile;
 mod m20261017_000021_restore_customer_credit_limit;
+mod m20261017_000022_drop_customer_credit_limit;
 
 pub struct Migrator;
 
@@ -49,6 +50,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261017_000019_invoice_return_payment_status::Migration),
             Box::new(m20261017_000020_stock_count_reconcile::Migration),
             Box::new(m20261017_000021_restore_customer_credit_limit::Migration),
+            Box::new(m20261017_000022_drop_customer_credit_limit::Migration),
         ]
     }
 }
@@ -132,6 +134,27 @@ mod tests {
             .expect("user count row");
         let count: i64 = user_count.try_get("", "count").expect("read user count");
         assert_eq!(count, 0, "owner is created during onboarding, not seed");
+
+        // 000021 may add credit_limit; 000022 must leave customers without it.
+        let cols = database
+            .query_all_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "PRAGMA table_info(customers)".to_owned(),
+            ))
+            .await
+            .expect("pragma customers");
+        let names: Vec<String> = cols
+            .iter()
+            .filter_map(|row| {
+                row.try_get_by_index::<String>(1)
+                    .or_else(|_| row.try_get::<String>("", "name"))
+                    .ok()
+            })
+            .collect();
+        assert!(
+            !names.iter().any(|n| n == "credit_limit"),
+            "customers.credit_limit must be absent after 000022, got {names:?}"
+        );
     }
 
     async fn connect_sqlite_single(url: &str) -> sea_orm::DatabaseConnection {
