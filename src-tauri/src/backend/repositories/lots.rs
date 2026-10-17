@@ -10,11 +10,11 @@ use crate::backend::{
         DEFAULT_TRANSFER_PREFIX, ERROR_INVALID_CATEGORY_ID, ERROR_LOT_ALLOCATION_MISMATCH_PREFIX,
         ERROR_LOT_NOT_FOUND, ERROR_LOT_ORIGINAL_BELOW_COMMITTED,
         ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE, ERROR_LOT_REMAINING_LOCKED, ERROR_PRODUCT_NOT_FOUND,
-        ERROR_SUPPLIER_REQUIRED, LEDGER_PURCHASE, LOT_SOURCE_OPENING, LOT_SOURCE_PURCHASE,
-        REFERENCE_GOODS_RECEIPT, REFERENCE_PRODUCT_OPENING, SEQUENCE_KIND_TRANSFER,
-        STOCK_MOVEMENT_ADJUSTMENT, STOCK_MOVEMENT_PRODUCTION_USE, STOCK_MOVEMENT_PRODUCTION_WASTE,
-        STOCK_MOVEMENT_PURCHASE, STOCK_MOVEMENT_REPAIR_USE, STOCK_MOVEMENT_REPLACEMENT,
-        STOCK_MOVEMENT_RETURN, STOCK_MOVEMENT_SALE,
+        ERROR_SUPPLIER_REQUIRED, INVOICE_STATUS_COMPLETED, LEDGER_PURCHASE, LOT_SOURCE_OPENING,
+        LOT_SOURCE_PURCHASE, REFERENCE_GOODS_RECEIPT, REFERENCE_INVOICE, REFERENCE_PRODUCT_OPENING,
+        SEQUENCE_KIND_TRANSFER, STOCK_MOVEMENT_ADJUSTMENT, STOCK_MOVEMENT_PRODUCTION_USE,
+        STOCK_MOVEMENT_PRODUCTION_WASTE, STOCK_MOVEMENT_PURCHASE, STOCK_MOVEMENT_REPAIR_USE,
+        STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN, STOCK_MOVEMENT_SALE,
     },
     context::RequestContext,
     dto::{
@@ -95,6 +95,28 @@ struct BranchLotSyncRow {
 #[derive(Debug, FromQueryResult)]
 struct QtyRow {
     qty: Decimal,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct LotSoldRow {
+    product_lot_id: Uuid,
+    qty: Decimal,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct LotSaleMoneyRow {
+    product_lot_id: Uuid,
+    consumed: Decimal,
+    cogs: Decimal,
+    revenue: Decimal,
+}
+
+#[derive(Debug, Clone, Default)]
+struct LotSaleMetrics {
+    sold: Decimal,
+    returned_to_supplier: Decimal,
+    revenue: Decimal,
+    profit: Decimal,
 }
 
 pub struct LotRepository;
@@ -598,7 +620,7 @@ async fn hydrate(
     let sql = format!(
         "SELECT id, branch_id, product_lot_id, allocated_base_quantity, remaining_base_quantity, reserved_base_quantity, damaged_base_quantity, updated_at FROM branch_lots WHERE product_lot_id IN ({placeholders})"
     );
-    let values: Vec<sea_orm::Value> = ids.into_iter().map(Into::into).collect();
+    let values: Vec<sea_orm::Value> = ids.iter().copied().map(Into::into).collect();
     let branch_rows = BranchLotRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
         sql,
@@ -606,8 +628,7 @@ async fn hydrate(
     ))
     .all(database)
     .await?;
-    let mut by_lot: std::collections::HashMap<Uuid, Vec<BranchLotResponse>> =
-        std::collections::HashMap::new();
+    let mut by_lot: HashMap<Uuid, Vec<BranchLotResponse>> = HashMap::new();
     for row in branch_rows {
         by_lot
             .entry(row.product_lot_id)
@@ -624,29 +645,195 @@ async fn hydrate(
             });
     }
 
+    let metrics = lot_sale_metrics_batch(database, &ids).await?;
+
     Ok(rows
         .into_iter()
-        .map(|row| LotResponse {
-            id: row.id.to_string(),
-            product_id: row.product_id.to_string(),
-            product_name: row.product_name,
-            supplier_id: row.supplier_id.map(|value| value.to_string()),
-            lot_number: row.lot_number,
-            source_type: row.source_type,
-            original_base_quantity: decimal(row.original_base_quantity),
-            remaining_base_quantity: decimal(row.remaining_base_quantity),
-            damaged_base_quantity: decimal(row.damaged_base_quantity),
-            purchase_price_per_base: decimal(row.purchase_price_per_base),
-            received_date: row.received_date.to_string(),
-            expiry_date: row.expiry_date.map(|value| value.to_string()),
-            branch_lots: by_lot.remove(&row.id).unwrap_or_default(),
-            purchase_order_id: row.purchase_order_id.map(|value| value.to_string()),
-            purchase_order_number: row.purchase_order_number,
-            purchase_order_status: row.purchase_order_status,
-            created_at: row.created_at.to_rfc3339(),
-            updated_at: row.updated_at.to_rfc3339(),
+        .map(|row| {
+            let metric = metrics.get(&row.id).cloned().unwrap_or_default();
+            let original = quantity(row.original_base_quantity);
+            let remaining = quantity(row.remaining_base_quantity);
+            let damaged = quantity(row.damaged_base_quantity);
+            let unit_cost = money_value(row.purchase_price_per_base);
+            // Identity: original = remaining + damaged + sold + returned_to_supplier + shrunk.
+            // ADJUSTMENT downs (stock count) land in shrunk — never in sold/revenue/profit.
+            let shrunk =
+                (original - remaining - damaged - metric.sold - metric.returned_to_supplier)
+                    .max(Decimal::ZERO);
+            let shrink_cost = money_value(shrunk * unit_cost);
+            LotResponse {
+                id: row.id.to_string(),
+                product_id: row.product_id.to_string(),
+                product_name: row.product_name,
+                supplier_id: row.supplier_id.map(|value| value.to_string()),
+                lot_number: row.lot_number,
+                source_type: row.source_type,
+                original_base_quantity: decimal(row.original_base_quantity),
+                remaining_base_quantity: decimal(row.remaining_base_quantity),
+                damaged_base_quantity: decimal(row.damaged_base_quantity),
+                sold_base_quantity: decimal(metric.sold),
+                shrunk_base_quantity: decimal(shrunk),
+                sold_revenue: decimal(metric.revenue),
+                sold_profit: decimal(metric.profit),
+                shrink_cost: decimal(shrink_cost),
+                purchase_price_per_base: decimal(row.purchase_price_per_base),
+                received_date: row.received_date.to_string(),
+                expiry_date: row.expiry_date.map(|value| value.to_string()),
+                branch_lots: by_lot.remove(&row.id).unwrap_or_default(),
+                purchase_order_id: row.purchase_order_id.map(|value| value.to_string()),
+                purchase_order_number: row.purchase_order_number,
+                purchase_order_status: row.purchase_order_status,
+                created_at: row.created_at.to_rfc3339(),
+                updated_at: row.updated_at.to_rfc3339(),
+            }
         })
         .collect())
+}
+
+/// Batch sold qty + realized sale revenue/profit. Stock-count ADJUSTMENTs are excluded.
+async fn lot_sale_metrics_batch(
+    database: &DatabaseConnection,
+    ids: &[Uuid],
+) -> Result<HashMap<Uuid, LotSaleMetrics>, AppError> {
+    let mut metrics: HashMap<Uuid, LotSaleMetrics> = ids
+        .iter()
+        .map(|id| (*id, LotSaleMetrics::default()))
+        .collect();
+    if ids.is_empty() {
+        return Ok(metrics);
+    }
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let id_values: Vec<sea_orm::Value> = ids.iter().copied().map(Into::into).collect();
+
+    // Committed sold (SALE/REPLACEMENT/PRODUCTION/REPAIR − RETURN).
+    let outbound_sql = format!(
+        "SELECT sm.product_lot_id AS product_lot_id,
+                CAST(COALESCE(SUM(-sm.base_quantity_delta), 0) AS REAL) AS qty
+         FROM stock_movements sm
+         WHERE sm.product_lot_id IN ({placeholders})
+           AND sm.type IN (?, ?, ?, ?, ?)
+         GROUP BY sm.product_lot_id"
+    );
+    let mut outbound_values = id_values.clone();
+    outbound_values.extend([
+        STOCK_MOVEMENT_SALE.into(),
+        STOCK_MOVEMENT_REPLACEMENT.into(),
+        STOCK_MOVEMENT_PRODUCTION_USE.into(),
+        STOCK_MOVEMENT_PRODUCTION_WASTE.into(),
+        STOCK_MOVEMENT_REPAIR_USE.into(),
+    ]);
+    let outbound_rows = LotSoldRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        outbound_sql,
+        outbound_values,
+    ))
+    .all(database)
+    .await?;
+    for row in outbound_rows {
+        if let Some(metric) = metrics.get_mut(&row.product_lot_id) {
+            metric.sold = quantity(row.qty);
+        }
+    }
+
+    let return_sql = format!(
+        "SELECT sm.product_lot_id AS product_lot_id,
+                CAST(COALESCE(SUM(sm.base_quantity_delta), 0) AS REAL) AS qty
+         FROM stock_movements sm
+         WHERE sm.product_lot_id IN ({placeholders})
+           AND sm.type = ?
+           AND sm.base_quantity_delta > 0
+         GROUP BY sm.product_lot_id"
+    );
+    let mut return_values = id_values.clone();
+    return_values.push(STOCK_MOVEMENT_RETURN.into());
+    let return_rows = LotSoldRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        return_sql,
+        return_values,
+    ))
+    .all(database)
+    .await?;
+    for row in return_rows {
+        if let Some(metric) = metrics.get_mut(&row.product_lot_id) {
+            metric.sold = (metric.sold - quantity(row.qty)).max(Decimal::ZERO);
+        }
+    }
+
+    let supplier_sql = format!(
+        "SELECT sm.product_lot_id AS product_lot_id,
+                CAST(COALESCE(SUM(-sm.base_quantity_delta), 0) AS REAL) AS qty
+         FROM stock_movements sm
+         WHERE sm.product_lot_id IN ({placeholders})
+           AND sm.type = ?
+           AND sm.base_quantity_delta < 0
+           AND LOWER(COALESCE(sm.notes, '')) LIKE '%supplier%'
+         GROUP BY sm.product_lot_id"
+    );
+    let mut supplier_values = id_values.clone();
+    supplier_values.push(STOCK_MOVEMENT_ADJUSTMENT.into());
+    let supplier_rows = LotSoldRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        supplier_sql,
+        supplier_values,
+    ))
+    .all(database)
+    .await?;
+    for row in supplier_rows {
+        if let Some(metric) = metrics.get_mut(&row.product_lot_id) {
+            metric.returned_to_supplier = quantity(row.qty);
+        }
+    }
+
+    // Realized sale money from COMPLETED invoices only (voided CANCELLED excluded).
+    let money_sql = format!(
+        "SELECT lc.product_lot_id AS product_lot_id,
+                CAST(COALESCE(SUM(lc.base_quantity), 0) AS REAL) AS consumed,
+                CAST(COALESCE(SUM(lc.total_cost), 0) AS REAL) AS cogs,
+                CAST(COALESCE(SUM(
+                  lc.base_quantity * (
+                    SELECT CAST(SUM(ii.line_total) AS REAL) / NULLIF(CAST(SUM(ii.base_quantity) AS REAL), 0)
+                    FROM invoice_items ii
+                    WHERE ii.invoice_id = lc.reference_id AND ii.product_id = lc.product_id
+                  )
+                ), 0) AS REAL) AS revenue
+         FROM lot_consumptions lc
+         INNER JOIN invoices i ON i.id = lc.reference_id
+           AND i.status = ?
+           AND i.deleted_at IS NULL
+         WHERE lc.reference_type = ?
+           AND lc.product_lot_id IN ({placeholders})
+         GROUP BY lc.product_lot_id"
+    );
+    let mut money_values: Vec<sea_orm::Value> =
+        vec![INVOICE_STATUS_COMPLETED.into(), REFERENCE_INVOICE.into()];
+    money_values.extend(id_values);
+    let money_rows = LotSaleMoneyRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        money_sql,
+        money_values,
+    ))
+    .all(database)
+    .await?;
+    for row in money_rows {
+        if let Some(metric) = metrics.get_mut(&row.product_lot_id) {
+            let consumed = quantity(row.consumed);
+            let mut revenue = money_value(row.revenue);
+            let mut cogs = money_value(row.cogs);
+            // Scale to net committed sold when returns reduced movement sold below consumptions.
+            if consumed > Decimal::ZERO && metric.sold < consumed {
+                let factor = metric.sold / consumed;
+                revenue = money_value(revenue * factor);
+                cogs = money_value(cogs * factor);
+            } else if metric.sold <= Decimal::ZERO {
+                revenue = Decimal::ZERO;
+                cogs = Decimal::ZERO;
+            }
+            metric.revenue = revenue;
+            metric.profit = money_value(revenue - cogs);
+        }
+    }
+
+    Ok(metrics)
 }
 
 fn decimal(value: Decimal) -> f64 {

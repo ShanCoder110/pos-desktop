@@ -3,10 +3,16 @@ import type { InvoiceRow, LedgerRow } from "@/shared/domain/types";
 /** Cash collected (or refunded). Returns are not paid — they net sold instead. */
 const PAID_LEDGER_TYPES = new Set(["PAYMENT_RECEIVED", "PAYMENT", "PAYMENT_MADE"]);
 
+/** Open-credit / profit-hold queries must ignore voided invoices (audit totals stay on the row). */
+export function isOpenCreditInvoice(invoice: InvoiceRow): boolean {
+  return invoice.status === "COMPLETED" && (Number(invoice.creditAmount) || 0) > 0;
+}
+
 /**
  * Calculates the total gross profit for an invoice across its line items.
  */
 export function calculateInvoiceGrossProfit(invoice: InvoiceRow): number {
+  if (invoice.status === "CANCELLED") return 0;
   if (!invoice.items || invoice.items.length === 0) return 0;
   return invoice.items.reduce((sum, item) => sum + (item.grossProfit ?? 0), 0);
 }
@@ -46,6 +52,7 @@ export function summarizeCreditLedger(entries: LedgerRow[], balanceAfter?: numbe
  * Full return with no cash → 0; RETURNED/PARTIALLY_RETURNED never invent a paid share.
  */
 export function invoiceNetRemaining(invoice: InvoiceRow): number {
+  if (invoice.status === "CANCELLED") return 0;
   const paid = Math.max(0, Number(invoice.paidAmount) || 0);
   const credit = Math.max(0, Number(invoice.creditAmount) || 0);
   return +(paid + credit).toFixed(2);
@@ -71,6 +78,7 @@ export function calculateInvoiceRemainingProfit(invoice: InvoiceRow): number {
  * ≡ gross × credit / total. Zero when no open credit (incl. full return).
  */
 export function calculateInvoiceProfitHold(invoice: InvoiceRow): number {
+  if (invoice.status === "CANCELLED") return 0;
   if (invoice.total <= 0 || invoice.creditAmount <= 0) return 0;
   const grossProfit = calculateInvoiceGrossProfit(invoice);
   if (grossProfit <= 0) return 0;
@@ -83,6 +91,7 @@ export function calculateInvoiceProfitHold(invoice: InvoiceRow): number {
  * ≡ gross × paid / total. Cash only — never treat creditAmount 0 / RETURNED as paid.
  */
 export function calculateInvoiceRealizedProfit(invoice: InvoiceRow): number {
+  if (invoice.status === "CANCELLED") return 0;
   if (invoice.total <= 0) return 0;
   const grossProfit = calculateInvoiceGrossProfit(invoice);
   if (grossProfit <= 0) return 0;
@@ -103,8 +112,12 @@ export function summarizeCreditInvoices(invoices: InvoiceRow[]) {
   let totalGrossProfit = 0;
   let totalProfitOnHold = 0;
   let totalRealizedProfit = 0;
+  let invoiceCount = 0;
 
   for (const inv of invoices) {
+    // Safer than zeroing creditAmount on void: keep audit totals, exclude CANCELLED here.
+    if (inv.status === "CANCELLED") continue;
+    invoiceCount += 1;
     totalInvoiced += inv.total;
     totalPaid += inv.paidAmount;
     totalCreditOutstanding += inv.creditAmount;
@@ -117,7 +130,7 @@ export function summarizeCreditInvoices(invoices: InvoiceRow[]) {
   }
 
   return {
-    invoiceCount: invoices.length,
+    invoiceCount,
     totalInvoiced,
     totalPaid,
     totalCreditOutstanding,

@@ -13,6 +13,13 @@ export interface LotResponse {
   originalBaseQuantity: number;
   remainingBaseQuantity: number;
   damagedBaseQuantity: number;
+  /** Committed sales — never residual (original − left − damaged). */
+  soldBaseQuantity?: number;
+  /** Stock-count / adjustment downs (cost only). */
+  shrunkBaseQuantity?: number;
+  soldRevenue?: number;
+  soldProfit?: number;
+  shrinkCost?: number;
   purchasePricePerBase: number;
   receivedDate: string;
   expiryDate?: string | null;
@@ -97,6 +104,11 @@ export function mapLotResponse(lot: LotResponse): ProductLotRow {
     originalQuantity: lot.originalBaseQuantity,
     remainingQuantity: lot.remainingBaseQuantity,
     damagedQuantity: lot.damagedBaseQuantity,
+    soldQuantity: Math.max(0, Number(lot.soldBaseQuantity) || 0),
+    shrunkQuantity: Math.max(0, Number(lot.shrunkBaseQuantity) || 0),
+    soldRevenue: Math.max(0, Number(lot.soldRevenue) || 0),
+    soldProfit: Number(lot.soldProfit) || 0,
+    shrinkCost: Math.max(0, Number(lot.shrinkCost) || 0),
     receivedAt: lot.receivedDate,
     expiryDate: lot.expiryDate ?? null,
     createdBy: "",

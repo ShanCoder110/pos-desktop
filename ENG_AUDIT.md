@@ -31,6 +31,9 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | Edit Left stock = on-hand + this invoice base qty − cart holds (no double-add) | ✅ Step 20 |
 | POS stock refetch on edit load, after sale, and tab focus; backend rejects oversell | ✅ Step 21 |
 | Reorder PO create drawer: per-line unit selector; qty/cost → base on save | ✅ Step 21 |
+| Stock-count downs = shrinkage (cost only), never sold/revenue/profit on lot drawer | ✅ Step 24 |
+| Invoices/Returns/Transactions/Stock When = `formatTableDateTime`; pack qty = mixed whole+pieces | ✅ Step 24 |
+| Voided credit keeps `creditAmount` for audit; open-credit/profit-hold exclude CANCELLED | ✅ Step 24 |
 
 ## UI agent-mistakes audit (2026-09-19)
 

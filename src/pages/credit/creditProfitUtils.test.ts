@@ -4,6 +4,7 @@ import {
   calculateInvoiceProfitHold,
   calculateInvoiceRealizedProfit,
   calculateInvoiceRemainingProfit,
+  isOpenCreditInvoice,
   summarizeCreditInvoices,
   summarizeCreditLedger,
 } from "@/pages/credit/creditProfitUtils";
@@ -207,5 +208,25 @@ describe("invoice profit after return", () => {
   it("partial credit remaining: hold is proportional to credit/total", () => {
     const inv = invoice({ creditAmount: 20, paidAmount: 0 });
     expect(calculateInvoiceProfitHold(inv)).toBe(12); // 24 * 20/40
+  });
+
+  it("voided CANCELLED credit invoice is excluded from open credit / hold", () => {
+    const voided = invoice({
+      creditAmount: 30,
+      paidAmount: 0,
+      status: "CANCELLED",
+      paymentStatus: "REFUNDED",
+    });
+    expect(isOpenCreditInvoice(voided)).toBe(false);
+    expect(calculateInvoiceProfitHold(voided)).toBe(0);
+    expect(calculateInvoiceRealizedProfit(voided)).toBe(0);
+    expect(summarizeCreditInvoices([voided])).toMatchObject({
+      invoiceCount: 0,
+      totalCreditOutstanding: 0,
+      totalProfitOnHold: 0,
+      totalRealizedProfit: 0,
+    });
+    // Audit totals remain on the row itself.
+    expect(voided.creditAmount).toBe(30);
   });
 });

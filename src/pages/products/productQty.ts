@@ -444,15 +444,9 @@ export function displayQtyFromStock(
   return rounded;
 }
 
+/** Whole packs + remainder pieces (never decimal packs like `99980.2 Pack`). */
 export function formatLinkedQty(product: Product, stockQty: number) {
-  const units = productSellUnits(product);
-  const ordered = qtyUnits(units);
-  const list = ordered.length ? ordered : units;
-  const bits = list.map((u) => {
-    const n = qtyInUnit(units, product.unit, u, stockQty);
-    return `${formatStockQty(n)} ${u.name || unitLabel(u.symbol || product.unit)}`;
-  });
-  return bits.join(" = ") || `0 ${unitLabel(product.unit)}`;
+  return formatMixedQty(product, stockQty);
 }
 
 export function formatLinkedPrice(

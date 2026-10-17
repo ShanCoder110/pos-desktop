@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Eye, Pencil } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { businessDayKey } from "@/shared/constants/dashboard";
 import { routes } from "@/shared/constants/routes";
 import {
   Badge,
@@ -21,7 +20,7 @@ import { InvoiceReturnPanel } from "@/pages/invoices/InvoiceReturnPanel";
 import { useSalesHub } from "@/pages/sales/SalesLayout";
 import type { TableExportColumn } from "@/utils/exportFile";
 import type { InvoiceRow } from "@/shared/domain/types";
-import { money } from "@/utils/format";
+import { formatTableDateTime, money } from "@/utils/format";
 import { paymentStatusTone } from "@/utils/paymentStatus";
 import { listAllInvoices, voidInvoice } from "@/services/sales";
 import { isAbortError } from "@/utils/async";
@@ -116,7 +115,7 @@ export function InvoicesPage() {
 
   const exportColumns: TableExportColumn<InvoiceRow>[] = [
     { label: "Number", value: (row) => row.invoiceNumber },
-    { label: "When", value: (row) => row.createdAt },
+    { label: "When", value: (row) => formatTableDateTime(row.createdAt) },
     { label: "Branch", value: (row) => branchNames[row.branchId] ?? row.branchId },
     {
       label: "Customer",
@@ -178,7 +177,7 @@ export function InvoicesPage() {
           {shown.map((row) => (
             <tr key={row.id}>
               <Td>{row.invoiceNumber}</Td>
-              <Td>{businessDayKey(row.createdAt) || row.createdAt}</Td>
+              <Td>{formatTableDateTime(row.createdAt)}</Td>
               <Td>{branchNames[row.branchId] ?? row.branchId}</Td>
               <Td>{row.customerId ? (customerNames[row.customerId] ?? "Customer") : "Walk-in"}</Td>
               <Td numeric>{money(row.total)}</Td>

@@ -3290,4 +3290,182 @@ mod tests {
             "message={err}"
         );
     }
+
+    /// QA-06: void keeps creditAmount for audit, but open-credit / profit-hold queries exclude CANCELLED.
+    #[tokio::test]
+    async fn voided_credit_invoice_keeps_credit_amount_but_excludes_from_open_credit() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let context = ctx();
+
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "VoidCredit".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let customer = MasterService::create(
+            &database,
+            MasterKind::Customer,
+            MasterRequest {
+                name: "Void Credit Cust".into(),
+                symbol: None,
+                phone: Some("03009998877".into()),
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: Some(true),
+                previous_balance: None,
+            },
+            Some(&context),
+        )
+        .await
+        .expect("customer");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Void Credit Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(8, 0),
+                    wholesale: Decimal::new(10, 0),
+                    price: Decimal::new(15, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(50, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let unit_id = product.sell_units[0].id.clone();
+        let cid = Uuid::parse_str(&customer.id).unwrap();
+
+        let session = AuthService::open_cash_session(
+            &database,
+            &context,
+            CashSessionOpenRequest {
+                opening_float: Decimal::ZERO,
+            },
+        )
+        .await
+        .expect("cash session");
+        let mut context = context;
+        context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
+
+        let sale = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "void-credit-sale".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id,
+                    quantity: Decimal::new(2, 0),
+                    unit_price: Decimal::new(15, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("credit sale");
+        assert_eq!(sale.credit_amount, 30.0);
+        let before = MasterRepository::find(&database, MasterKind::Customer, cid)
+            .await
+            .expect("cust")
+            .expect("row");
+        assert_eq!(before.open_credit_sale_count.unwrap_or(0), 1);
+        assert!(before.profit_on_hold.unwrap_or(0.0) > 0.0);
+
+        let voided = SalesService::void(
+            &database,
+            &context,
+            Uuid::parse_str(&sale.id).unwrap(),
+            crate::backend::dto::VoidRequest {
+                reason: "QA void credit".into(),
+            },
+        )
+        .await
+        .expect("void");
+        assert_eq!(voided.status, "CANCELLED");
+        // Safer option: keep original creditAmount for audit (do not zero on void).
+        assert_eq!(voided.credit_amount, 30.0);
+
+        let after = MasterRepository::find(&database, MasterKind::Customer, cid)
+            .await
+            .expect("cust")
+            .expect("row");
+        assert_eq!(
+            after.open_credit_sale_count.unwrap_or(-1),
+            0,
+            "CANCELLED must be excluded from open credit count"
+        );
+        assert_eq!(
+            after.profit_on_hold.unwrap_or(-1.0),
+            0.0,
+            "CANCELLED must be excluded from profit on hold"
+        );
+    }
 }

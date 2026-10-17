@@ -19,7 +19,7 @@ import { applyFilterChip, chipValuesForField } from "@/utils/filterChips";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import type { CatalogProduct, StockMovementRow } from "@/shared/domain/types";
-import { qty } from "@/utils/format";
+import { formatTableDateTime, qty } from "@/utils/format";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import { STOCK_TABLE_COLUMNS } from "@/shared/constants/products";
 import { ensureSession } from "@/services/auth";
@@ -266,7 +266,7 @@ export function StockPage() {
                 {moves.length === 0 ? <EmptyRow cols={6} text="No movements yet" /> : null}
                 {moves.map((m) => (
                   <tr key={m.id}>
-                    <Td>{m.createdAt}</Td>
+                    <Td>{formatTableDateTime(m.createdAt)}</Td>
                     <Td>
                       <Badge tone={m.quantity < 0 ? "danger" : "ok"}>{m.type}</Badge>
                     </Td>

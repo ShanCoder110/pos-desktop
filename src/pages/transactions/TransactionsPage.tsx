@@ -17,7 +17,7 @@ import {
 import type { TableExportColumn } from "@/utils/exportFile";
 import type { MoneyTxnRow } from "@/shared/domain/types";
 import { useQueryTab } from "@/hooks/useQueryTab";
-import { money } from "@/utils/format";
+import { formatTableDateTime, money } from "@/utils/format";
 import { ensureSession } from "@/services/auth";
 import { listAllTransactions } from "@/services/finance";
 import { listAllBranches, mapBranch } from "@/services/org";
@@ -72,7 +72,7 @@ export function TransactionsPage() {
   const out = seed.filter((t) => t.direction === "OUT").reduce((s, t) => s + t.amount, 0);
 
   const exportColumns: TableExportColumn<MoneyTxnRow>[] = [
-    { label: "When", value: (row) => row.createdAt },
+    { label: "When", value: (row) => formatTableDateTime(row.createdAt) },
     { label: "Branch", value: (row) => branchNames[row.branchId] ?? row.branchId },
     { label: "Direction", value: (row) => row.direction },
     { label: "Type", value: (row) => row.type },
@@ -154,7 +154,7 @@ export function TransactionsPage() {
             {shown.length === 0 ? <EmptyRow cols={8} /> : null}
             {shown.map((row) => (
               <tr key={row.id}>
-                <Td>{row.createdAt}</Td>
+                <Td>{formatTableDateTime(row.createdAt)}</Td>
                 <Td>{row.type}</Td>
                 <Td>
                   <Badge tone={row.direction === "IN" ? "ok" : "danger"}>{row.direction}</Badge>

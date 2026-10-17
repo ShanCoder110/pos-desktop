@@ -66,6 +66,8 @@ import { Controller, useAppForm } from "@/hooks/useAppForm";
 import { assignApiError, fieldMessage } from "@/utils/form";
 
 function isCreditInvoice(row: InvoiceRow) {
+  // Safer option: keep creditAmount on void for audit; exclude CANCELLED from open-credit UI.
+  if (row.status === "CANCELLED") return false;
   return (
     row.creditAmount > 0 ||
     row.paymentStatus === "CREDIT" ||

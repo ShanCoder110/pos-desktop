@@ -168,6 +168,13 @@ export interface ProductLotRow {
   originalQuantity: number;
   remainingQuantity: number;
   damagedQuantity: number;
+  /** Committed sales qty — never original − left − damaged (that treats count-downs as sold). */
+  soldQuantity?: number;
+  /** Stock-count / adjustment shrinkage qty (cost only). */
+  shrunkQuantity?: number;
+  soldRevenue?: number;
+  soldProfit?: number;
+  shrinkCost?: number;
   receivedAt: string;
   expiryDate: string | null;
   createdBy: string;

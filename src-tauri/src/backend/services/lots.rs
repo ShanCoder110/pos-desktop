@@ -139,11 +139,14 @@ mod tests {
         db::connect_memory,
         dto::{
             CashSessionOpenRequest, CompleteSaleRequest, CreateProductRequest, LotListQuery,
-            MasterRequest, OpeningStockInput, ProductUnitInput, SaleItemInput, UpdateLotRequest,
+            MasterRequest, OpeningStockInput, ProductUnitInput, SaleItemInput, SalePaymentInput,
+            StockCountRequest, UpdateLotRequest,
         },
         errors::AppError,
         repositories::{MasterKind, OrgRepository},
-        services::{AuthService, LotService, MasterService, ProductService, SalesService},
+        services::{
+            AuthService, LotService, MasterService, ProductService, SalesService, StockService,
+        },
     };
 
     async fn seed_owner(database: &DatabaseConnection) {
@@ -477,5 +480,198 @@ mod tests {
             }
             other => panic!("expected allocation mismatch validation, got {other:?}"),
         }
+    }
+
+    /// QA-06: 100 @ 8, sell 10 @ 15, count down 5 → sold 10 / rev 150 / profit 70 / shrink 5 (Rs 40) / left 85.
+    /// Stock-count downs must never count as sold qty, revenue, or profit.
+    #[tokio::test]
+    async fn lot_metrics_exclude_stock_count_shrinkage_from_sold_and_profit() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let mut context = ctx("OWNER");
+
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "ShrinkQA".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Shrink Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(8, 0),
+                    wholesale: Decimal::new(10, 0),
+                    price: Decimal::new(15, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(100, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let unit_id = product.sell_units[0].id.clone();
+
+        let session = AuthService::open_cash_session(
+            &database,
+            &context,
+            CashSessionOpenRequest {
+                opening_float: Decimal::ZERO,
+            },
+        )
+        .await
+        .expect("cash session");
+        context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
+
+        SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "shrink-sale".into(),
+                customer_id: None,
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::new(10, 0),
+                    unit_price: Decimal::new(15, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![SalePaymentInput {
+                    payment_method: "CASH".into(),
+                    amount: Decimal::new(150, 0),
+                    amount_tendered: Some(Decimal::new(150, 0)),
+                    reference_number: None,
+                    notes: None,
+                    client_request_id: None,
+                }],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("sale 10");
+
+        StockService::count(
+            &database,
+            &context,
+            StockCountRequest {
+                product_id: product.id.clone(),
+                branch_id: Some(SEED_BRANCH_ID.into()),
+                product_unit_id: unit_id,
+                counted_quantity: Decimal::new(85, 0),
+                reason: "Shelf short count".into(),
+                adjust_supplier_payable: false,
+                supplier_id: None,
+                supplier_amount: None,
+            },
+        )
+        .await
+        .expect("count down to 85");
+
+        let lots = LotService::list(
+            &database,
+            LotListQuery {
+                product_id: Some(product.id.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("lots")
+        .data;
+        assert_eq!(lots.len(), 1, "expected single opening lot");
+        let lot = &lots[0];
+
+        assert!(
+            (lot.remaining_base_quantity - 85.0).abs() < 0.01,
+            "left={}",
+            lot.remaining_base_quantity
+        );
+        assert!(
+            (lot.sold_base_quantity - 10.0).abs() < 0.01,
+            "sold must be 10 not residual 15, got {}",
+            lot.sold_base_quantity
+        );
+        assert!(
+            (lot.sold_revenue - 150.0).abs() < 0.01,
+            "revenue={}",
+            lot.sold_revenue
+        );
+        assert!(
+            (lot.sold_profit - 70.0).abs() < 0.01,
+            "profit={}",
+            lot.sold_profit
+        );
+        assert!(
+            (lot.shrunk_base_quantity - 5.0).abs() < 0.01,
+            "shrunk={}",
+            lot.shrunk_base_quantity
+        );
+        assert!(
+            (lot.shrink_cost - 40.0).abs() < 0.01,
+            "shrink_cost={}",
+            lot.shrink_cost
+        );
+        // Residual formula would wrongly report sold=15 / profit≈105.
+        let residual =
+            lot.original_base_quantity - lot.remaining_base_quantity - lot.damaged_base_quantity;
+        assert!((residual - 15.0).abs() < 0.01);
+        assert!((lot.sold_base_quantity - residual).abs() > 0.01);
     }
 }

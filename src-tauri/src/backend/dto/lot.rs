@@ -115,6 +115,16 @@ pub struct LotResponse {
     pub original_base_quantity: f64,
     pub remaining_base_quantity: f64,
     pub damaged_base_quantity: f64,
+    /// Committed sales (SALE/REPLACEMENT/PRODUCTION/REPAIR − RETURN). Never residual.
+    pub sold_base_quantity: f64,
+    /// Stock-count / adjustment downs that are not sales (cost only — never revenue/profit).
+    pub shrunk_base_quantity: f64,
+    /// Realized sale revenue for this lot (COMPLETED invoices only).
+    pub sold_revenue: f64,
+    /// Realized sale profit for this lot (revenue − FIFO COGS). Shrinkage is not included.
+    pub sold_profit: f64,
+    /// Shrinkage at lot FIFO cost (qty × purchase_price_per_base).
+    pub shrink_cost: f64,
     pub purchase_price_per_base: f64,
     pub received_date: String,
     pub expiry_date: Option<String>,

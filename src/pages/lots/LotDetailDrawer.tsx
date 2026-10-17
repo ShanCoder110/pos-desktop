@@ -6,10 +6,16 @@ import { DetailQtyDisplay } from "@/pages/products/DetailQtyDisplay";
 import { ensureSession } from "@/services/auth";
 import { lotUnitPricing, ProductUnitPricingList } from "@/pages/products/ProductUnitPricingCard";
 import {
-  formatLinkedQty,
+  lotShrinkCost,
+  lotShrunkQuantity,
+  lotSoldProfit,
+  lotSoldQuantity,
+  lotSoldRevenue,
+} from "@/pages/lots/lotMetrics";
+import {
+  formatMixedQty,
   formatStockQty,
   lotCostInStockUnit,
-  productBasePricing,
   unitLabel,
 } from "@/pages/products/productQty";
 import { LOT_COPY, PRODUCT_COPY } from "@/shared/constants/products";
@@ -70,8 +76,11 @@ export function LotDetailDrawer({
   const fifoCost = product ? lotCostInStockUnit(product, lot.purchasePrice) : lot.purchasePrice;
   const stockValue = lot.remainingQuantity * fifoCost;
   const empty = lot.remainingQuantity <= 0;
-  const sold = Math.max(0, lot.originalQuantity - lot.remainingQuantity - lot.damagedQuantity);
-  const { retail } = product ? productBasePricing(product) : { retail: 0 };
+  const sold = lotSoldQuantity(lot);
+  const shrunk = lotShrunkQuantity(lot);
+  const revenue = lotSoldRevenue(lot);
+  const profit = lotSoldProfit(lot);
+  const shrinkCost = lotShrinkCost(lot);
 
   return (
     <Drawer
@@ -146,7 +155,7 @@ export function LotDetailDrawer({
             </strong>
             <small>
               {product
-                ? `of ${formatLinkedQty(product, lot.originalQuantity)}`
+                ? `of ${formatMixedQty(product, lot.originalQuantity)}`
                 : `of ${formatStockQty(lot.originalQuantity)} ${stockUnit}`}
             </small>
           </article>
@@ -166,7 +175,7 @@ export function LotDetailDrawer({
               <DetailQtyDisplay product={product} qty={sold} />
             </strong>
             <small>
-              {sold > 0 && product ? `Profit ${money(sold * (retail - fifoCost))}` : "No sales yet"}
+              {sold > 0 ? `Revenue ${money(revenue)} · Profit ${money(profit)}` : "No sales yet"}
             </small>
           </article>
         </div>
@@ -195,6 +204,15 @@ export function LotDetailDrawer({
               <dt>Damaged</dt>
               <dd>
                 <DetailQtyDisplay product={product} qty={lot.damagedQuantity} />
+              </dd>
+            </div>
+            <div>
+              <dt>Shrinkage</dt>
+              <dd>
+                <DetailQtyDisplay product={product} qty={shrunk} />
+                {shrunk > 0 ? (
+                  <span className="product-detail-fact-note"> · cost {money(shrinkCost)}</span>
+                ) : null}
               </dd>
             </div>
           </dl>
