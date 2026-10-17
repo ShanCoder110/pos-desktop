@@ -12,3 +12,4 @@ pub mod unit;
 
 pub use product::Entity as Product;
 pub use product_unit::Entity as ProductUnit;
+pub use unit::Entity as Unit;

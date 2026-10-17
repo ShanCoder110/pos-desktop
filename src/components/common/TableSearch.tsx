@@ -29,9 +29,12 @@ export function TableSearch({
     setDraft(value);
   }, [value]);
 
-  useEffect(() => () => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    },
+    [],
+  );
 
   function changeQuery(nextValue: string) {
     setDraft(nextValue);

@@ -56,7 +56,13 @@ import type { Branch, StaffUser } from "@/shared/domain/types";
 import { Controller, useAppForm } from "@/hooks/useAppForm";
 import { useQueryTab } from "@/hooks/useQueryTab";
 import { assignApiError, fieldMessage } from "@/utils/form";
-import { formatEntityRef, limitMoneyDraft, money, shortError } from "@/utils/format";
+import {
+  formatEntityRef,
+  formatTableDateTime,
+  limitMoneyDraft,
+  money,
+  shortError,
+} from "@/utils/format";
 import { formatPkMobile, pkMobileDigits } from "@/utils/phone";
 import { createLoadGuard, isAbortError } from "@/utils/async";
 import { ensureSession } from "@/services/auth";
@@ -82,7 +88,6 @@ import { listEmptyMessage } from "@/shared/constants/empty";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { CUSTOMER_PAY_METHODS } from "@/shared/constants/customers";
 import {
-  DEFAULT_STAFF_PASSWORD,
   EMPLOYEE_COPY,
   EMPLOYEE_SEARCH_PLACEHOLDER,
   EMPLOYEE_TABLE_COLUMNS,
@@ -106,14 +111,7 @@ const PAGE = DEFAULT_PAGE_SIZE;
 const PAY_FORM_ID = "employee-pay-form";
 
 function when(iso: string) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatTableDateTime(iso);
 }
 
 function nameSlug(name: string) {
@@ -511,7 +509,6 @@ export function EmployeesPage() {
         await createUser({
           ...payload,
           email: staffEmailForCreate(edit.id, values.name.trim()),
-          password: DEFAULT_STAFF_PASSWORD,
         });
       } else {
         await updateUser(edit.id, {

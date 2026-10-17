@@ -10,6 +10,7 @@ pub struct Model {
     pub unit_id: Uuid,
     pub display_name: String,
     pub conversion_to_base: Decimal,
+    pub factor_direction: String,
     pub cost_reference: Option<Decimal>,
     pub minimum_price: Decimal,
     pub wholesale_price: Decimal,

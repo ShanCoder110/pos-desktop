@@ -14,7 +14,7 @@ fn ensure_adjust_permission(context: &RequestContext) -> Result<(), AppError> {
     if matches!(context.role.as_str(), "OWNER" | "MANAGER") {
         Ok(())
     } else {
-        Err(AppError::Forbidden(ERROR_ADJUST_BALANCE_DENIED.into()))
+        Err(AppError::Forbidden(ERROR_ADJUST_BALANCE_DENIED))
     }
 }
 

@@ -5,14 +5,25 @@ import {
   SearchableSelect,
   TextInput,
   TruncatedTooltip,
+  UnitSegmentedControl,
   toaster,
 } from "@/components/common";
+import {
+  inventoryPerSellUnit,
+  priceFromStock,
+  productSellUnits,
+} from "@/pages/products/productQty";
 import { productStockUnitId, quickReorderPrefill } from "@/pages/reorders/quickReorder";
 import { REORDER_COPY } from "@/shared/constants/reorders";
 import type { ProductLotRow, SupplierRow } from "@/shared/domain/types";
 import type { Product } from "@/shared/types";
 import { createPurchaseOrder } from "@/services/purchasing";
 import { money, shortError } from "@/utils/format";
+import {
+  convertDisplayedUnit,
+  defaultTransactionUnit,
+  stockToDisplayedQuantity,
+} from "@/utils/unitConversion";
 
 export function QuickReorderPopover({
   product,
@@ -28,18 +39,48 @@ export function QuickReorderPopover({
   onCreated: () => void;
 }) {
   const prefill = useMemo(() => quickReorderPrefill(product, lots), [product, lots]);
-  const [qty, setQty] = useState(String(prefill.quantity || ""));
+  const units = useMemo(
+    () =>
+      productSellUnits(product).filter(
+        (unit) => unit.id && !unit.id.endsWith("-u") && !unit.id.endsWith("-pack"),
+      ),
+    [product],
+  );
+  const initialUnit = defaultTransactionUnit(product, units);
+  const [unitId, setUnitId] = useState(initialUnit?.id ?? productStockUnitId(product));
+  const [qty, setQty] = useState(
+    String(initialUnit ? stockToDisplayedQuantity(initialUnit, prefill.quantity) || "" : ""),
+  );
   const [supplierId, setSupplierId] = useState(prefill.supplierId);
   const [saving, setSaving] = useState(false);
   const qtyRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setQty(String(prefill.quantity || ""));
+    const nextUnit = defaultTransactionUnit(product, units);
+    setUnitId(nextUnit?.id ?? productStockUnitId(product));
+    setQty(String(nextUnit ? stockToDisplayedQuantity(nextUnit, prefill.quantity) || "" : ""));
     setSupplierId(prefill.supplierId);
     qtyRef.current?.focus();
     qtyRef.current?.select();
-  }, [product.id, prefill.quantity, prefill.supplierId]);
+  }, [product, units, prefill.quantity, prefill.supplierId]);
+
+  const selectedUnit = units.find((unit) => unit.id === unitId) ?? initialUnit;
+
+  function changeUnit(nextUnitId: string) {
+    const nextUnit = units.find((unit) => unit.id === nextUnitId);
+    if (!nextUnit) return;
+    const currentUnit = units.find((unit) => unit.id === unitId);
+    const currentQty = Number(qty);
+    setUnitId(nextUnitId);
+    if (currentUnit && Number.isFinite(currentQty)) {
+      setQty(String(convertDisplayedUnit(currentUnit, nextUnit, currentQty)));
+    }
+    requestAnimationFrame(() => {
+      qtyRef.current?.focus();
+      qtyRef.current?.select();
+    });
+  }
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
@@ -93,7 +134,6 @@ export function QuickReorderPopover({
       toaster.error(REORDER_COPY.supplierRequired);
       return;
     }
-    const unitId = productStockUnitId(product);
     if (!unitId) {
       toaster.error(REORDER_COPY.unitRequired);
       return;
@@ -103,7 +143,16 @@ export function QuickReorderPopover({
     try {
       await createPurchaseOrder({
         supplierId,
-        items: [{ productId: product.id, unitId, quantity, unitCost: prefill.cost }],
+        items: [
+          {
+            productId: product.id,
+            unitId,
+            quantity,
+            unitCost: selectedUnit
+              ? priceFromStock(units, product.unit, prefill.cost, selectedUnit)
+              : prefill.cost,
+          },
+        ],
       });
       toaster.success(REORDER_COPY.created);
       onCreated();
@@ -117,7 +166,7 @@ export function QuickReorderPopover({
   return (
     <div
       ref={panelRef}
-      className="absolute right-0 top-[calc(100%+6px)] z-30 w-[260px]"
+      className="absolute right-0 top-[calc(100%+6px)] z-30 w-[300px]"
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
@@ -140,6 +189,20 @@ export function QuickReorderPopover({
             onChange={(event) => setQty(event.target.value)}
           />
         </Field>
+        {units.length ? (
+          <Field label="Unit">
+            <UnitSegmentedControl
+              units={units.map((unit) => ({
+                id: unit.id,
+                label: unit.name || unit.symbol || "Unit",
+                meta: inventoryPerSellUnit(unit) > 1 ? `×${inventoryPerSellUnit(unit)}` : undefined,
+              }))}
+              value={unitId}
+              onChange={changeUnit}
+              compact
+            />
+          </Field>
+        ) : null}
         <Field label={REORDER_COPY.supplierLabel}>
           <SearchableSelect
             name="quick-reorder-supplier"
@@ -151,7 +214,13 @@ export function QuickReorderPopover({
           />
         </Field>
         <p className="m-0 mb-2 text-[11px] text-muted">
-          {REORDER_COPY.costLabel} {money(prefill.cost)}
+          {REORDER_COPY.costLabel}{" "}
+          {money(
+            selectedUnit
+              ? priceFromStock(units, product.unit, prefill.cost, selectedUnit)
+              : prefill.cost,
+          )}
+          {selectedUnit ? ` / ${selectedUnit.name || selectedUnit.symbol}` : ""}
           {prefill.fromLot ? ` · ${prefill.fromLot.lotNumber}` : ""}
         </p>
         <div className="flex justify-end gap-2">

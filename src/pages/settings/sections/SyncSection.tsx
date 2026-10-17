@@ -41,8 +41,8 @@ export function SyncSection() {
         label="This machine is the main server"
       />
       <p className="settings-note text-muted">
-        Cloud sync is {enabled ? "enabled" : "disabled"} on this local shop. Open till → push outbox → pull since
-        Device.sync_cursor → store the new cursor when cloud is available.
+        Cloud sync is {enabled ? "enabled" : "disabled"} on this local shop. Open till → push outbox
+        → pull since Device.sync_cursor → store the new cursor when cloud is available.
       </p>
       <Table>
         <THead>
@@ -60,7 +60,9 @@ export function SyncSection() {
               <Td>{device.name}</Td>
               <Td>{device.branchId}</Td>
               <Td>
-                <Badge tone={device.isActive ? "ok" : "danger"}>{device.isActive ? "Active" : "Inactive"}</Badge>
+                <Badge tone={device.isActive ? "ok" : "danger"}>
+                  {device.isActive ? "Active" : "Inactive"}
+                </Badge>
               </Td>
               <Td>{device.lastSeenAt || "—"}</Td>
             </tr>

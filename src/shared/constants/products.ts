@@ -6,12 +6,51 @@ export const PRODUCT_TAB_ALL = "all";
 export const PRODUCT_SECTION_TABS = [
   { id: PRODUCT_TAB_ALL, label: "All products" },
   { id: "lots", label: "Lots" },
+  { id: "stock-count", label: "Stock count" },
   { id: "units", label: "Units" },
   { id: "categories", label: "Categories" },
   { id: "transfers", label: "Transfers" },
   { id: "reorders", label: "Reorders" },
   { id: "low", label: "Low stock" },
 ] as const;
+
+/** Owners/managers only — cashiers must not see the Stock count tab. */
+export const STOCK_COUNT_ROLES = new Set(["OWNER", "MANAGER"]);
+
+export const STOCK_COUNT_COPY = {
+  title: "Stock count",
+  subtitle: "Count on-hand stock and post an adjustment",
+  product: "Product",
+  branch: "Branch",
+  unit: "Count unit",
+  currentBase: "System qty (base)",
+  currentInUnit: "System qty (unit)",
+  counted: "Counted qty",
+  difference: "Difference",
+  reason: "Reason",
+  reasonPlaceholder: "Why is the count different?",
+  reasonRequired: "Enter a reason",
+  reasonMax: "Reason must be 200 characters or less",
+  countedRequired: "Enter a counted quantity",
+  countedNegative: "Counted quantity cannot be negative",
+  countedTooLarge: "Counted quantity cannot exceed 1,000,000 base units",
+  save: "Save count",
+  saved: "Stock count saved",
+  saveFailed: "Could not save stock count",
+  history: "Adjustment history",
+  historyEmpty: "No stock adjustments yet",
+  supplierAdjust: "Adjust supplier payable",
+  supplierAdjustHint: "Optional — posts a supplier ledger adjustment",
+  supplier: "Supplier",
+  supplierAmount: "Amount",
+  denied: "Only owners and managers can count stock",
+  pickProduct: "Choose a product",
+  pickBranch: "Choose a branch",
+  pickUnit: "Choose a unit",
+  leftLockedHint: "Use Stock count to change quantity",
+  loadFailed: "Could not load stock movements",
+  retry: "Retry",
+} as const;
 
 export type ProductSectionTab = (typeof PRODUCT_SECTION_TABS)[number]["id"];
 
@@ -109,9 +148,17 @@ export const PRODUCT_COPY = {
   categoryRequired: "Choose a category",
   unitRequired: "Choose a unit",
   unitsHint:
-    "Details ki Unit pehle base hoti hai. Box Dozen Bag add karne se base nahi badalta, sirf Use as base se. Prices conversion se auto bharti hain, manually bhi change kar sakte ho. Base badalne se prices ya stock nahi badalte.",
-  stockUnit: "Base unit",
-  makeStockUnit: "Set as base",
+    "The opening-stock unit is the inventory unit. Add Gaz under Roll (1 Roll = 90 Gaz) or Pack over Piece (1 Pack = 12 Piece). Prices auto-fill from the conversion. The default sale unit only controls what POS selects first.",
+  stockUnit: "Default sale",
+  makeStockUnit: "Make default",
+  inventoryUnit: "Inventory unit",
+  inventoryUnitHint: "Stock quantity is on Lots",
+  addUnitForConversion: "Add unit for Gaz / Pack",
+  addUnitAction: "Add unit",
+  unitNameRequired: "Choose a unit name",
+  unitNameDuplicate: "Each unit name must be unique",
+  unitFactorInvalid: "Enter a conversion greater than zero",
+  unitBaseRequired: "Choose one base unit",
   sessionRequired: "Sign in again to save products",
   branchesTitle: "Branch stock",
   branchesHint: "Split opening quantity across branches. FIFO lots are created per branch.",
@@ -123,11 +170,10 @@ export const PRODUCT_COPY = {
   unitPriceTierRetail: "Retail",
   unitPricesInvalid: "Fix unit prices before saving",
   unitPriceRequired: "Enter a price",
-  openingQtyRequired: "Enter opening quantity",
-  lowStockAlert: "Low stock alert",
+  openingQtyRequired: "Opening quantity cannot be negative",
+  lowStockAlert: "Low stock alert (optional)",
   lowStockHint:
     "Alerts when overall stock — total remaining qty from all open lots (all branches) — reaches this or below.",
-  lowStockRequired: "Enter a low stock quantity",
   unitPricesIncomplete: "Enter all prices on every unit",
   detailTitle: "Product details",
   detailSubtitle: "Stock, prices, lots, and branch quantity",
@@ -142,7 +188,7 @@ export const PRODUCT_COPY = {
   detailSku: "SKU",
   detailType: "Type",
   detailLotProfit: "Realized profit from this lot",
-  detailVsCost: "vs cost",
+  detailVsCost: "margin",
   detailWholesaleProfit: "Wholesale",
   detailRetailProfit: "Retail",
   detailBranches: (count: number) => `${count} branch${count === 1 ? "" : "es"}`,
@@ -188,6 +234,7 @@ export const LOT_COPY = {
   transferDescription: "Move stock between branches",
   editAction: "Edit",
   editDescription: "Adjust quantities, supplier, and prices",
+  editDeniedCashier: "Only owners and managers can edit lots",
   branchStockTitle: "Branch stock",
   branchStockHint: "Quantity left in each branch for this lot",
   branchSplitTitle: "Split between branches",
@@ -205,6 +252,12 @@ export const LOT_COPY = {
   filterCity: "City",
   valueLeftColumn: "Value left",
   filteredValueTotal: "Total value left",
+  loadFailed: "Could not load lots",
+  retry: "Retry",
+  expiryLabel: "Expiry",
+  expiryHint: "Optional. Leave blank to clear.",
+  expiryBeforeReceived: "Expiry cannot be before the received date",
+  expiryPastWarning: "Expiry is in the past — saved anyway",
 } as const;
 
 export const LOT_FILTER_FIELDS: {
@@ -245,6 +298,7 @@ export const LOT_TABLE_COLUMNS = [
   { id: "original", label: "Original" },
   { id: "left", label: "Left" },
   { id: "damaged", label: "Damaged" },
+  { id: "expiry", label: "Expiry" },
 ];
 
 export const CATEGORY_TABLE_COLUMNS = [

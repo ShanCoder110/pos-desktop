@@ -10,6 +10,21 @@ pub fn parse_uuid(value: &str, field: &str) -> Result<Uuid, AppError> {
     Uuid::parse_str(value).map_err(|_| AppError::Validation(format!("{field} must be a UUID.")))
 }
 
+/// Bind a UUID as a 16-byte SQLite BLOB (never as hyphenated TEXT).
+/// Prefer this over `Uuid.into()` on INSERT/UPDATE paths that historically
+/// risked `uuid.to_string().into()` writing 36-char TEXT and breaking SeaORM decode.
+pub fn uuid_blob(id: Uuid) -> sea_orm::Value {
+    sea_orm::Value::Bytes(Some(id.as_bytes().to_vec()))
+}
+
+/// Bind an optional UUID as BLOB, or SQL NULL.
+pub fn optional_uuid_blob(id: Option<Uuid>) -> sea_orm::Value {
+    match id {
+        Some(value) => uuid_blob(value),
+        None => sea_orm::Value::Bytes(None),
+    }
+}
+
 pub fn parse_optional_uuid(value: Option<&str>, field: &str) -> Result<Option<Uuid>, AppError> {
     value.map(|raw| parse_uuid(raw, field)).transpose()
 }

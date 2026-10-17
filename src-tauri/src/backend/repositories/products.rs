@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::backend::{
     dto::{ProductBranchStockResponse, ProductListQuery, ProductResponse, ProductSellUnitResponse},
-    entities::{product, product_lot, product_unit, Product, ProductUnit},
+    entities::{product, product_lot, product_unit, unit, Product, ProductUnit, Unit},
     errors::AppError,
     util::parse_uuid,
 };
@@ -198,6 +198,35 @@ impl ProductRepository {
             .await?)
     }
 
+    /// Case-insensitive SKU collision check (active products only).
+    pub async fn sku_taken<C: ConnectionTrait>(
+        database: &C,
+        sku: &str,
+        exclude_id: Option<Uuid>,
+    ) -> Result<bool, AppError> {
+        let sql = if exclude_id.is_some() {
+            "SELECT COUNT(*) AS count FROM products
+             WHERE deleted_at IS NULL AND lower(sku) = lower(?) AND id != ?"
+        } else {
+            "SELECT COUNT(*) AS count FROM products
+             WHERE deleted_at IS NULL AND lower(sku) = lower(?)"
+        };
+        let mut values: Vec<sea_orm::Value> = vec![sku.into()];
+        if let Some(id) = exclude_id {
+            values.push(id.into());
+        }
+        let count = CountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            sql,
+            values,
+        ))
+        .one(database)
+        .await?
+        .map(|row| row.count)
+        .unwrap_or(0);
+        Ok(count > 0)
+    }
+
     pub async fn soft_delete(database: &DatabaseConnection, id: Uuid) -> Result<bool, AppError> {
         let Some(model) = Self::model(database, id).await? else {
             return Ok(false);
@@ -270,34 +299,72 @@ impl ProductRepository {
         units: Vec<product_unit::ActiveModel>,
     ) -> Result<(), AppError> {
         let now = chrono::Utc::now();
+        // Clear stock-unit flags first. The real flag is set after every row is written.
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE product_units SET is_base = 0, is_default_sale_unit = 0, updated_at = ? WHERE product_id = ?",
+                [now.into(), product_id.into()],
+            ))
+            .await?;
         let existing = ProductUnit::find()
             .filter(product_unit::Column::ProductId.eq(product_id))
             .all(transaction)
             .await?;
         let mut kept_ids = HashSet::new();
+        let mut base_id = None;
+        let mut default_id = None;
 
-        for incoming in units {
+        for mut incoming in units {
+            let want_base = active_value(&incoming.is_base).unwrap_or(false);
+            let want_default = active_value(&incoming.is_default_sale_unit).unwrap_or(false);
+            incoming.is_base = Set(false);
+            incoming.is_default_sale_unit = Set(false);
             let incoming_id = active_value(&incoming.id);
-            let unit_id = active_value(&incoming.unit_id)
-                .ok_or_else(|| AppError::internal("sellUnits.unitId is required"))?;
-            let conversion = active_value(&incoming.conversion_to_base)
-                .ok_or_else(|| AppError::internal("sellUnits.contains is required"))?;
-
+            let incoming_unit_id = active_value(&incoming.unit_id);
+            let incoming_conversion = active_value(&incoming.conversion_to_base);
             let matched = incoming_id
                 .and_then(|id| existing.iter().find(|row| row.id == id))
                 .or_else(|| {
-                    existing
-                        .iter()
-                        .find(|row| row.unit_id == unit_id && row.conversion_to_base == conversion)
+                    existing.iter().find(|row| {
+                        Some(row.unit_id) == incoming_unit_id
+                            && Some(row.conversion_to_base) == incoming_conversion
+                    })
                 });
 
-            if let Some(row) = matched {
+            let id = if let Some(row) = matched {
                 merge_unit(row, incoming, now).update(transaction).await?;
                 kept_ids.insert(row.id);
+                row.id
             } else {
                 let model = incoming.insert(transaction).await?;
                 kept_ids.insert(model.id);
+                model.id
+            };
+            if want_base {
+                base_id = Some(id);
             }
+            if want_default {
+                default_id = Some(id);
+            }
+        }
+        if let Some(id) = base_id {
+            transaction
+                .execute_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "UPDATE product_units SET is_base = 1 WHERE id = ?",
+                    [id.into()],
+                ))
+                .await?;
+        }
+        if let Some(id) = default_id {
+            transaction
+                .execute_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "UPDATE product_units SET is_default_sale_unit = 1 WHERE id = ?",
+                    [id.into()],
+                ))
+                .await?;
         }
 
         for row in existing.iter() {
@@ -335,6 +402,7 @@ fn merge_unit(
         unit_id: incoming.unit_id,
         display_name: incoming.display_name,
         conversion_to_base: incoming.conversion_to_base,
+        factor_direction: incoming.factor_direction,
         cost_reference: incoming.cost_reference,
         minimum_price: incoming.minimum_price,
         wholesale_price: incoming.wholesale_price,
@@ -389,13 +457,30 @@ fn build_conditions(
         values.push(active.into());
     }
     if let Some(search) = &query.page.search {
-        parts.push("(lower(p.name) LIKE ? OR lower(p.sku) LIKE ? OR lower(p.barcode) LIKE ? OR lower(c.name) LIKE ?)".to_owned());
+        // Case-insensitive partial match on name/sku/barcode/category/unit barcodes.
+        // Also match hyphen/space-stripped SKU/barcode so "pmx001" hits "PMX-001".
+        parts.push(
+            "(lower(p.name) LIKE ? OR lower(p.sku) LIKE ? OR lower(p.barcode) LIKE ? OR lower(c.name) LIKE ? OR EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.deleted_at IS NULL AND lower(COALESCE(pu.barcode, '')) LIKE ?) OR replace(replace(lower(p.sku), '-', ''), ' ', '') LIKE ? OR replace(replace(lower(COALESCE(p.barcode, '')), '-', ''), ' ', '') LIKE ? OR EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.deleted_at IS NULL AND replace(replace(lower(COALESCE(pu.barcode, '')), '-', ''), ' ', '') LIKE ?))"
+                .to_owned(),
+        );
         let needle = format!("%{}%", search.to_lowercase());
+        let compact = format!(
+            "%{}%",
+            search
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .flat_map(|c| c.to_lowercase())
+                .collect::<String>()
+        );
         values.extend([
             needle.clone().into(),
             needle.clone().into(),
             needle.clone().into(),
+            needle.clone().into(),
             needle.into(),
+            compact.clone().into(),
+            compact.clone().into(),
+            compact.into(),
         ]);
     }
     crate::backend::util::push_in_uuids(
@@ -488,10 +573,18 @@ async fn hydrate(
     let ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
     let branch_stocks = load_branch_stocks(database, &ids).await?;
     let unit_models = ProductUnit::find()
-        .filter(product_unit::Column::ProductId.is_in(ids))
+        .filter(product_unit::Column::ProductId.is_in(ids.clone()))
         .filter(product_unit::Column::DeletedAt.is_null())
         .all(database)
         .await?;
+    let master_ids: Vec<Uuid> = unit_models.iter().map(|unit| unit.unit_id).collect();
+    let master_symbols: HashMap<Uuid, String> = Unit::find()
+        .filter(unit::Column::Id.is_in(master_ids))
+        .all(database)
+        .await?
+        .into_iter()
+        .map(|unit| (unit.id, unit.symbol))
+        .collect();
     let mut units_by_product: HashMap<Uuid, Vec<product_unit::Model>> = HashMap::new();
     for unit in unit_models {
         units_by_product
@@ -504,14 +597,15 @@ async fn hydrate(
         .into_iter()
         .map(|row| {
             let mut units = units_by_product.remove(&row.id).unwrap_or_default();
-            units.sort_by(|left, right| left.sort_order.cmp(&right.sort_order));
+            units.sort_by_key(|left| left.sort_order);
             let base = units
                 .iter()
                 .find(|unit| unit.is_base)
                 .or_else(|| units.first());
-            let first_bigger = units
-                .iter()
-                .find(|unit| unit.conversion_to_base > Decimal::ONE);
+            let first_bigger = units.iter().find(|unit| {
+                unit.conversion_to_base > Decimal::ONE
+                    && unit.factor_direction != crate::backend::qty::FACTOR_DIVIDE
+            });
             let cost = if row.current_cost > Decimal::ZERO {
                 row.current_cost
             } else {
@@ -539,26 +633,30 @@ async fn hydrate(
             let sell_units: Vec<ProductSellUnitResponse> = units
                 .into_iter()
                 .map(|unit| {
-                    let symbol = if unit.is_base {
-                        row.unit_symbol.clone()
-                    } else {
-                        unit.display_name.clone()
-                    };
+                    let symbol = master_symbols
+                        .get(&unit.unit_id)
+                        .cloned()
+                        .unwrap_or_else(|| unit.display_name.clone());
                     ProductSellUnitResponse {
                         id: unit.id.to_string(),
                         name: unit.display_name,
                         symbol,
                         contains: decimal(unit.conversion_to_base),
-                        cost: decimal(
-                            unit.cost_reference
-                                .unwrap_or(row.current_cost * unit.conversion_to_base),
-                        ),
+                        cost: decimal(unit.cost_reference.unwrap_or_else(|| {
+                            row.current_cost
+                                * crate::backend::qty::to_base_qty(
+                                    Decimal::ONE,
+                                    unit.conversion_to_base,
+                                    &unit.factor_direction,
+                                )
+                        })),
                         min: decimal(unit.minimum_price),
                         wholesale: decimal(unit.wholesale_price),
                         price: decimal(unit.retail_price),
                         barcode: unit.barcode.unwrap_or_default(),
                         is_base: unit.is_base,
                         is_default: unit.is_default_sale_unit,
+                        factor_direction: unit.factor_direction,
                     }
                 })
                 .collect();
@@ -603,6 +701,7 @@ async fn hydrate(
                 branch_stock,
                 components: Vec::new(),
                 sell_units,
+                matched_unit_id: None,
                 is_active: row.is_active,
                 created_at: row.created_at.to_rfc3339(),
                 updated_at: row.updated_at.to_rfc3339(),

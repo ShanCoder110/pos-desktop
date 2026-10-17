@@ -13,6 +13,27 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | POS / product list prices from **open** FIFO lot cost + unit M/W/R | ✅ cost from oldest remaining lot |
 | Repair / production / replacement FIFO still **single branch** | 🟡 not using fallback |
 | Unit tests for FIFO consume / split lots | 🔴 still missing |
+| Stock count / adjust API (`POST /stock/count`) — FIFO down, newest-lot/ADJUSTMENT-lot up | ✅ Step 10 backend |
+| Stock count UI (Products → Stock count; owner/manager; history; Left locked hint) | ✅ Step 11 |
+| Lot raw `remaining` edit locked; quantity changes via stock count | ✅ |
+| Reconcile `product.stock` = Σ branch_lots = Σ lot remaining (+ migration repair) | ✅ |
+| Migration 000019 invoices rebuild: single-connection FK off + foreign_key_check | ✅ Step 12 |
+| Lot allocation mismatch names sum X vs remaining Y (+ Stock count hint) | ✅ Step 13 |
+| Invoices Edit → `/pos?edit=<id>` (list + detail); AbortError not toasted on POS edit load/save | ✅ Step 14 |
+| Cashier Products hub: catalog loads even if a side query fails; Stock count tab waits for role | ✅ Step 14 |
+| Invoice edit: preload customer/payments; block RETURNED/PARTIALLY_RETURNED (422); no walk-in credit switch | ✅ Step 15 |
+| Void blocked on RETURNED/PARTIALLY_RETURNED (UI + 422); stock-count max 1e6 base; Pack Left mixed qty; shared datetime; cashier GET /stock/movements?movementType=ADJUSTMENT → 403 | ✅ Step 16 |
+| No-op revise skips reverse/repost (0 ledger/payment/movement rows); split edit preloads CASH+MOBILE amounts | ✅ Step 17 |
+| Edit prefill uses sale tenders only (not later payment allocations); revise preserves allocated paid; block total &lt; allocated | ✅ Step 18 |
+| Edit totals count allocated as paid (due/after-bill); walk-in customer switch resets price mode to retail | ✅ Step 19 |
+| SKU search case/partial/hyphen-insensitive (PMX-001) | ✅ Step 20 |
+| Customer credit caps removed (won't do / Shan); migration 000022 drops the column | ✅ Step 22 |
+| Edit Left stock = on-hand + this invoice base qty − cart holds (no double-add) | ✅ Step 20 |
+| POS stock refetch on edit load, after sale, and tab focus; backend rejects oversell | ✅ Step 21 |
+| Reorder PO create drawer: per-line unit selector; qty/cost → base on save | ✅ Step 21 |
+| Stock-count downs = shrinkage (cost only), never sold/revenue/profit on lot drawer | ✅ Step 24 |
+| Invoices/Returns/Transactions/Stock When = `formatTableDateTime`; pack qty = mixed whole+pieces | ✅ Step 24 |
+| Voided credit keeps `creditAmount` for audit; open-credit/profit-hold exclude CANCELLED | ✅ Step 24 |
 
 ## UI agent-mistakes audit (2026-09-19)
 
@@ -55,7 +76,8 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | ✅ Codes | Stable `CODE_*` + `ConflictCoded`; phone duplicates map to specific codes |
 | ✅ FE mapper | `ApiError` + `mapApiError` / `handleApiError`; `apiRequest` throws `ApiError` |
 | 🔴 Call sites | Most pages still use ad-hoc `catch` + `shortError`; migrate to `handleApiError` opportunistically |
-| 🔴 Empty catches | e.g. logout `catch {}` (intentional — commented); some `.catch(() => …)` swallowers on list loads |
+| ⚠️ Empty catches | logout `catch {}` intentional; Lots + Stock count list loads now surface error + Retry (Step 23). Other pages may still soft-fail to empty. |
+| ✅ UUID storage | `uuid_blob` helper + migration `000023` converts text/blob36 → 16-byte BLOB; stock-count writers bind bytes |
 
 ## Testing
 

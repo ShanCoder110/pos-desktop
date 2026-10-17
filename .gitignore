@@ -38,3 +38,4 @@ src-tauri/bindings/
 .env.*.local
 src-tauri/.env
 src-tauri/.env.local
+dukan.db

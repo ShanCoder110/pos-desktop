@@ -16,7 +16,13 @@ export function Slider({
       <span className="field-label [font-size:12px] [font-weight:600] [color:var(--sub)]">
         {label} · {value}
       </span>
-      <input type="range" min={min} max={max} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      <input
+        type="range"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
     </label>
   );
 }

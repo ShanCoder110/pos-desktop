@@ -97,8 +97,15 @@ export function listExpenseCategories(signal?: AbortSignal) {
     API_ROUTES.expenseCategories,
     { signal },
   ).then((payload) =>
-    (Array.isArray(payload) ? payload : payload.data ?? []).map(mapExpenseCategory),
+    (Array.isArray(payload) ? payload : (payload.data ?? [])).map(mapExpenseCategory),
   );
+}
+
+export function createExpenseCategory(name: string) {
+  return apiRequest<ExpenseCategoryResponse>(API_ROUTES.expenseCategories, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  }).then(mapExpenseCategory);
 }
 
 export function listExpenses(
@@ -170,10 +177,9 @@ export function reportsAnalytics(
   params: { from?: string; to?: string } = {},
   signal?: AbortSignal,
 ) {
-  return apiRequest<AnalyticsReport>(
-    `${API_ROUTES.reportsAnalytics}${queryString(params)}`,
-    { signal },
-  );
+  return apiRequest<AnalyticsReport>(`${API_ROUTES.reportsAnalytics}${queryString(params)}`, {
+    signal,
+  });
 }
 
 export function getLocalizationSettings(signal?: AbortSignal) {

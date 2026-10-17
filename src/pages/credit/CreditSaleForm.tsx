@@ -16,13 +16,16 @@ import {
   TextInput,
   THead,
   Th,
+  UnitSegmentedControl,
 } from "@/components/common";
 import { CREDIT_COPY } from "@/shared/constants/customers";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { useSettings } from "@/shared/settings";
 import type { Product, ProductSellUnit } from "@/shared/types";
+import { stockToDisplayedQuantity } from "@/utils/unitConversion";
 import { cn, creditState, limitMoneyDraft, money } from "@/utils/format";
 import { productSellUnits, resolveProductSellUnit } from "@/pages/credit/creditSaleUtils";
+import { creditTierPrice, stockPerUnit, toBaseQty, type SalePriceTier } from "@/utils/salePricing";
 import { formatStockQty } from "@/pages/products/productQty";
 
 type CreditPriceMode = "MINIMUM" | "WHOLESALE" | "RETAIL";
@@ -66,15 +69,15 @@ const PRICE_MODES: { id: CreditPriceMode; label: string }[] = [
 export const CREDIT_SALE_FORM_ID = "credit-sale-form";
 
 function priceFor(unit: ProductSellUnit | undefined, mode: CreditPriceMode) {
-  if (!unit) return 0;
-  if (mode === "MINIMUM") return unit.min;
-  if (mode === "WHOLESALE") return unit.wholesale;
-  return unit.price;
+  const tier: SalePriceTier =
+    mode === "MINIMUM" ? "minimum" : mode === "WHOLESALE" ? "wholesale" : "retail";
+  return creditTierPrice(unit, tier);
 }
 
 function availableInUnit(product: Product, unit: ProductSellUnit, usedBase: number) {
-  const factor = unit.contains > 0 ? unit.contains : 1;
-  return Math.max(0, (Math.max(0, product.stock) - usedBase) / factor);
+  const per = stockPerUnit(unit);
+  if (per <= 0) return 0;
+  return Math.max(0, (Math.max(0, product.stock) - usedBase) / per);
 }
 
 export function CreditSaleForm({
@@ -225,7 +228,7 @@ export function CreditSaleForm({
       setError(`Price cannot be below ${money(unit.min)}.`);
       return;
     }
-    const baseQuantity = quantity * (unit.contains > 0 ? unit.contains : 1);
+    const baseQuantity = toBaseQty(product, unit.id, quantity);
     setError("");
     setLines((prev) => [
       ...prev,
@@ -288,7 +291,7 @@ export function CreditSaleForm({
         const unit = product ? resolveProductSellUnit(product, next.productUnitId) : undefined;
         if (unit) {
           next.unitName = unit.name || product?.unit || line.unitName;
-          next.baseQuantity = next.quantity * (unit.contains > 0 ? unit.contains : 1);
+          next.baseQuantity = product ? toBaseQty(product, unit.id, next.quantity) : next.quantity;
         }
         return next;
       }),
@@ -300,9 +303,12 @@ export function CreditSaleForm({
     const unit = product ? resolveProductSellUnit(product, productUnitId) : undefined;
     if (!unit) return;
     const nextPrice = priceFor(unit, line.priceMode);
+    const quantity = stockToDisplayedQuantity(unit, line.baseQuantity);
     updateLine(line.id, {
       productUnitId,
       unitName: unit.name || product?.unit || line.unitName,
+      quantity,
+      quantityDraft: String(quantity),
       unitPrice: nextPrice,
       unitPriceDraft: String(nextPrice),
     });
@@ -357,32 +363,42 @@ export function CreditSaleForm({
                 <span className="text-[10px] font-bold uppercase tracking-wide text-muted">
                   Unit
                 </span>
-                <div className="flex min-h-9 flex-wrap gap-1 rounded-lg border border-line bg-paper p-1">
-                  {unitOptions.map((unit, index) => (
-                    <button
-                      key={unit.id}
-                      ref={(element) => {
-                        unitRefs.current[unit.id] = element;
-                      }}
-                      type="button"
-                      tabIndex={selectedUnit.id === unit.id ? 0 : -1}
-                      className={cn(
-                        "min-h-7 flex-1 rounded-md border-0 px-3 text-[11px] font-bold",
-                        selectedUnit.id === unit.id
-                          ? "bg-accent text-white"
-                          : "bg-transparent text-sub hover:bg-bg",
-                      )}
-                      onClick={() => pickUnit(unit.id)}
-                      onKeyDown={(event) => onUnitKeyDown(event, index)}
-                    >
-                      {unit.name || "Unit"}
-                    </button>
-                  ))}
-                </div>
+                <UnitSegmentedControl
+                  units={unitOptions.map((unit) => ({ id: unit.id, label: unit.name || "Unit" }))}
+                  value={selectedUnit.id}
+                  onChange={pickUnit}
+                  onButtonRef={(unitId, element) => {
+                    unitRefs.current[unitId] = element;
+                  }}
+                  onKeyDown={onUnitKeyDown}
+                />
               </div>
             ) : null}
 
-            <div className="grid grid-cols-[110px_minmax(0,1fr)_120px] items-end gap-2">
+            <Field label="Price tier (for selected unit)">
+              <div className="grid grid-cols-3 gap-1 rounded-lg border border-line bg-paper p-1">
+                {PRICE_MODES.map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    className={cn(
+                      "flex min-h-[44px] flex-col items-center justify-center rounded-md border-0 px-2 text-[10px] font-bold",
+                      draft.priceMode === mode.id
+                        ? "bg-accent-bg text-accent-deep"
+                        : "bg-transparent text-muted hover:bg-bg",
+                    )}
+                    onClick={() => pickPriceMode(mode.id)}
+                  >
+                    <span>{mode.label}</span>
+                    <span className="text-[11px] tabular-nums">
+                      {money(priceFor(selectedUnit, mode.id))}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </Field>
+
+            <div className="grid grid-cols-[110px_minmax(0,1fr)] items-end gap-2">
               <Field label="Quantity">
                 <TextInput
                   inputRef={quantityRef}
@@ -400,26 +416,7 @@ export function CreditSaleForm({
                   }}
                 />
               </Field>
-              <Field label="Selling price">
-                <div className="grid h-[38px] grid-cols-3 gap-1 rounded-lg border border-line bg-paper p-1">
-                  {PRICE_MODES.map((mode) => (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      className={cn(
-                        "rounded-md border-0 px-2 text-[10px] font-bold",
-                        draft.priceMode === mode.id
-                          ? "bg-accent-bg text-accent-deep"
-                          : "bg-transparent text-muted hover:bg-bg",
-                      )}
-                      onClick={() => pickPriceMode(mode.id)}
-                    >
-                      {mode.label}
-                    </button>
-                  ))}
-                </div>
-              </Field>
-              <Field label="Price">
+              <Field label="Unit price">
                 <TextInput
                   inputMode="decimal"
                   maxLength={FIELD_LIMITS.moneyChars}
@@ -489,27 +486,14 @@ export function CreditSaleForm({
                     const product = activeProducts.find((row) => row.id === line.productId);
                     const units = product ? productSellUnits(product) : [];
                     return units.length > 1 ? (
-                      <div
-                        className="flex min-w-[120px] overflow-hidden rounded-lg border border-line bg-paper p-0.5"
-                        role="group"
-                        aria-label={`Unit for ${line.name}`}
-                      >
-                        {units.map((unit) => (
-                          <button
-                            key={unit.id}
-                            type="button"
-                            className={cn(
-                              "min-h-7 flex-1 rounded-md border-0 px-2 text-[10px] font-bold",
-                              unit.id === line.productUnitId
-                                ? "bg-accent text-white"
-                                : "bg-transparent text-muted hover:bg-bg",
-                            )}
-                            onClick={() => changeLineUnit(line, unit.id)}
-                          >
-                            {unit.name}
-                          </button>
-                        ))}
-                      </div>
+                      <UnitSegmentedControl
+                        units={units.map((unit) => ({ id: unit.id, label: unit.name }))}
+                        value={line.productUnitId}
+                        onChange={(unitId) => changeLineUnit(line, unitId)}
+                        ariaLabel={`Unit for ${line.name}`}
+                        className="min-w-[120px]"
+                        compact
+                      />
                     ) : (
                       <span className="text-[11px] font-medium text-sub">{line.unitName}</span>
                     );

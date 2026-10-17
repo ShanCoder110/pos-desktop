@@ -13,6 +13,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             if let Err(error) = Config::load() {
                 error!(target: LOG_TARGET, %error, "config load failed");

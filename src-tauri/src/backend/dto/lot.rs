@@ -1,8 +1,24 @@
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use validator::{Validate, ValidationError};
 
+use crate::backend::constants::MAX_STOCK_COUNT_BASE_UNITS;
+
 use super::PageQuery;
+
+/// Patch field: absent = leave unchanged; null/"" = clear; string = set.
+fn deserialize_patch_optional_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let inner = Option::<String>::deserialize(deserializer)?;
+    Ok(Some(inner.and_then(|text| {
+        let trimmed = text.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    })))
+}
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -83,6 +99,8 @@ pub struct BranchLotResponse {
 pub struct UpdateLotRequest {
     pub supplier_id: Option<String>,
     #[validate(custom(function = "non_negative_optional_decimal"))]
+    pub original_quantity: Option<Decimal>,
+    #[validate(custom(function = "non_negative_optional_decimal"))]
     pub remaining_quantity: Option<Decimal>,
     #[validate(custom(function = "non_negative_optional_decimal"))]
     pub damaged_quantity: Option<Decimal>,
@@ -94,6 +112,9 @@ pub struct UpdateLotRequest {
     pub wholesale: Option<Decimal>,
     #[validate(custom(function = "non_negative_optional_decimal"))]
     pub retail: Option<Decimal>,
+    /// Absent = leave unchanged; `null`/empty = clear; date string = set.
+    #[serde(default, deserialize_with = "deserialize_patch_optional_string")]
+    pub expiry_date: Option<Option<String>>,
     #[validate(nested)]
     #[serde(default)]
     pub branch_allocations: Vec<BranchAllocationInput>,
@@ -111,6 +132,16 @@ pub struct LotResponse {
     pub original_base_quantity: f64,
     pub remaining_base_quantity: f64,
     pub damaged_base_quantity: f64,
+    /// Committed sales (SALE/REPLACEMENT/PRODUCTION/REPAIR − RETURN). Never residual.
+    pub sold_base_quantity: f64,
+    /// Stock-count / adjustment downs that are not sales (cost only — never revenue/profit).
+    pub shrunk_base_quantity: f64,
+    /// Realized sale revenue for this lot (COMPLETED invoices only).
+    pub sold_revenue: f64,
+    /// Realized sale profit for this lot (revenue − FIFO COGS). Shrinkage is not included.
+    pub sold_profit: f64,
+    /// Shrinkage at lot FIFO cost (qty × purchase_price_per_base).
+    pub shrink_cost: f64,
     pub purchase_price_per_base: f64,
     pub received_date: String,
     pub expiry_date: Option<String>,
@@ -176,6 +207,8 @@ pub struct StockMovementResponse {
     pub displayed_quantity: f64,
     pub displayed_unit_name: String,
     pub base_quantity_delta: f64,
+    pub quantity_before: Option<f64>,
+    pub quantity_after: Option<f64>,
     pub unit_cost: Option<f64>,
     pub total_cost: Option<f64>,
     pub reference_type: String,
@@ -184,6 +217,68 @@ pub struct StockMovementResponse {
     pub occurred_at: String,
     pub created_by: String,
     pub created_at: String,
+}
+
+/// Count on-hand stock for one product at a branch, in any sell unit.
+#[derive(Clone, Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct StockCountRequest {
+    pub product_id: String,
+    #[serde(default)]
+    pub branch_id: Option<String>,
+    pub product_unit_id: String,
+    /// Displayed count in the chosen sell unit (converted to base server-side).
+    /// Rejects negatives; absolute cap is enforced on base units after conversion.
+    #[validate(custom(function = "stock_count_display_quantity"))]
+    pub counted_quantity: Decimal,
+    /// Required reason, max 200 characters.
+    #[validate(length(min = 1, max = 200))]
+    pub reason: String,
+    /// When true, also post a supplier ledger ADJUSTMENT (default off).
+    #[serde(default)]
+    pub adjust_supplier_payable: bool,
+    pub supplier_id: Option<String>,
+    pub supplier_amount: Option<Decimal>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockCountResponse {
+    pub id: String,
+    pub adjustment_number: String,
+    pub product_id: String,
+    pub branch_id: String,
+    pub product_unit_id: String,
+    pub displayed_unit_name: String,
+    pub counted_quantity: f64,
+    pub old_quantity: f64,
+    pub new_quantity: f64,
+    pub difference: f64,
+    pub reason: String,
+    pub movement_ids: Vec<String>,
+    pub created_adjustment_lot_id: Option<String>,
+    pub supplier_ledger_posted: bool,
+    pub occurred_at: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockReconcileFix {
+    pub product_id: String,
+    pub product_name: String,
+    pub lot_id: String,
+    pub lot_number: String,
+    pub lot_remaining: f64,
+    pub branch_lots_before: f64,
+    pub branch_lots_after: f64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockReconcileResponse {
+    pub checked_products: u64,
+    pub mismatched_before: u64,
+    pub fixes: Vec<StockReconcileFix>,
 }
 
 fn positive_decimal(value: &Decimal) -> Result<(), ValidationError> {
@@ -200,6 +295,20 @@ fn non_negative_decimal(value: &Decimal) -> Result<(), ValidationError> {
 
 fn non_negative_optional_decimal(value: &Decimal) -> Result<(), ValidationError> {
     non_negative_decimal(value)
+}
+
+/// Displayed counted qty: non-negative and not absurdly large before unit conversion.
+fn stock_count_display_quantity(value: &Decimal) -> Result<(), ValidationError> {
+    if *value < Decimal::ZERO {
+        return Err(ValidationError::new("must_be_non_negative"));
+    }
+    // Cap display input at the base-unit max (1:1 units); pack conversion is
+    // re-checked after to_base in the stock-count service.
+    let max = Decimal::from(MAX_STOCK_COUNT_BASE_UNITS);
+    if *value > max {
+        return Err(ValidationError::new("stock_count_too_large"));
+    }
+    Ok(())
 }
 
 fn validate_receive_lot(value: &ReceiveLotRequest) -> Result<(), ValidationError> {

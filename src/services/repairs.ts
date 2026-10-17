@@ -50,9 +50,12 @@ export function listRepairs(
   params: { page?: number; perPage?: number; branchId?: string; status?: string } = {},
   signal?: AbortSignal,
 ) {
-  return apiRequest<PaginatedResponse<RepairResponse>>(`${API_ROUTES.repairs}${queryString(params)}`, {
-    signal,
-  });
+  return apiRequest<PaginatedResponse<RepairResponse>>(
+    `${API_ROUTES.repairs}${queryString(params)}`,
+    {
+      signal,
+    },
+  );
 }
 
 export async function listAllRepairs(signal?: AbortSignal): Promise<RepairResponse[]> {

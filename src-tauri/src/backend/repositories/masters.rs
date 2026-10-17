@@ -36,8 +36,10 @@ impl MasterKind {
             Self::Category => "id, name, NULL AS symbol, NULL AS phone, NULL AS email, NULL AS address, description AS notes, is_active, NULL AS precision, NULL AS balance, NULL AS is_walk_in, NULL AS in_credit_book, NULL AS credit_sale_count, NULL AS open_credit_sale_count, NULL AS credit_sale_total, NULL AS collected_total, NULL AS profit_on_hold, NULL AS last_credit_sale_at, NULL AS city_id, NULL AS city_name, created_at, updated_at",
             Self::City => "id, name, NULL AS symbol, NULL AS phone, NULL AS email, NULL AS address, NULL AS notes, is_active, NULL AS precision, NULL AS balance, NULL AS is_walk_in, NULL AS in_credit_book, NULL AS credit_sale_count, NULL AS open_credit_sale_count, NULL AS credit_sale_total, NULL AS collected_total, NULL AS profit_on_hold, NULL AS last_credit_sale_at, NULL AS city_id, NULL AS city_name, created_at, updated_at",
             Self::Unit => "id, name, symbol, NULL AS phone, NULL AS email, NULL AS address, NULL AS notes, is_active, precision, NULL AS balance, NULL AS is_walk_in, NULL AS in_credit_book, NULL AS credit_sale_count, NULL AS open_credit_sale_count, NULL AS credit_sale_total, NULL AS collected_total, NULL AS profit_on_hold, NULL AS last_credit_sale_at, NULL AS city_id, NULL AS city_name, created_at, updated_at",
-            Self::Supplier => "id, name, NULL AS symbol, phone, email, address, notes, is_active, NULL AS precision, CAST((SELECT sle.balance_after FROM supplier_ledger_entries sle WHERE sle.supplier_id = suppliers.id ORDER BY sle.occurred_at DESC, sle.created_at DESC LIMIT 1) AS REAL) AS balance, NULL AS is_walk_in, NULL AS in_credit_book, NULL AS credit_sale_count, NULL AS open_credit_sale_count, NULL AS credit_sale_total, NULL AS collected_total, NULL AS profit_on_hold, NULL AS last_credit_sale_at, city_id, (SELECT c.name FROM cities c WHERE c.id = suppliers.city_id AND c.deleted_at IS NULL LIMIT 1) AS city_name, created_at, updated_at",
-            Self::Customer => "id, name, NULL AS symbol, phone, email, address, notes, is_active, NULL AS precision, CAST((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id ORDER BY cle.occurred_at DESC, cle.created_at DESC LIMIT 1) AS REAL) AS balance, is_walk_in, in_credit_book, (SELECT COUNT(*) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type = 'SALE') AS credit_sale_count, (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = customers.id AND i.credit_amount > 0 AND i.status = 'COMPLETED' AND i.deleted_at IS NULL) AS open_credit_sale_count, CAST(COALESCE((SELECT SUM(cle.debit) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type = 'SALE'), 0) AS REAL) AS credit_sale_total, CAST(COALESCE((SELECT SUM(cle.credit) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type IN ('PAYMENT_RECEIVED', 'PAYMENT')), 0) AS REAL) AS collected_total, CAST(COALESCE((SELECT SUM(ii.gross_profit * CASE WHEN i.total > 0 THEN i.credit_amount / i.total ELSE 0 END) FROM invoices i INNER JOIN invoice_items ii ON ii.invoice_id = i.id WHERE i.customer_id = customers.id AND i.credit_amount > 0 AND i.status = 'COMPLETED' AND i.deleted_at IS NULL), 0) AS REAL) AS profit_on_hold, (SELECT MAX(cle.occurred_at) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type = 'SALE') AS last_credit_sale_at, city_id, (SELECT c.name FROM cities c WHERE c.id = customers.city_id AND c.deleted_at IS NULL LIMIT 1) AS city_name, created_at, updated_at",
+            Self::Supplier => "id, name, NULL AS symbol, phone, email, address, notes, is_active, NULL AS precision, CAST((SELECT sle.balance_after FROM supplier_ledger_entries sle WHERE sle.supplier_id = suppliers.id ORDER BY sle.occurred_at DESC, sle.created_at DESC, sle.rowid DESC LIMIT 1) AS REAL) AS balance, NULL AS is_walk_in, NULL AS in_credit_book, NULL AS credit_sale_count, NULL AS open_credit_sale_count, NULL AS credit_sale_total, NULL AS collected_total, NULL AS profit_on_hold, NULL AS last_credit_sale_at, city_id, (SELECT c.name FROM cities c WHERE c.id = suppliers.city_id AND c.deleted_at IS NULL LIMIT 1) AS city_name, created_at, updated_at",
+            // Balance / sold / paid all come from the customer ledger so cards, list, and
+            // dashboard stay aligned. Sold nets SALE with revise ADJUSTMENTs (no double count).
+            Self::Customer => "id, name, NULL AS symbol, phone, email, address, notes, is_active, NULL AS precision, CAST((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id ORDER BY cle.occurred_at DESC, cle.created_at DESC, cle.rowid DESC LIMIT 1) AS REAL) AS balance, is_walk_in, in_credit_book, (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = customers.id AND i.status = 'COMPLETED' AND i.deleted_at IS NULL AND (i.credit_amount > 0 OR i.payment_status IN ('CREDIT', 'PARTIAL', 'RETURNED', 'PARTIALLY_RETURNED'))) AS credit_sale_count, (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = customers.id AND i.credit_amount > 0 AND i.status = 'COMPLETED' AND i.deleted_at IS NULL) AS open_credit_sale_count, CAST(COALESCE((SELECT SUM(cle.debit - cle.credit) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type NOT IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE')), 0) AS REAL) AS credit_sale_total, CAST(COALESCE((SELECT SUM(cle.credit - cle.debit) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE')), 0) AS REAL) AS collected_total, CAST(COALESCE((SELECT SUM(ii.gross_profit * CASE WHEN i.total > 0 THEN i.credit_amount / i.total ELSE 0 END) FROM invoices i INNER JOIN invoice_items ii ON ii.invoice_id = i.id WHERE i.customer_id = customers.id AND i.credit_amount > 0 AND i.status = 'COMPLETED' AND i.deleted_at IS NULL), 0) AS REAL) AS profit_on_hold, (SELECT MAX(cle.occurred_at) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type = 'SALE') AS last_credit_sale_at, city_id, (SELECT c.name FROM cities c WHERE c.id = customers.city_id AND c.deleted_at IS NULL LIMIT 1) AS city_name, created_at, updated_at",
         }
     }
 }
@@ -250,6 +252,58 @@ impl MasterRepository {
         Self::find(database, kind, id).await
     }
 
+    pub async fn customer_history_message(
+        database: &DatabaseConnection,
+        id: Uuid,
+    ) -> Result<Option<String>, AppError> {
+        #[derive(Debug, FromQueryResult)]
+        struct HistoryRow {
+            invoices: i64,
+            ledger: i64,
+            payments: i64,
+            returns: i64,
+            balance: f64,
+        }
+        let row = HistoryRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT (SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND deleted_at IS NULL) AS invoices, (SELECT COUNT(*) FROM customer_ledger_entries WHERE customer_id = ?) AS ledger, (SELECT COUNT(*) FROM payments WHERE customer_id = ?) AS payments, (SELECT COUNT(*) FROM sale_returns WHERE customer_id = ?) AS returns, COALESCE((SELECT balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1), 0) AS balance",
+            [id.into(), id.into(), id.into(), id.into(), id.into()],
+        ))
+        .one(database)
+        .await?
+        .ok_or_else(|| AppError::Internal("Customer history query failed.".into()))?;
+        if row.invoices == 0
+            && row.ledger == 0
+            && row.payments == 0
+            && row.returns == 0
+            && row.balance.abs() < 0.000001
+        {
+            return Ok(None);
+        }
+        let mut parts = Vec::new();
+        if row.invoices > 0 {
+            parts.push(format!("{} invoices", row.invoices));
+        }
+        if row.payments > 0 {
+            parts.push(format!("{} payments", row.payments));
+        }
+        if row.returns > 0 {
+            parts.push(format!("{} returns", row.returns));
+        }
+        if row.ledger > 0 {
+            parts.push(format!("{} ledger lines", row.ledger));
+        }
+        if row.balance.abs() >= 0.000001 {
+            let amount = (row.balance.abs() * 100.0).round() / 100.0;
+            let label = if row.balance < 0.0 { "Advance" } else { "Owes" };
+            parts.push(format!("{label} Rs {amount}"));
+        }
+        Ok(Some(format!(
+            "Cannot delete this customer: {}.",
+            parts.join(", ")
+        )))
+    }
+
     pub async fn soft_delete(
         database: &DatabaseConnection,
         kind: MasterKind,
@@ -372,8 +426,8 @@ fn conditions(kind: MasterKind, query: &PageQuery) -> (String, Vec<sea_orm::Valu
     (parts.join(" AND "), values)
 }
 
-const SUPPLIER_BALANCE_SQL: &str = "COALESCE((SELECT sle.balance_after FROM supplier_ledger_entries sle WHERE sle.supplier_id = suppliers.id ORDER BY sle.occurred_at DESC, sle.created_at DESC LIMIT 1), 0)";
-const CUSTOMER_BALANCE_SQL: &str = "COALESCE((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id ORDER BY cle.occurred_at DESC, cle.created_at DESC LIMIT 1), 0)";
+const SUPPLIER_BALANCE_SQL: &str = "COALESCE((SELECT sle.balance_after FROM supplier_ledger_entries sle WHERE sle.supplier_id = suppliers.id ORDER BY sle.occurred_at DESC, sle.created_at DESC, sle.rowid DESC LIMIT 1), 0)";
+const CUSTOMER_BALANCE_SQL: &str = "COALESCE((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id ORDER BY cle.occurred_at DESC, cle.created_at DESC, cle.rowid DESC LIMIT 1), 0)";
 
 fn push_like(
     parts: &mut Vec<String>,

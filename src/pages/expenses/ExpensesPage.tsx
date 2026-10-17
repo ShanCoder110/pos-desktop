@@ -6,6 +6,7 @@ import {
   Drawer,
   EmptyRow,
   Field,
+  HubExportMenu,
   KpiCard,
   PageHead,
   Pagination,
@@ -26,8 +27,14 @@ import { useQueryTab } from "@/hooks/useQueryTab";
 import { assignApiError, fieldMessage, requiredTrim } from "@/utils/form";
 import { limitMoneyDraft, money, shortError } from "@/utils/format";
 import { ensureSession } from "@/services/auth";
-import { createExpense, listAllExpenses, listExpenseCategories } from "@/services/finance";
+import {
+  createExpense,
+  createExpenseCategory,
+  listAllExpenses,
+  listExpenseCategories,
+} from "@/services/finance";
 import { listAllBranches, mapBranch } from "@/services/org";
+import type { TableExportColumn } from "@/utils/exportFile";
 
 const PAGE = 10;
 const EXPENSE_FORM_ID = "expense-form";
@@ -202,8 +209,16 @@ export function ExpensesPage() {
           .then((rows) => rows.map(mapBranch))
           .catch(() => []),
       ]);
+      let expenseCategories = categories;
+      if (expenseCategories.length === 0) {
+        try {
+          expenseCategories = [await createExpenseCategory("General")];
+        } catch {
+          expenseCategories = [];
+        }
+      }
       setRows(expenseRows);
-      setExpenseCategories(categories);
+      setExpenseCategories(expenseCategories);
       setBranches(branchRows);
     })();
     return () => controller.abort();
@@ -224,6 +239,15 @@ export function ExpensesPage() {
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const shown = filtered.slice((page - 1) * PAGE, page * PAGE);
 
+  const exportColumns: TableExportColumn<ExpenseRow>[] = [
+    { label: "Date", value: (row) => row.expenseDate },
+    { label: "Category", value: (row) => categoryName(row.categoryId) },
+    { label: "Description", value: (row) => row.description },
+    { label: "Branch", value: (row) => branchName(row.branchId) },
+    { label: "Method", value: (row) => row.paymentMethod },
+    { label: "Amount", value: (row) => row.amount },
+  ];
+
   async function saveExpense(values: {
     categoryId: string;
     branchId: string;
@@ -232,6 +256,9 @@ export function ExpensesPage() {
     description: string;
   }) {
     if (!edit) return;
+    if (!values.categoryId.trim()) {
+      throw new Error("Select a category");
+    }
     const created = await createExpense({
       categoryId: values.categoryId,
       amount: Number(values.amount),
@@ -292,14 +319,22 @@ export function ExpensesPage() {
       >
         <Table
           toolbar={
-            <SearchInput
-              value={q}
-              onChange={(v) => {
-                setQ(v);
-                setPage(1);
-              }}
-              placeholder="Description or category"
-            />
+            <div className="flex w-full flex-wrap items-center justify-between gap-2">
+              <SearchInput
+                value={q}
+                onChange={(v) => {
+                  setQ(v);
+                  setPage(1);
+                }}
+                placeholder="Description or category"
+              />
+              <HubExportMenu
+                columns={exportColumns}
+                rows={filtered}
+                filename={`expenses-${tab}`}
+                sheetName="Expenses"
+              />
+            </div>
           }
           footer={
             <Pagination

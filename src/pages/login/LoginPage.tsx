@@ -37,7 +37,7 @@ export function LoginPage() {
     return <Navigate to={routes.dashboard} replace />;
   }
 
-  const displayShop = shopName ?? "POS";
+  const displayShop = shopName ?? "Dukan";
 
   return (
     <AuthShell

@@ -8,6 +8,10 @@ const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts"],
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -17,7 +21,14 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
+    host: host || true,
+    allowedHosts: [".ngrok-free.app", ".ngrok.app", ".ngrok.io"],
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:38472",
+        changeOrigin: true,
+      },
+    },
     hmr: host
       ? {
           protocol: "ws",
@@ -27,6 +38,18 @@ export default defineConfig(async () => ({
       : undefined,
     watch: {
       ignored: ["**/src-tauri/**", "**/data/**", "**/*.sqlite3", "**/*.sqlite3-*"],
+    },
+  },
+  preview: {
+    port: 1420,
+    strictPort: true,
+    host: true,
+    allowedHosts: [".ngrok-free.app", ".ngrok.app", ".ngrok.io"],
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:38472",
+        changeOrigin: true,
+      },
     },
   },
 }));

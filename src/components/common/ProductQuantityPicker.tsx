@@ -3,6 +3,7 @@ import { AlertTriangle, Trash2 } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { ProductSearch } from "@/components/common/ProductSearch";
 import { TextInput } from "@/components/common/fields";
+import { UnitSegmentedControl } from "@/components/common/UnitSegmentedControl";
 import {
   formatStockQty,
   productSellUnits,
@@ -13,6 +14,11 @@ import {
 import type { Product } from "@/shared/types";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { cn, money } from "@/utils/format";
+import {
+  defaultTransactionUnit,
+  displayedToStockQuantity,
+  stockToDisplayedQuantity,
+} from "@/utils/unitConversion";
 
 export type ProductQuantityValue = {
   productId: string;
@@ -53,9 +59,7 @@ export function ProductQuantityPicker({
   const product = products.find((item) => item.id === value.productId);
   const units = product ? productSellUnits(product) : [];
   const selectedUnit = product
-    ? (units.find((unit) => unit.id === value.unitId) ??
-      units.find((unit) => unit.symbol === product.unit) ??
-      units[0])
+    ? (units.find((unit) => unit.id === value.unitId) ?? defaultTransactionUnit(product, units))
     : undefined;
   const hasUnitChoice = units.length > 1;
   const available =
@@ -77,7 +81,7 @@ export function ProductQuantityPicker({
         quantityRef.current?.select();
       }
     });
-  }, [product?.id, selectedUnit?.id]);
+  }, [product, selectedUnit]);
 
   function selectProduct(selected: Product | null) {
     if (!selected) {
@@ -85,7 +89,7 @@ export function ProductQuantityPicker({
       return;
     }
     const nextUnits = productSellUnits(selected);
-    const base = nextUnits.find((unit) => unit.symbol === selected.unit) ?? nextUnits[0];
+    const base = defaultTransactionUnit(selected, nextUnits);
     const availableQuantity = base ? qtyInUnit(nextUnits, selected.unit, base, selected.stock) : 0;
     const quantity = Math.min(Math.max(value.quantity || 1, 0), availableQuantity);
     nextFocus.current = nextUnits.length > 1 ? "unit" : "quantity";
@@ -102,13 +106,16 @@ export function ProductQuantityPicker({
     if (!product) return;
     const unit = units.find((item) => item.id === unitId);
     if (!unit) return;
+    const currentBase = selectedUnit
+      ? (value.baseQuantity ?? displayedToStockQuantity(selectedUnit, value.quantity || 1))
+      : 1;
     const nextAvailable = qtyInUnit(units, product.unit, unit, product.stock);
-    const quantity = Math.min(1, nextAvailable);
+    const quantity = Math.min(stockToDisplayedQuantity(unit, currentBase), nextAvailable);
     onChange({
       ...value,
       unitId,
       quantity,
-      baseQuantity: quantity * unitInStock(units, product.unit, unit),
+      baseQuantity: displayedToStockQuantity(unit, quantity),
     });
     if (moveToQuantity) {
       requestAnimationFrame(() => {
@@ -177,28 +184,18 @@ export function ProductQuantityPicker({
           {hasUnitChoice ? (
             <div className="grid gap-1.5">
               <span className="text-[10px] font-bold text-muted">Unit</span>
-              <div className="flex min-h-[38px] flex-wrap items-center gap-1 rounded-lg border border-line bg-paper p-1">
-                {units.map((unit, index) => (
-                  <button
-                    key={unit.id}
-                    ref={(element) => {
-                      unitRefs.current[unit.id] = element;
-                    }}
-                    type="button"
-                    tabIndex={selectedUnit.id === unit.id ? 0 : -1}
-                    className={cn(
-                      "min-h-7 flex-1 rounded-md border-0 px-2 text-[11px] font-bold",
-                      selectedUnit.id === unit.id
-                        ? "bg-accent text-white"
-                        : "bg-transparent text-sub hover:bg-bg",
-                    )}
-                    onClick={() => selectUnit(unit.id)}
-                    onKeyDown={(event) => onUnitKeyDown(event, index)}
-                  >
-                    {unit.name || unitLabel(unit.symbol || product.unit)}
-                  </button>
-                ))}
-              </div>
+              <UnitSegmentedControl
+                units={units.map((unit) => ({
+                  id: unit.id,
+                  label: unit.name || unitLabel(unit.symbol || product.unit),
+                }))}
+                value={selectedUnit.id}
+                onChange={selectUnit}
+                onButtonRef={(unitId, element) => {
+                  unitRefs.current[unitId] = element;
+                }}
+                onKeyDown={onUnitKeyDown}
+              />
             </div>
           ) : null}
 
@@ -217,7 +214,7 @@ export function ProductQuantityPicker({
                   ...value,
                   unitId: selectedUnit.id,
                   quantity,
-                  baseQuantity: quantity * unitInStock(units, product.unit, selectedUnit),
+                  baseQuantity: displayedToStockQuantity(selectedUnit, quantity),
                 });
               }}
               onKeyDown={(event) => {

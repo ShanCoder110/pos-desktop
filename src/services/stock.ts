@@ -27,6 +27,8 @@ export interface StockMovementResponse {
   displayedQuantity: number;
   displayedUnitName: string;
   baseQuantityDelta: number;
+  quantityBefore?: number | null;
+  quantityAfter?: number | null;
   unitCost?: number | null;
   totalCost?: number | null;
   referenceType: string;
@@ -35,6 +37,35 @@ export interface StockMovementResponse {
   occurredAt: string;
   createdBy: string;
   createdAt: string;
+}
+
+export interface StockCountPayload {
+  productId: string;
+  branchId?: string;
+  productUnitId: string;
+  countedQuantity: number;
+  reason: string;
+  adjustSupplierPayable?: boolean;
+  supplierId?: string;
+  supplierAmount?: number;
+}
+
+export interface StockCountResponse {
+  id: string;
+  adjustmentNumber: string;
+  productId: string;
+  branchId: string;
+  productUnitId: string;
+  displayedUnitName: string;
+  countedQuantity: number;
+  oldQuantity: number;
+  newQuantity: number;
+  difference: number;
+  reason: string;
+  movementIds: string[];
+  createdAdjustmentLotId?: string | null;
+  supplierLedgerPosted: boolean;
+  occurredAt: string;
 }
 
 export function mapStockRow(row: StockResponse, isManufactured = false): CatalogProduct {
@@ -59,19 +90,45 @@ export function mapStockMovement(row: StockMovementResponse): StockMovementRow {
     branchId: row.branchId,
     type: (row.movementType as StockMoveType) || "ADJUSTMENT",
     quantity: row.baseQuantityDelta,
+    quantityBefore: row.quantityBefore,
+    quantityAfter: row.quantityAfter,
+    displayedUnitName: row.displayedUnitName,
     referenceType: row.referenceType,
     referenceId: row.referenceId,
     notes: row.notes ?? "",
     createdBy: row.createdBy,
     createdAt: row.occurredAt || row.createdAt,
+    productName: row.productName,
   };
 }
 
-export function listStock(
-  params: { page?: number; perPage?: number; branchId?: string; productId?: string; lowStock?: boolean } = {},
+export function countStock(payload: StockCountPayload) {
+  return apiRequest<StockCountResponse>(API_ROUTES.stockCount, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listAdjustmentMovements(
+  params: { page?: number; perPage?: number; branchId?: string; productId?: string } = {},
   signal?: AbortSignal,
 ) {
-  return apiRequest<PaginatedResponse<StockResponse>>(`${API_ROUTES.stock}${queryString(params)}`, { signal });
+  return listStockMovements({ ...params, movementType: "ADJUSTMENT" }, signal);
+}
+
+export function listStock(
+  params: {
+    page?: number;
+    perPage?: number;
+    branchId?: string;
+    productId?: string;
+    lowStock?: boolean;
+  } = {},
+  signal?: AbortSignal,
+) {
+  return apiRequest<PaginatedResponse<StockResponse>>(`${API_ROUTES.stock}${queryString(params)}`, {
+    signal,
+  });
 }
 
 export async function listAllStock(signal?: AbortSignal): Promise<StockResponse[]> {
@@ -86,7 +143,13 @@ export async function listAllStock(signal?: AbortSignal): Promise<StockResponse[
 }
 
 export function listStockMovements(
-  params: { page?: number; perPage?: number; branchId?: string; productId?: string; movementType?: string } = {},
+  params: {
+    page?: number;
+    perPage?: number;
+    branchId?: string;
+    productId?: string;
+    movementType?: string;
+  } = {},
   signal?: AbortSignal,
 ) {
   return apiRequest<PaginatedResponse<StockMovementResponse>>(

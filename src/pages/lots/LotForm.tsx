@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Package, Plus } from "lucide-react";
 import {
   Button,
@@ -13,6 +14,7 @@ import {
 } from "@/components/common";
 import { LotBranchFields, type LotBranchRow } from "@/pages/lots/LotBranchFields";
 import { LotUnitLines } from "@/pages/products/LotFields";
+import { productsHref } from "@/shared/constants/products";
 import {
   baseUnit,
   biggerUnit,
@@ -164,6 +166,7 @@ export function LotForm({
   onSave: (lot: ProductLotRow, sellUnits?: ProductSellUnit[]) => void;
   onClose: () => void;
 }) {
+  const navigate = useNavigate();
   const rootRef = useRef<HTMLDivElement>(null);
   const draftUnitRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<LotTab>("lot");
@@ -232,6 +235,32 @@ export function LotForm({
       remainingQuantity: isNew
         ? Math.max(0, quantity - lot.damagedQuantity)
         : lot.remainingQuantity,
+      branchId: primary,
+      branchAllocations: active.map((row) => ({
+        branchId: row.branchId,
+        quantity: row.quantity,
+      })),
+    });
+  }
+
+  /** Keep the single active branch allocation aligned with Left so Save stays usable. */
+  function applyRemainingQuantity(quantity: number) {
+    const nextQty = Math.max(0, quantity);
+    const withQty = branchRows.filter((row) => row.quantity > 0);
+    let nextRows = branchRows;
+    if (withQty.length === 1) {
+      nextRows = branchRows.map((row) =>
+        row.branchId === withQty[0].branchId ? { ...row, quantity: nextQty } : row,
+      );
+    }
+    setBranchRows(nextRows);
+    const active = nextRows.filter((row) => row.quantity > 0);
+    const primary =
+      nextRows.find((row) => row.quantity > 0 && row.branchId === sessionBranchId)?.branchId ||
+      nextRows.find((row) => row.quantity > 0)?.branchId ||
+      "";
+    patch({
+      remainingQuantity: nextQty,
       branchId: primary,
       branchAllocations: active.map((row) => ({
         branchId: row.branchId,
@@ -472,12 +501,26 @@ export function LotForm({
         })),
       };
     }
+    const expiryRaw = (nextLot.expiryDate ?? "").trim();
+    const receivedDay = (nextLot.receivedAt || new Date().toISOString()).slice(0, 10);
+    if (expiryRaw) {
+      const expiryDay = expiryRaw.slice(0, 10);
+      if (expiryDay < receivedDay) {
+        toaster.error(LOT_COPY.expiryBeforeReceived);
+        setTab("lot");
+        return;
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      if (expiryDay < today) {
+        toaster.info(LOT_COPY.expiryPastWarning);
+      }
+    }
     onSave(
       {
         ...nextLot,
         ...lotPricesFromUnits(units, stockSymbol),
         receivedAt: nextLot.receivedAt || new Date().toISOString().slice(0, 10),
-        expiryDate: null,
+        expiryDate: expiryRaw ? expiryRaw.slice(0, 10) : null,
         createdBy: nextLot.createdBy || "u1",
       },
       units,
@@ -621,6 +664,15 @@ export function LotForm({
                     <TextInput value={lot.lotNumber} disabled />
                   </Field>
                 )}
+                <Field label={LOT_COPY.expiryLabel} hint={LOT_COPY.expiryHint}>
+                  <TextInput
+                    type="date"
+                    value={(lot.expiryDate ?? "").slice(0, 10)}
+                    onChange={(event) =>
+                      patch({ expiryDate: event.target.value ? event.target.value : null })
+                    }
+                  />
+                </Field>
               </div>
             </FormSection>
 
@@ -638,10 +690,11 @@ export function LotForm({
                     left={lot.remainingQuantity}
                     damaged={lot.damagedQuantity}
                     showLeft={!isNew}
+                    lockReceived={!isNew}
                     showQuantity
                     showPricing
-                    onReceived={applyReceivedQuantity}
-                    onLeft={(quantity) => patch({ remainingQuantity: quantity })}
+                    onReceived={isNew ? applyReceivedQuantity : undefined}
+                    onLeft={applyRemainingQuantity}
                     onDamaged={(quantity) =>
                       patch({
                         damagedQuantity: quantity,
@@ -651,6 +704,10 @@ export function LotForm({
                       })
                     }
                     onUnitPrice={setUnitPrice}
+                    onOpenStockCount={() => {
+                      onClose();
+                      navigate(productsHref("stock-count"));
+                    }}
                   />
                 </div>
                 {draftUnit && onAddProductUnit ? (

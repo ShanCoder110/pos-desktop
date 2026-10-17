@@ -41,8 +41,24 @@ export function ClaimsPage() {
   return (
     <div className="products-hub-panel [flex:1] [min-height:0] [min-width:0] [display:flex] [flex-direction:column] [overflow:hidden]">
       <Table
-        toolbar={<SearchInput value={q} onChange={(v) => { setQ(v); setPage(1); }} placeholder="Search name, SKU, category" />}
-        footer={<Pagination page={Math.min(page, pages)} pages={pages} total={rows.length} onChange={setPage} />}
+        toolbar={
+          <SearchInput
+            value={q}
+            onChange={(v) => {
+              setQ(v);
+              setPage(1);
+            }}
+            placeholder="Search name, SKU, category"
+          />
+        }
+        footer={
+          <Pagination
+            page={Math.min(page, pages)}
+            pages={pages}
+            total={rows.length}
+            onChange={setPage}
+          />
+        }
       >
         <THead>
           <tr>

@@ -8,8 +8,9 @@ use crate::backend::{
     constants::{
         ERROR_CLAIM_NOT_FOUND, ERROR_CUSTOMER_NOT_FOUND, ERROR_INSUFFICIENT_STOCK,
         ERROR_INVOICE_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND, ERROR_RETURN_NOT_FOUND,
-        LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LOT_SOURCE_RETURN, PAYMENT_DIRECTION_IN,
-        PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED, REFERENCE_RETURN,
+        LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LEDGER_RETURN, LOT_SOURCE_RETURN,
+        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED,
+        PAYMENT_STATUS_PARTIALLY_RETURNED, PAYMENT_STATUS_RETURNED, REFERENCE_RETURN,
         STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN,
     },
     context::RequestContext,
@@ -20,17 +21,13 @@ use crate::backend::{
         CustomerPaymentResponse, ReturnItemResponse, ReturnListQuery, ReturnResponse,
     },
     errors::AppError,
+    repositories::{LedgerEntryInput, LedgerParty, LedgerRepository},
     util::{money_value, now_utc, parse_optional_uuid, parse_uuid, quantity, trimmed},
 };
 
 #[derive(Debug, FromQueryResult)]
 struct CountRow {
     count: i64,
-}
-
-#[derive(Debug, FromQueryResult)]
-struct BalanceRow {
-    balance_after: Decimal,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -79,6 +76,8 @@ struct CustomerLedgerListRow {
 struct InvoiceMeta {
     branch_id: Uuid,
     customer_id: Option<Uuid>,
+    invoice_number: String,
+    credit_amount: Decimal,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -86,12 +85,19 @@ struct InvoiceItemMeta {
     product_id: Uuid,
     conversion_to_base: Decimal,
     unit_name: String,
+    displayed_quantity: Decimal,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct ReturnedQtyRow {
+    returned: Decimal,
 }
 
 #[derive(Debug, FromQueryResult)]
 struct UnitMeta {
     display_name: String,
     conversion_to_base: Decimal,
+    factor_direction: String,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -180,7 +186,7 @@ impl CreditRepository {
         ensure_customer(database, customer_id).await?;
         let rows = LedgerRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, customer_id, branch_id, type AS entry_type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_at FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at ASC, created_at ASC",
+            "SELECT id, customer_id, branch_id, type AS entry_type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_at FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at ASC, created_at ASC, rowid ASC",
             [customer_id.into()],
         ))
         .all(database)
@@ -239,24 +245,17 @@ impl CreditRepository {
             .clone()
             .filter(|v| !v.trim().is_empty())
             .unwrap_or_else(|| format!("cust-pay-{payment_id}"));
-        let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-            [customer_id.into()],
-        ))
-        .one(transaction)
-        .await?
-        .map(|row| row.balance_after)
-        .unwrap_or(Decimal::ZERO);
+        let previous =
+            LedgerRepository::current_balance(transaction, LedgerParty::Customer(customer_id))
+                .await?;
         // Positive balance = customer owes (collect). Negative = advance (refund).
         let collecting = previous >= Decimal::ZERO;
-        let (direction, entry_type, debit, credit, balance_after) = if collecting {
+        let (direction, entry_type, debit, credit) = if collecting {
             (
                 PAYMENT_DIRECTION_IN,
                 LEDGER_PAYMENT_RECEIVED,
                 Decimal::ZERO,
                 amount,
-                previous - amount,
             )
         } else {
             (
@@ -264,9 +263,15 @@ impl CreditRepository {
                 LEDGER_PAYMENT_MADE,
                 amount,
                 Decimal::ZERO,
-                previous + amount,
             )
         };
+        let ledger_note = trimmed(&request.notes).unwrap_or_else(|| {
+            if collecting {
+                "Customer payment".into()
+            } else {
+                "Customer refund".into()
+            }
+        });
 
         transaction
             .execute_raw(Statement::from_sql_and_values(
@@ -310,34 +315,27 @@ impl CreditRepository {
                 ],
             ))
             .await?;
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "INSERT INTO customer_ledger_entries (id, customer_id, branch_id, type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    ledger_id.into(),
-                    customer_id.into(),
-                    context.branch_id.into(),
-                    entry_type.into(),
-                    payment_id.into(),
-                    debit.into(),
-                    credit.into(),
-                    balance_after.into(),
-                    trimmed(&request.notes)
-                        .unwrap_or_else(|| {
-                            if collecting {
-                                "Customer payment".into()
-                            } else {
-                                "Customer refund".into()
-                            }
-                        })
-                        .into(),
-                    now.into(),
-                    context.user_id.into(),
-                    now.into(),
-                ],
-            ))
-            .await?;
+        let balance_after = LedgerRepository::post_entry(
+            transaction,
+            LedgerEntryInput {
+                id: Some(ledger_id),
+                party: LedgerParty::Customer(customer_id),
+                branch_id: context.branch_id,
+                entry_type,
+                debit,
+                credit,
+                notes: Some(&ledger_note),
+                occurred_at: now,
+                created_by: context.user_id,
+                purchase_order_id: None,
+                goods_receipt_id: None,
+                money_transaction_id: None,
+                invoice_id: None,
+                payment_id: Some(payment_id),
+                return_id: None,
+            },
+        )
+        .await?;
 
         if collecting && amount > Decimal::ZERO {
             let mut remaining_to_apply = amount;
@@ -467,7 +465,7 @@ impl CreditRepository {
         .map(|row| row.count.max(0) as u64)
         .unwrap_or(0);
         let sql = format!(
-            "SELECT cle.id, cle.customer_id, c.name AS customer_name, cle.branch_id, cle.type AS entry_type, cle.invoice_id, cle.payment_id, cle.return_id, CAST(cle.debit AS REAL) AS debit, CAST(cle.credit AS REAL) AS credit, CAST(cle.balance_after AS REAL) AS balance_after, cle.notes, cle.occurred_at, cle.created_at FROM customer_ledger_entries cle INNER JOIN customers c ON c.id = cle.customer_id WHERE {where_sql} ORDER BY cle.created_at DESC, cle.id DESC LIMIT ? OFFSET ?"
+            "SELECT cle.id, cle.customer_id, c.name AS customer_name, cle.branch_id, cle.type AS entry_type, cle.invoice_id, cle.payment_id, cle.return_id, CAST(cle.debit AS REAL) AS debit, CAST(cle.credit AS REAL) AS credit, CAST(cle.balance_after AS REAL) AS balance_after, cle.notes, cle.occurred_at, cle.created_at FROM customer_ledger_entries cle INNER JOIN customers c ON c.id = cle.customer_id WHERE {where_sql} ORDER BY cle.occurred_at ASC, cle.created_at ASC, cle.rowid ASC LIMIT ? OFFSET ?"
         );
         let mut page_values = values;
         page_values.push((page.per_page as i64).into());
@@ -561,7 +559,7 @@ impl CreditRepository {
         let invoice_id = parse_uuid(&request.invoice_id, "invoiceId")?;
         let invoice = InvoiceMeta::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT branch_id, customer_id FROM invoices WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+            "SELECT branch_id, customer_id, invoice_number, CAST(credit_amount AS REAL) AS credit_amount FROM invoices WHERE id = ? AND deleted_at IS NULL LIMIT 1",
             [invoice_id.into()],
         ))
         .one(transaction)
@@ -596,13 +594,30 @@ impl CreditRepository {
             let invoice_item_id = parse_uuid(&item.invoice_item_id, "items.invoiceItemId")?;
             let meta = InvoiceItemMeta::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT product_id, conversion_to_base, unit_name FROM invoice_items WHERE id = ? AND invoice_id = ? LIMIT 1",
+                "SELECT product_id, conversion_to_base, unit_name, displayed_quantity FROM invoice_items WHERE id = ? AND invoice_id = ? LIMIT 1",
                 [invoice_item_id.into(), invoice_id.into()],
             ))
             .one(transaction)
             .await?
             .ok_or(AppError::Validation("Invoice item not found on invoice.".into()))?;
             let displayed = quantity(item.quantity);
+            let prior = ReturnedQtyRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "SELECT CAST(COALESCE(SUM(sri.displayed_quantity), 0) AS REAL) AS returned FROM sale_return_items sri INNER JOIN sale_returns sr ON sr.id = sri.sale_return_id WHERE sri.invoice_item_id = ? AND sr.status = 'COMPLETED'",
+                [invoice_item_id.into()],
+            ))
+            .one(transaction)
+            .await?
+            .map(|row| row.returned)
+            .unwrap_or(Decimal::ZERO);
+            let remaining = quantity(meta.displayed_quantity - prior);
+            if displayed > remaining + Decimal::new(1, 6) {
+                return Err(AppError::Conflict(format!(
+                    "Only {} {} can still be returned.",
+                    crate::backend::qty::format_qty(remaining),
+                    meta.unit_name
+                )));
+            }
             let base_qty = quantity(displayed * meta.conversion_to_base);
             let condition = item.condition.trim().to_uppercase();
             let refund_amount = money_value(item.refund_amount);
@@ -612,13 +627,105 @@ impl CreditRepository {
             } else {
                 "NO_RESTOCK"
             };
-            let original_lot = parse_optional_uuid(
+            let track_damaged = condition == "DAMAGED";
+            let mut original_lot = parse_optional_uuid(
                 item.original_product_lot_id.as_deref(),
                 "originalProductLotId",
             )?;
+            let mut restore_cost = Decimal::ZERO;
+            if original_lot.is_none() {
+                #[derive(Debug, FromQueryResult)]
+                struct UsedLot {
+                    product_lot_id: Uuid,
+                    unit_cost: f64,
+                    base_quantity: f64,
+                }
+                let used = UsedLot::find_by_statement(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "SELECT product_lot_id, CAST(unit_cost AS REAL) AS unit_cost, CAST(base_quantity AS REAL) AS base_quantity FROM lot_consumptions WHERE reference_type = ? AND reference_id = ? AND product_id = ?",
+                    [
+                        crate::backend::constants::REFERENCE_INVOICE.into(),
+                        invoice_id.into(),
+                        meta.product_id.into(),
+                    ],
+                ))
+                .all(transaction)
+                .await?;
+                if let Some(first) = used.first() {
+                    original_lot = Some(first.product_lot_id);
+                    let weight: f64 = used.iter().map(|row| row.base_quantity).sum();
+                    let cost = if weight > 0.0 {
+                        used.iter()
+                            .map(|row| row.unit_cost * row.base_quantity)
+                            .sum::<f64>()
+                            / weight
+                    } else {
+                        first.unit_cost
+                    };
+                    restore_cost = Decimal::from_f64_retain(cost).unwrap_or(Decimal::ZERO);
+                }
+            }
             let mut movement_id: Option<Uuid> = None;
 
-            if restock == "RESTOCK" {
+            if track_damaged {
+                let damaged_lot = Uuid::new_v4();
+                transaction
+                    .execute_raw(Statement::from_sql_and_values(
+                        DbBackend::Sqlite,
+                        "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, 0, ?, 0, ?, NULL, ?, 1, NULL, ?, ?, ?)",
+                        [
+                            damaged_lot.into(),
+                            meta.product_id.into(),
+                            format!("DMG-{}", &return_id.to_string()[..8]).into(),
+                            LOT_SOURCE_RETURN.into(),
+                            base_qty.into(),
+                            base_qty.into(),
+                            now.date_naive().into(),
+                            context.user_id.into(),
+                            context.device_id.into(),
+                            now.into(),
+                            now.into(),
+                        ],
+                    ))
+                    .await?;
+                transaction
+                    .execute_raw(Statement::from_sql_and_values(
+                        DbBackend::Sqlite,
+                        "INSERT INTO branch_lots (id, branch_id, product_lot_id, allocated_base_quantity, remaining_base_quantity, reserved_base_quantity, damaged_base_quantity, updated_at) VALUES (?, ?, ?, ?, 0, 0, ?, ?)",
+                        [
+                            Uuid::new_v4().into(),
+                            invoice.branch_id.into(),
+                            damaged_lot.into(),
+                            base_qty.into(),
+                            base_qty.into(),
+                            now.into(),
+                        ],
+                    ))
+                    .await?;
+                let mid = Uuid::new_v4();
+                movement_id = Some(mid);
+                transaction
+                    .execute_raw(Statement::from_sql_and_values(
+                        DbBackend::Sqlite,
+                        "INSERT INTO stock_movements (id, branch_id, product_id, product_lot_id, type, displayed_quantity, displayed_unit_name, base_quantity_delta, unit_cost, total_cost, reference_type, reference_id, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)",
+                        [
+                            mid.into(),
+                            invoice.branch_id.into(),
+                            meta.product_id.into(),
+                            damaged_lot.into(),
+                            STOCK_MOVEMENT_RETURN.into(),
+                            displayed.into(),
+                            meta.unit_name.clone().into(),
+                            base_qty.into(),
+                            REFERENCE_RETURN.into(),
+                            return_id.into(),
+                            now.into(),
+                            context.user_id.into(),
+                            now.into(),
+                        ],
+                    ))
+                    .await?;
+            } else if restock == "RESTOCK" {
                 let lot_id = if let Some(lot_id) = original_lot {
                     lot_id
                 } else {
@@ -627,7 +734,7 @@ impl CreditRepository {
                     transaction
                         .execute_raw(Statement::from_sql_and_values(
                             DbBackend::Sqlite,
-                            "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, 0, ?, NULL, ?, 1, NULL, ?, ?, ?)",
+                            "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, NULL, ?, 1, NULL, ?, ?, ?)",
                             [
                                 new_lot.into(),
                                 meta.product_id.into(),
@@ -635,6 +742,7 @@ impl CreditRepository {
                                 LOT_SOURCE_RETURN.into(),
                                 base_qty.into(),
                                 base_qty.into(),
+                                restore_cost.into(),
                                 now.date_naive().into(),
                                 context.user_id.into(),
                                 context.device_id.into(),
@@ -752,14 +860,18 @@ impl CreditRepository {
                     parse_uuid(&replacement.product_unit_id, "replacements.productUnitId")?;
                 let unit = UnitMeta::find_by_statement(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
-                    "SELECT display_name, conversion_to_base FROM product_units WHERE id = ? AND product_id = ? AND deleted_at IS NULL LIMIT 1",
+                    "SELECT display_name, conversion_to_base, factor_direction FROM product_units WHERE id = ? AND product_id = ? AND deleted_at IS NULL LIMIT 1",
                     [product_unit_id.into(), product_id.into()],
                 ))
                 .one(transaction)
                 .await?
                 .ok_or(AppError::NotFound(ERROR_PRODUCT_NOT_FOUND))?;
                 let displayed = quantity(replacement.quantity);
-                let base_qty = quantity(displayed * unit.conversion_to_base);
+                let base_qty = crate::backend::qty::to_base_qty(
+                    displayed,
+                    unit.conversion_to_base,
+                    &unit.factor_direction,
+                );
                 let unit_price = money_value(replacement.unit_price);
                 let movement_id = allocate_fifo(
                     transaction,
@@ -804,6 +916,71 @@ impl CreditRepository {
                 ],
             ))
             .await?;
+
+        // Open credit on the invoice shrinks by the returned value (never below 0).
+        // Excess beyond open credit becomes customer advance via the ledger RETURN credit.
+        let refund = money_value(refund_total);
+        let credit_before = money_value(invoice.credit_amount);
+        let new_credit = money_value(credit_before - refund.min(credit_before));
+        // Only rewrite payment_status when this return touched open credit — cash-only
+        // invoices that never had credit keep their existing PAID/etc. status.
+        if credit_before > Decimal::ZERO {
+            let payment_status = if new_credit <= Decimal::ZERO {
+                PAYMENT_STATUS_RETURNED
+            } else {
+                PAYMENT_STATUS_PARTIALLY_RETURNED
+            };
+            transaction
+                .execute_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "UPDATE invoices SET credit_amount = ?, payment_status = ?, updated_at = ? WHERE id = ?",
+                    [
+                        new_credit.into(),
+                        payment_status.into(),
+                        now.into(),
+                        invoice_id.into(),
+                    ],
+                ))
+                .await?;
+        } else if refund > Decimal::ZERO {
+            // No open credit to clear; still bump updated_at for audit consistency.
+            transaction
+                .execute_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "UPDATE invoices SET updated_at = ? WHERE id = ?",
+                    [now.into(), invoice_id.into()],
+                ))
+                .await?;
+        }
+
+        // Always post the full refund on the ledger when there is a named customer.
+        // Prior tip uses stable rowid order (revise ADJUSTMENT+SALE share timestamps).
+        if refund > Decimal::ZERO {
+            if let Some(customer_id) = invoice.customer_id {
+                let note = format!("Return {}", invoice.invoice_number);
+                LedgerRepository::post_entry(
+                    transaction,
+                    LedgerEntryInput {
+                        id: None,
+                        party: LedgerParty::Customer(customer_id),
+                        branch_id: invoice.branch_id,
+                        entry_type: LEDGER_RETURN,
+                        debit: Decimal::ZERO,
+                        credit: refund,
+                        notes: Some(&note),
+                        occurred_at: now,
+                        created_by: context.user_id,
+                        purchase_order_id: None,
+                        goods_receipt_id: None,
+                        money_transaction_id: None,
+                        invoice_id: Some(invoice_id),
+                        payment_id: None,
+                        return_id: Some(return_id),
+                    },
+                )
+                .await?;
+            }
+        }
 
         let _ = ERROR_RETURN_NOT_FOUND;
         Ok(return_id)
@@ -944,6 +1121,7 @@ impl CreditRepository {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn allocate_fifo(
     transaction: &DatabaseTransaction,
     context: &RequestContext,

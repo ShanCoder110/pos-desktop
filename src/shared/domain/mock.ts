@@ -142,12 +142,13 @@ export const userPermissions: UserPermission[] = [
 ];
 
 export const units: UnitRow[] = [
-  { id: "un1", name: "Meter", symbol: "m" },
-  { id: "un2", name: "Piece", symbol: "pc" },
-  { id: "un3", name: "Kilogram", symbol: "kg" },
-  { id: "un4", name: "Pack", symbol: "pk" },
-  { id: "un5", name: "Box", symbol: "box" },
-  { id: "un6", name: "Gaz", symbol: "gaz" },
+  { id: "un1", name: "Piece", symbol: "pc" },
+  { id: "un2", name: "Pack", symbol: "pk" },
+  { id: "un3", name: "Box", symbol: "box" },
+  { id: "un4", name: "Gaz", symbol: "gaz" },
+  { id: "un5", name: "Meter", symbol: "m" },
+  { id: "un6", name: "Roll", symbol: "roll" },
+  { id: "un7", name: "Foot", symbol: "ft" },
 ];
 
 export const catalog: CatalogProduct[] = [

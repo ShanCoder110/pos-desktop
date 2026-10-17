@@ -16,7 +16,7 @@ import {
 } from "@/components/common";
 import { useQueryTab } from "@/hooks/useQueryTab";
 import { listTrash, purgeTrash, restoreTrash, type TrashItem } from "@/services/trash";
-import { shortError } from "@/utils/format";
+import { formatTableDateTime, shortError } from "@/utils/format";
 
 const TRASH_TABS = [
   { id: "suppliers", label: "Suppliers" },
@@ -88,7 +88,7 @@ export function TrashPage() {
               ? rows.map((row) => (
                   <tr key={row.id}>
                     <Td>{row.name}</Td>
-                    <Td>{new Date(row.deletedAt).toLocaleString()}</Td>
+                    <Td>{formatTableDateTime(row.deletedAt)}</Td>
                     <Td>
                       <div className="flex justify-end gap-2">
                         <Button

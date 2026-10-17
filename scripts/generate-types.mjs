@@ -31,6 +31,11 @@ run("node", [
   "export_types",
 ]);
 
+// ts-rs intentionally emits compact TypeScript. Normalize the generated files
+// before checking them so local generation and the committed Prettier format
+// are deterministic on every platform.
+run("npx", ["prettier", "--write", "src/types/generated/**/*.ts"]);
+
 if (check) {
   const diff = spawnSync(
     "git",

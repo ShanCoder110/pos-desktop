@@ -14,7 +14,13 @@ export function PageHeader({
   if (!hint && !actions) return null;
   return (
     <div className="mgmt-page-toolbar [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [flex-shrink:0]">
-      {hint ? <p className="mgmt-page-hint [font-size:12px] [font-weight:500] [color:var(--muted)]">{hint}</p> : <span />}
+      {hint ? (
+        <p className="mgmt-page-hint [font-size:12px] [font-weight:500] [color:var(--muted)]">
+          {hint}
+        </p>
+      ) : (
+        <span />
+      )}
       {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
     </div>
   );
@@ -85,13 +91,7 @@ export function StatCard({
   );
 }
 
-export function RowActions({
-  onEdit,
-  onDelete,
-}: {
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
+export function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
   return (
     <div className="flex justify-end gap-1">
       <Button size="icon" variant="ghost" onClick={onEdit} aria-label="Edit">

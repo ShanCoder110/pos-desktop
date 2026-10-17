@@ -1,14 +1,17 @@
 import {
   baseUnit,
+  canonicalUnit,
   formatStockQty,
   priceFromStock,
   productSellUnits,
   qtyUnits,
+  resolvedFactorDirection,
   unitLabel,
 } from "@/pages/products/productQty";
 import { PRODUCT_COPY, PRODUCT_UNIT_PRICE_TIERS } from "@/shared/constants/products";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { cn } from "@/utils/format";
+import { profitAmount, profitMarginPercent } from "@/utils/margin";
 
 function compactAmount(n: number) {
   const rounded = Math.round(n * 100) / 100;
@@ -29,15 +32,23 @@ function signedRs(n: number) {
 }
 
 function unitKindLabel(unit: ProductSellUnit, units: ProductSellUnit[]) {
-  const base = baseUnit(units);
-  if (!base || unit.id === base.id || unit.contains <= 1) return "Base unit";
-  const parent = base.name || unitLabel(base.symbol ?? "");
-  return `${formatStockQty(unit.contains)} per ${parent}`;
+  const stock =
+    units.find(
+      (row) => resolvedFactorDirection(row) !== "divide" && Math.abs(row.contains - 1) < 1e-6,
+    ) ??
+    canonicalUnit(units) ??
+    baseUnit(units);
+  if (!stock || unit.id === stock.id) return "Stock unit";
+  const stockName = stock.name || unitLabel(stock.symbol ?? "");
+  const name = unit.name || unitLabel(unit.symbol ?? "");
+  const n = formatStockQty(unit.contains);
+  if (resolvedFactorDirection(unit) === "divide") return `1 ${stockName} = ${n} ${name}`;
+  return `1 ${name} = ${n} ${stockName}`;
 }
 
 function unitMargin(cost: number, retail: number) {
-  const profit = retail - cost;
-  const pct = cost > 0 ? (profit / cost) * 100 : 0;
+  const profit = profitAmount(retail, cost);
+  const pct = profitMarginPercent(retail, cost);
   return { profit, pct, healthy: profit >= 0 };
 }
 

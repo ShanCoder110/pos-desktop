@@ -118,12 +118,31 @@ impl IntoResponse for AppError {
                         None,
                     )
                 } else if text.contains("unique") {
-                    (
-                        StatusCode::CONFLICT,
-                        CODE_CONFLICT,
-                        ERROR_DUPLICATE_RECORD.to_string(),
-                        None,
-                    )
+                    if text.contains("ux_products_sku_lower") || text.contains("products.sku") {
+                        (
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            CODE_VALIDATION,
+                            super::constants::ERROR_SKU_DUPLICATE.to_string(),
+                            Some(serde_json::json!({ "field": "sku" })),
+                        )
+                    } else {
+                        let message = if text.contains("ux_product_units_base")
+                            || (text.contains("product_units.product_id")
+                                && !text.contains("unit_id"))
+                        {
+                            "This product already has a stock unit. Clear the old one first."
+                                .to_string()
+                        } else if text.contains("ux_product_units_default") {
+                            "This product already has a default sale unit.".to_string()
+                        } else if text.contains("ux_product_units_barcode") {
+                            "That barcode is already used on another unit.".to_string()
+                        } else if text.contains("product_units") {
+                            "Two units on this product share the same unit and factor.".to_string()
+                        } else {
+                            ERROR_DUPLICATE_RECORD.to_string()
+                        };
+                        (StatusCode::CONFLICT, CODE_CONFLICT, message, None)
+                    }
                 } else {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,

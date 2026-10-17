@@ -1,6 +1,9 @@
+import type { ReceiptFontFamily } from "@/shared/constants/receiptBranding";
+
 export type StockPick = "oldest" | "newest" | "ask";
 export type PrintSize = "thermal" | "a4";
 export type PaperWidth = "MM_58" | "MM_80" | "A4";
+export type { ReceiptFontFamily };
 export type AppLanguage = "EN" | "UR";
 export type BranchKind = "retail" | "repair";
 export type Unit = "pc" | "m";
@@ -43,10 +46,20 @@ export interface ShopSettings {
   tagline: string;
   contactLine: string;
   promoUrdu: string;
+  /** Slip body font (thermal / courier / arial / times / consolas). */
+  receiptFontFamily: ReceiptFontFamily;
+  /** Line-item table grid borders on the slip (dukan default off). */
+  itemsTableBordered: boolean;
   printerName: string;
   printerPaperWidth: PaperWidth;
   copies: number;
   splitLongBill: boolean;
+  /** Products on first cut slip when split is on (dukan default 12). */
+  splitFirstPageItems: number;
+  /** Products on middle continuation slips (dukan default 15). */
+  splitMiddlePageItems: number;
+  /** Products on last slip with totals (dukan default 12). */
+  splitLastPageItems: number;
 }
 
 export interface Shop {
@@ -103,6 +116,8 @@ export interface ProductSellUnit {
   kind?: "base" | "bigger" | "smaller" | "pack" | "small";
   isBase?: boolean;
   isDefault?: boolean;
+  /** divide: stock unit contains this many of this unit. multiply: this unit contains this many stock units. */
+  factorDirection?: "multiply" | "divide";
   contains: number;
   cost: number;
   min: number;
@@ -148,6 +163,8 @@ export interface Product {
   branchStock?: ProductBranchStock[];
   components: BomLine[];
   sellUnits?: ProductSellUnit[];
+  /** Set by product search when a sell-unit barcode matched exactly. */
+  matchedUnitId?: string | null;
   isActive?: boolean;
   createdAt?: string;
   updatedAt?: string;

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { RequireAuth } from "@/components/common/auth/RequireAuth";
+import { AppUpdateAgent } from "@/components/common/AppUpdateAgent";
 import { RootRedirect } from "@/components/common/auth/RootRedirect";
 import { SessionProvider } from "@/components/common/auth/SessionProvider";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -45,6 +46,7 @@ export default function App() {
 
   return (
     <SettingsContext.Provider value={{ settings, setSettings }}>
+      <AppUpdateAgent />
       <SessionProvider>
         <BrowserRouter>
           <Routes>

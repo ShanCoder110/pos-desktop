@@ -33,3 +33,21 @@ export function symbolFromUnitName(name: string, fallback = "pc") {
   if (needle.includes("piece")) return "pc";
   return fallback;
 }
+
+/** Builds a short, URL-safe symbol for units created from an inline selector. */
+export function uniqueUnitSymbol(name: string, usedSymbols: string[]) {
+  const known = symbolFromUnitName(name, "");
+  const stem =
+    known ||
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "")
+      .slice(0, 12) ||
+    "unit";
+  const used = new Set(usedSymbols.map((symbol) => symbol.trim().toLowerCase()));
+  if (!used.has(stem.toLowerCase())) return stem;
+  let suffix = 2;
+  while (used.has(`${stem}${suffix}`.toLowerCase())) suffix += 1;
+  return `${stem}${suffix}`;
+}

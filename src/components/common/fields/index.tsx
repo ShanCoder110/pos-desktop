@@ -63,7 +63,13 @@ export function Field({
   className?: string;
 }) {
   return (
-    <div className={cn("field [display:grid] [gap:6px]", error && "is-invalid", className)}>
+    <div
+      className={cn(
+        "field [display:grid] [min-width:0] [gap:6px]",
+        error && "is-invalid",
+        className,
+      )}
+    >
       <span className="field-label [font-size:12px] [font-weight:600] [color:var(--sub)]">
         {label}
       </span>

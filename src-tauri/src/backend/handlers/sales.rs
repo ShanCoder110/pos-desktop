@@ -54,6 +54,18 @@ pub async fn void_invoice(
     ))
 }
 
+pub async fn revise_invoice(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Path(id): Path<String>,
+    Json(request): Json<CompleteSaleRequest>,
+) -> Result<Json<InvoiceResponse>, AppError> {
+    let _ = ctx.require_cash_session()?;
+    Ok(Json(
+        SalesService::revise(&state.db, &ctx, parse_id(&id)?, request).await?,
+    ))
+}
+
 pub async fn list_holds(
     State(state): State<AppState>,
     ctx: RequestContext,

@@ -42,16 +42,26 @@ export function Menu({ children }: { children: ReactNode }) {
 export function MenuItem({
   icon,
   danger,
+  disabled,
+  title,
   children,
   onClick,
 }: {
   icon?: ReactNode;
   danger?: boolean;
+  disabled?: boolean;
+  title?: string;
   children: ReactNode;
   onClick: () => void;
 }) {
   return (
-    <button type="button" className={danger ? "is-danger" : undefined} onClick={onClick}>
+    <button
+      type="button"
+      className={danger ? "is-danger" : undefined}
+      disabled={disabled}
+      title={title}
+      onClick={onClick}
+    >
       {icon}
       {children}
     </button>

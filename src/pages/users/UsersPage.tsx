@@ -57,7 +57,6 @@ import { listEmptyMessage } from "@/shared/constants/empty";
 import { routes } from "@/shared/constants/routes";
 import {
   ALL_PERMISSION_KEYS,
-  DEFAULT_STAFF_PASSWORD,
   STAFF_ROLE_OWNER,
   STAFF_STATUS_ACTIVE,
   STAFF_STATUS_INACTIVE,
@@ -281,7 +280,7 @@ export function UsersPage() {
 
       if (isNew) {
         payload.username = deriveUsername(values.email);
-        payload.password = values.password.trim() || DEFAULT_STAFF_PASSWORD;
+        payload.password = values.password.trim();
         await createUser(payload);
       } else {
         payload.username = edit.username;

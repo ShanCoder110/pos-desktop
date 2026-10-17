@@ -214,6 +214,12 @@ export const CREDIT_COPY = {
   tabCreditSales: "Credit sales",
   tabInvoices: "Invoices",
   tabLedger: "Ledger",
+  creditSold: "Sold on credit",
+  creditSoldHint: "credit sale product(s)",
+  paidOnCredit: "Paid on credit",
+  paidOnCreditHint: "Collected against credit sales",
+  paymentNote:
+    "Payment reduces the customer balance and knocks off open credit sales in FIFO order.",
   owedToShop: "Owed to shop",
   owingCount: "Owing",
   advanceHeld: "Advance",

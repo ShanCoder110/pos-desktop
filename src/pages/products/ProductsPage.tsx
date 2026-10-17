@@ -56,6 +56,7 @@ import { ProductForm } from "@/pages/products/ProductForm";
 import { useDebounce } from "@/hooks/useDebounce";
 import { blankProduct } from "@/pages/products/productLots";
 import {
+  formatMixedQty,
   formatStockQty,
   isLinearStockUnit,
   priceBreakdown,
@@ -96,6 +97,8 @@ import {
   resolveCategoryId,
 } from "@/pages/products/productPayload";
 import { listAllInvoices } from "@/services/sales";
+import { createMasterRecord } from "@/services/masters";
+import { productMatchesQuery } from "@/utils/salePricing";
 import {
   buildProductSalesStats,
   formatInsightMetricValue,
@@ -106,6 +109,7 @@ import {
 } from "@/pages/products/productSalesStats";
 import { exportProductsCsv, exportProductsExcel, printProducts } from "@/utils/exportFile";
 import { money, shortError } from "@/utils/format";
+import { profitMarginPercent } from "@/utils/margin";
 import { ProductCostDisplay } from "@/pages/products/ProductCostDisplay";
 import { fifoCostForProduct, openLotStockValue } from "@/pages/products/productFifo";
 import { branchStockTooltip, productTotalStock } from "@/utils/productStock";
@@ -153,8 +157,7 @@ function UnitPrice({ row, field }: { row: Product; field: PriceField }) {
 function marginPct(row: Product, lots: ProductLotRow[]) {
   const cost = fifoCostForProduct(row, lots);
   const { retail } = productBasePricing(row);
-  if (cost <= 0) return 0;
-  return ((retail - cost) / cost) * 100;
+  return profitMarginPercent(retail, cost);
 }
 
 function unitProfit(row: Product, lots: ProductLotRow[]) {
@@ -476,8 +479,15 @@ export function ProductsPage() {
 
   const filtered = useMemo(() => {
     const list = searchRows.filter((r) => {
-      const text = `${r.name} ${r.sku} ${r.category}`.toLowerCase();
-      if (q && !text.includes(q.toLowerCase())) return false;
+      // Use productMatchesQuery so SKU/barcode hits stay case/partial/hyphen-insensitive
+      // (e.g. "pmx001" → "PMX-001") after remote search merges into the table.
+      if (
+        q &&
+        !productMatchesQuery(r, q) &&
+        !(r.category ?? "").toLowerCase().includes(q.toLowerCase())
+      ) {
+        return false;
+      }
       for (const chip of chips) {
         const selected = chipValues(chip);
         if (chip.field === "health") {
@@ -616,19 +626,23 @@ export function ProductsPage() {
     setPage(1);
   }
 
-  async function commit(next: Product): Promise<boolean> {
+  async function commit(next: Product): Promise<boolean | string> {
     const isNewRow = !rows.some((r) => r.id === next.id);
-    const category = resolveCategoryId(next, categories);
-    if (!category) {
-      toaster.error(PRODUCT_COPY.categoryRequired);
-      return false;
-    }
     if (!units.some((row) => row.symbol === next.unit)) {
       toaster.error(PRODUCT_COPY.unitRequired);
       return false;
     }
     setProductLoading((current) => ({ ...current, saving: true }));
     try {
+      let category = resolveCategoryId(next, categories);
+      if (!category) {
+        const existingOther = categories.find((row) => row.name.trim().toLowerCase() === "other");
+        category =
+          existingOther ??
+          (await createMasterRecord("categories", { name: "Other", isActive: true }));
+        next.category = category.name;
+        next.categoryId = category.id;
+      }
       const session = await ensureSession();
       if (isNewRow) {
         const payload = buildCreateProductPayload(next, {
@@ -657,12 +671,15 @@ export function ProductsPage() {
         const updated = await updateProduct(next.id, payload);
         next.categoryId = updated.categoryId;
         next.category = updated.category;
+        next.sku = updated.sku;
         setLots((prev) => [...prev.filter((lot) => lot.productId !== next.id)]);
       }
       await refreshHub();
       return true;
     } catch (error) {
-      toaster.error(shortError(error, PRODUCT_COPY.saveFailed));
+      const message = shortError(error, PRODUCT_COPY.saveFailed);
+      if (/sku/i.test(message)) return message;
+      toaster.error(message);
       return false;
     } finally {
       setProductLoading((current) => ({ ...current, saving: false }));
@@ -764,6 +781,22 @@ export function ProductsPage() {
   }, [filtered, settings.shopName, setActions]);
 
   const isNew = !edit || !rows.some((r) => r.id === edit.id);
+  const hasProductDraft = Boolean(
+    edit &&
+    (!isNew ||
+      edit.name.trim() ||
+      edit.category ||
+      edit.supplierId ||
+      edit.stock > 0 ||
+      (edit.minimumStock ?? 0) > 0 ||
+      edit.cost > 0 ||
+      edit.min > 0 ||
+      edit.wholesale > 0 ||
+      edit.retail > 0 ||
+      edit.isManufactured ||
+      edit.warrantyEnabled ||
+      (edit.sellUnits?.length ?? 0) > 1),
+  );
 
   return (
     <div
@@ -1196,6 +1229,9 @@ export function ProductsPage() {
                           <span>
                             {formatStockQty(productTotalStock(row))} {unitLabel(row.unit)}
                           </span>
+                          <span className="text-[11px] text-muted">
+                            {formatMixedQty(row, productTotalStock(row))}
+                          </span>
                           {(row.branchStock?.length ?? 0) > 1 ? (
                             <small className="text-muted">
                               {row.branchStock?.filter((entry) => entry.quantity > 0).length ?? 0}{" "}
@@ -1320,6 +1356,7 @@ export function ProductsPage() {
         size="lg"
         form
         dim={false}
+        closeOnBackdrop={!hasProductDraft}
         title={isNew ? "Add Product" : "Edit Product"}
         subtitle={
           <p className="product-keys [display:flex] [flex-wrap:wrap] [gap:8px_12px] [margin:0] [font-size:11px] [color:var(--muted)]">

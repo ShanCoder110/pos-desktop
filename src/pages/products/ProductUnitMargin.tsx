@@ -1,9 +1,11 @@
 import { PRODUCT_COPY } from "@/shared/constants/products";
 import { cn, money } from "@/utils/format";
+import { markupPercent, profitAmount, profitMarginPercent } from "@/utils/margin";
 
 export function ProductUnitMargin({ cost, retail }: { cost: number; retail: number }) {
-  const profit = retail - cost;
-  const pct = cost > 0 ? (profit / cost) * 100 : 0;
+  const profit = profitAmount(retail, cost);
+  const pct = profitMarginPercent(retail, cost);
+  const markup = markupPercent(retail, cost);
   const healthy = profit >= 0;
 
   return (
@@ -16,7 +18,7 @@ export function ProductUnitMargin({ cost, retail }: { cost: number; retail: numb
       {PRODUCT_COPY.unitProfit}: {money(profit)}
       <span className="font-medium text-muted"> · </span>
       {healthy ? "+" : ""}
-      {pct.toFixed(1)}%
+      {pct.toFixed(1)}% margin · {markup.toFixed(1)}% markup
     </p>
   );
 }

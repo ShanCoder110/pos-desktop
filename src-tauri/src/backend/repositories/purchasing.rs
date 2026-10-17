@@ -20,7 +20,8 @@ use crate::backend::{
         SupplierLedgerListQuery, SupplierPaymentRequest, SupplierPaymentResponse,
     },
     errors::AppError,
-    repositories::SequenceRepository,
+    qty::to_base_qty,
+    repositories::{LedgerEntryInput, LedgerParty, LedgerRepository, SequenceRepository},
     util::{money_value, now_utc, parse_date, parse_uuid, quantity, trimmed},
 };
 
@@ -67,14 +68,10 @@ struct PoItemRow {
 struct UnitRow {
     display_name: String,
     conversion_to_base: Decimal,
+    factor_direction: String,
     minimum_price: Decimal,
     wholesale_price: Decimal,
     retail_price: Decimal,
-}
-
-#[derive(Debug, FromQueryResult)]
-struct BalanceRow {
-    balance_after: Decimal,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -226,7 +223,7 @@ impl PurchasingRepository {
             let unit = load_unit(transaction, product_id, unit_id).await?;
             let qty = quantity(item.quantity);
             let cost = money_value(item.unit_cost);
-            let base_qty = quantity(qty * unit.conversion_to_base);
+            let base_qty = to_base_qty(qty, unit.conversion_to_base, &unit.factor_direction);
             let line_total = money_value(cost * qty);
             subtotal += line_total;
             prepared.push((
@@ -365,7 +362,8 @@ impl PurchasingRepository {
                         .clone();
                     let unit = load_unit(transaction, item.product_id, item.unit_id).await?;
                     let displayed = quantity(input.quantity);
-                    let base_qty = quantity(displayed * unit.conversion_to_base);
+                    let base_qty =
+                        to_base_qty(displayed, unit.conversion_to_base, &unit.factor_direction);
                     let remaining =
                         quantity(item.ordered_base_quantity - item.received_base_quantity);
                     if base_qty > remaining {
@@ -392,10 +390,20 @@ impl PurchasingRepository {
         let mut prepared_lines = Vec::new();
         for (item, base_qty, expiry) in receive_plan {
             let unit = load_unit(transaction, item.product_id, item.unit_id).await?;
-            let cost_per_base = money_value(item.expected_unit_cost / unit.conversion_to_base);
+            let per_one = to_base_qty(
+                Decimal::ONE,
+                unit.conversion_to_base,
+                &unit.factor_direction,
+            );
+            let per_one = if per_one.is_zero() {
+                Decimal::ONE
+            } else {
+                per_one
+            };
+            let cost_per_base = money_value(item.expected_unit_cost / per_one);
             let line_total = money_value(cost_per_base * base_qty);
             subtotal += line_total;
-            let displayed = quantity(base_qty / unit.conversion_to_base);
+            let displayed = quantity(base_qty / per_one);
             prepared_lines.push(PreparedReceive {
                 po_item_id: item.id,
                 product_id: item.product_id,
@@ -547,36 +555,28 @@ impl PurchasingRepository {
                 .await?;
         }
 
-        let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-            [header.supplier_id.into()],
-        ))
-        .one(transaction)
-        .await?
-        .map(|row| row.balance_after)
-        .unwrap_or(Decimal::ZERO);
-        let balance_after = previous + total;
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "INSERT INTO supplier_ledger_entries (id, supplier_id, branch_id, type, purchase_order_id, goods_receipt_id, money_transaction_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?, ?, ?)",
-                [
-                    Uuid::new_v4().into(),
-                    header.supplier_id.into(),
-                    header.branch_id.into(),
-                    LEDGER_PURCHASE.into(),
-                    po_id.into(),
-                    receipt_id.into(),
-                    total.into(),
-                    balance_after.into(),
-                    format!("Goods receipt {receipt_id}").into(),
-                    now.into(),
-                    context.user_id.into(),
-                    now.into(),
-                ],
-            ))
-            .await?;
+        let note = format!("Goods receipt {receipt_id}");
+        LedgerRepository::post_entry(
+            transaction,
+            LedgerEntryInput {
+                id: None,
+                party: LedgerParty::Supplier(header.supplier_id),
+                branch_id: header.branch_id,
+                entry_type: LEDGER_PURCHASE,
+                debit: total,
+                credit: Decimal::ZERO,
+                notes: Some(&note),
+                occurred_at: now,
+                created_by: context.user_id,
+                purchase_order_id: Some(po_id),
+                goods_receipt_id: Some(receipt_id),
+                money_transaction_id: None,
+                invoice_id: None,
+                payment_id: None,
+                return_id: None,
+            },
+        )
+        .await?;
 
         let remaining = CountRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
@@ -629,6 +629,7 @@ impl PurchasingRepository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn apply_lot_to_open_po(
         transaction: &DatabaseTransaction,
         context: &RequestContext,
@@ -836,7 +837,7 @@ impl PurchasingRepository {
         ensure_supplier(database, supplier_id).await?;
         let rows = LedgerRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, supplier_id, branch_id, type AS entry_type, purchase_order_id, goods_receipt_id, money_transaction_id, CAST(debit AS REAL) AS debit, CAST(credit AS REAL) AS credit, CAST(balance_after AS REAL) AS balance_after, notes, occurred_at, created_at FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at ASC, created_at ASC",
+            "SELECT id, supplier_id, branch_id, type AS entry_type, purchase_order_id, goods_receipt_id, money_transaction_id, CAST(debit AS REAL) AS debit, CAST(credit AS REAL) AS credit, CAST(balance_after AS REAL) AS balance_after, notes, occurred_at, created_at FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at ASC, created_at ASC, rowid ASC",
             [supplier_id.into()],
         ))
         .all(database)
@@ -938,7 +939,7 @@ impl PurchasingRepository {
         .map(|row| row.count.max(0) as u64)
         .unwrap_or(0);
         let sql = format!(
-            "SELECT sle.id, sle.supplier_id, s.name AS supplier_name, sle.branch_id, sle.type AS entry_type, sle.purchase_order_id, sle.goods_receipt_id, sle.money_transaction_id, CAST(sle.debit AS REAL) AS debit, CAST(sle.credit AS REAL) AS credit, CAST(sle.balance_after AS REAL) AS balance_after, sle.notes, sle.occurred_at, sle.created_at FROM supplier_ledger_entries sle INNER JOIN suppliers s ON s.id = sle.supplier_id WHERE {where_sql} ORDER BY sle.created_at DESC, sle.id DESC LIMIT ? OFFSET ?"
+            "SELECT sle.id, sle.supplier_id, s.name AS supplier_name, sle.branch_id, sle.type AS entry_type, sle.purchase_order_id, sle.goods_receipt_id, sle.money_transaction_id, CAST(sle.debit AS REAL) AS debit, CAST(sle.credit AS REAL) AS credit, CAST(sle.balance_after AS REAL) AS balance_after, sle.notes, sle.occurred_at, sle.created_at FROM supplier_ledger_entries sle INNER JOIN suppliers s ON s.id = sle.supplier_id WHERE {where_sql} ORDER BY sle.occurred_at ASC, sle.created_at ASC, sle.rowid ASC LIMIT ? OFFSET ?"
         );
         let mut page_values = values;
         page_values.push((page.per_page as i64).into());
@@ -992,24 +993,17 @@ impl PurchasingRepository {
         }
         let money_id = Uuid::new_v4();
         let ledger_id = Uuid::new_v4();
-        let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-            [supplier_id.into()],
-        ))
-        .one(transaction)
-        .await?
-        .map(|row| row.balance_after)
-        .unwrap_or(Decimal::ZERO);
+        let previous =
+            LedgerRepository::current_balance(transaction, LedgerParty::Supplier(supplier_id))
+                .await?;
         // Positive balance = we owe supplier (pay out). Negative = advance (receive back).
         let paying_out = previous >= Decimal::ZERO;
-        let (direction, entry_type, debit, credit, balance_after) = if paying_out {
+        let (direction, entry_type, debit, credit) = if paying_out {
             (
                 PAYMENT_DIRECTION_OUT,
                 LEDGER_PAYMENT_MADE,
                 Decimal::ZERO,
                 amount,
-                previous - amount,
             )
         } else {
             (
@@ -1017,9 +1011,14 @@ impl PurchasingRepository {
                 LEDGER_PAYMENT_RECEIVED,
                 amount,
                 Decimal::ZERO,
-                previous + amount,
             )
         };
+        let ledger_note = trimmed(&request.notes).unwrap_or_else(|| {
+            format!(
+                "Supplier payment {}",
+                request.reference_number.as_deref().unwrap_or("")
+            )
+        });
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
@@ -1040,28 +1039,27 @@ impl PurchasingRepository {
                 ],
             ))
             .await?;
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "INSERT INTO supplier_ledger_entries (id, supplier_id, branch_id, type, purchase_order_id, goods_receipt_id, money_transaction_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    ledger_id.into(),
-                    supplier_id.into(),
-                    context.branch_id.into(),
-                    entry_type.into(),
-                    money_id.into(),
-                    debit.into(),
-                    credit.into(),
-                    balance_after.into(),
-                    trimmed(&request.notes)
-                        .unwrap_or_else(|| format!("Supplier payment {}", request.reference_number.as_deref().unwrap_or("")))
-                        .into(),
-                    now.into(),
-                    context.user_id.into(),
-                    now.into(),
-                ],
-            ))
-            .await?;
+        let balance_after = LedgerRepository::post_entry(
+            transaction,
+            LedgerEntryInput {
+                id: Some(ledger_id),
+                party: LedgerParty::Supplier(supplier_id),
+                branch_id: context.branch_id,
+                entry_type,
+                debit,
+                credit,
+                notes: Some(&ledger_note),
+                occurred_at: now,
+                created_by: context.user_id,
+                purchase_order_id: None,
+                goods_receipt_id: None,
+                money_transaction_id: Some(money_id),
+                invoice_id: None,
+                payment_id: None,
+                return_id: None,
+            },
+        )
+        .await?;
         let _ = ERROR_PO_NOT_FOUND;
         Ok(SupplierPaymentResponse {
             id: ledger_id.to_string(),
@@ -1275,11 +1273,11 @@ async fn load_unit(
     unit_id: Uuid,
 ) -> Result<UnitRow, AppError> {
     const UNIT_SELECT: &str =
-        "SELECT display_name, conversion_to_base, minimum_price, wholesale_price, retail_price FROM product_units WHERE product_id = ? AND deleted_at IS NULL";
+        "SELECT display_name, conversion_to_base, factor_direction, minimum_price, wholesale_price, retail_price FROM product_units WHERE product_id = ? AND deleted_at IS NULL";
 
     if let Some(row) = UnitRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        &format!("{UNIT_SELECT} AND id = ? LIMIT 1"),
+        format!("{UNIT_SELECT} AND id = ? LIMIT 1"),
         [product_id.into(), unit_id.into()],
     ))
     .one(database)
@@ -1290,7 +1288,7 @@ async fn load_unit(
 
     if let Some(row) = UnitRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        &format!("{UNIT_SELECT} AND unit_id = ? LIMIT 1"),
+        format!("{UNIT_SELECT} AND unit_id = ? LIMIT 1"),
         [product_id.into(), unit_id.into()],
     ))
     .one(database)
@@ -1301,7 +1299,7 @@ async fn load_unit(
 
     UnitRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        &format!("{UNIT_SELECT} AND is_base = 1 LIMIT 1"),
+        format!("{UNIT_SELECT} AND is_base = 1 LIMIT 1"),
         [product_id.into()],
     ))
     .one(database)

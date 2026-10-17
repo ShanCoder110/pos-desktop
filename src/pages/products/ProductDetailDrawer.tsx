@@ -11,6 +11,7 @@ import {
   Tags,
 } from "lucide-react";
 import { DetailToolbar, DetailToolbarButton, Drawer } from "@/components/common";
+import { lotSoldProfit, lotSoldQuantity } from "@/pages/lots/lotMetrics";
 import { DetailQtyDisplay } from "@/pages/products/DetailQtyDisplay";
 import { ProductUnitPricingList } from "@/pages/products/ProductUnitPricingCard";
 import {
@@ -70,7 +71,7 @@ function OpenLotCard({
 }) {
   const sold = lotSoldQuantity(lot);
   const fifoCost = lotCostInStockUnit(product, lot.purchasePrice);
-  const lotProfit = lotRealizedProfit(lot, product, fifoCost);
+  const profit = lotSoldProfit(lot);
   return (
     <article className={cn("product-detail-lot", fifo && "is-current")}>
       <div className="product-detail-lot-top">
@@ -111,23 +112,10 @@ function OpenLotCard({
       </div>
       <footer className="product-detail-lot-foot">
         <span>{PRODUCT_COPY.detailLotProfit}</span>
-        <b>
-          {lotProfit.hint ? `${compactRs(0)} · ${lotProfit.hint}` : compactRs(lotProfit.amount)}
-        </b>
+        <b>{sold <= 0 ? `${compactRs(0)} · ${PRODUCT_COPY.detailNoSales}` : compactRs(profit)}</b>
       </footer>
     </article>
   );
-}
-
-function lotSoldQuantity(lot: ProductLotRow) {
-  return Math.max(0, lot.originalQuantity - lot.remainingQuantity - lot.damagedQuantity);
-}
-
-function lotRealizedProfit(lot: ProductLotRow, product: Product, fifoCost: number) {
-  const sold = lotSoldQuantity(lot);
-  if (sold <= 0) return { amount: 0, hint: PRODUCT_COPY.detailNoSales };
-  const { retail } = productBasePricing(product);
-  return { amount: sold * (retail - fifoCost), hint: null };
 }
 
 function shortDate(iso: string) {

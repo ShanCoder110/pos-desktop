@@ -22,13 +22,16 @@ import {
   THead,
   Th,
   rangeForPeriod,
+  toaster,
 } from "@/components/common";
 import type { DateRangeFilter } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { applyFilterChip, chipValuesForField } from "@/utils/filterChips";
 import { chipCsv, chipCsvFromNames, chipMinNumber } from "@/utils/filterQuery";
 import { createLoadGuard, isAbortError } from "@/utils/async";
+import { classifyListFetch } from "@/utils/listLoad";
 import { listAllLots, listLots, mapLotResponse } from "@/services/lots";
+import { ensureSession } from "@/services/auth";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { LotDetailDrawer } from "@/pages/lots/LotDetailDrawer";
 import { useLotDrawer } from "@/pages/lots/useLotDrawer";
@@ -47,7 +50,11 @@ import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import { LOT_COPY, LOT_FILTER_FIELDS, LOT_TABLE_COLUMNS } from "@/shared/constants/products";
 import type { ProductLotRow } from "@/shared/domain/types";
-import { money } from "@/utils/format";
+import { formatTableDate, money } from "@/utils/format";
+
+function canEditLots(role: string | null | undefined) {
+  return role === "OWNER" || role === "MANAGER";
+}
 
 function LotQty({
   product,
@@ -66,12 +73,6 @@ function LotQty({
       <DetailQtyDisplay product={product} qty={qty} />
     </div>
   );
-}
-
-function shortDate(iso: string) {
-  const date = new Date(`${iso.slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 function signedMoney(value: number) {
@@ -128,6 +129,8 @@ export function LotsPage() {
   const [pages, setPages] = useState(1);
   const [filteredValueTotal, setFilteredValueTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const { edit, nested, supplierRows, openCreate, openEdit, unlinkLot, lotDrawer } = useLotDrawer();
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
@@ -142,6 +145,16 @@ export function LotsPage() {
   const [reorderLotId, setReorderLotId] = useState<string | null>(null);
   const [chartProductId, setChartProductId] = useState("");
   const [chartLotId, setChartLotId] = useState("");
+  const [viewerRole, setViewerRole] = useState<string | null>(null);
+  const lotEditAllowed = canEditLots(viewerRole);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void ensureSession(controller.signal)
+      .then((session) => setViewerRole(session?.user.role ?? null))
+      .catch(() => setViewerRole(null));
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (!chartProductId && products[0]) setChartProductId(products[0].id);
@@ -180,6 +193,7 @@ export function LotsPage() {
     const controller = new AbortController();
     const guard = createLoadGuard();
     setLoading(true);
+    setLoadError(null);
     const load =
       pageSize === PAGE_SIZE_ALL
         ? listAllLots(apiFilters, controller.signal).then((data) => ({
@@ -197,15 +211,23 @@ export function LotsPage() {
     void load
       .then((response) => {
         if (!guard.isActive()) return;
-        setRows(response.rows);
-        setTotal(response.total);
-        setPages(response.pages);
+        const outcome = classifyListFetch({ ok: true, rows: response.rows }, LOT_COPY.loadFailed);
+        if (outcome.kind === "empty" || outcome.kind === "data") {
+          setRows(response.rows);
+          setTotal(response.total);
+          setPages(response.pages);
+          setLoadError(null);
+        }
       })
       .catch((error) => {
-        if (isAbortError(error) || !guard.isActive()) return;
+        if (!guard.isActive()) return;
+        const outcome = classifyListFetch({ ok: false, error }, LOT_COPY.loadFailed);
+        if (outcome.kind !== "error") return;
         setRows([]);
         setTotal(0);
         setPages(1);
+        setLoadError(outcome.message);
+        toaster.error(outcome.message);
       })
       .finally(() => {
         if (guard.isActive()) setLoading(false);
@@ -214,7 +236,7 @@ export function LotsPage() {
       guard.dispose();
       controller.abort();
     };
-  }, [apiFilters, page, pageSize]);
+  }, [apiFilters, page, pageSize, reloadToken]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -230,11 +252,10 @@ export function LotsPage() {
       })
       .catch((error) => {
         if (isAbortError(error)) return;
-        setFilteredRows([]);
-        setFilteredValueTotal(0);
+        // Keep prior totals; primary table shows the loadError + Retry.
       });
     return () => controller.abort();
-  }, [apiFilters, products]);
+  }, [apiFilters, products, reloadToken]);
 
   function writeLots(nextLots: ProductLotRow[], productIds: string[]) {
     setRows(nextLots);
@@ -464,7 +485,7 @@ export function LotsPage() {
               title={`${chartProduct?.name ?? "Product"} lot cost`}
               subtitle={
                 lastIncrease
-                  ? `${chartHistory.length} lots · ${chartIncreases.length} increase${chartIncreases.length === 1 ? "" : "s"} · last up ${signedMoney(lastIncrease.change)} on ${shortDate(lastIncrease.lot.receivedAt)}`
+                  ? `${chartHistory.length} lots · ${chartIncreases.length} increase${chartIncreases.length === 1 ? "" : "s"} · last up ${signedMoney(lastIncrease.change)} on ${formatTableDate(lastIncrease.lot.receivedAt)}`
                   : `${chartHistory.length} lots in the selected dates · no price increase yet`
               }
               data={chartData}
@@ -504,7 +525,7 @@ export function LotsPage() {
                           {chartIncreases
                             .map(
                               (row) =>
-                                `${row.lot.lotNumber} ${shortDate(row.lot.receivedAt)} ${signedMoney(row.change)}`,
+                                `${row.lot.lotNumber} ${formatTableDate(row.lot.receivedAt)} ${signedMoney(row.change)}`,
                             )
                             .join(" · ")}
                         </span>
@@ -533,7 +554,8 @@ export function LotsPage() {
                               </span>
                               <span className="flex items-center justify-between gap-3 text-[10px] text-muted">
                                 <span>
-                                  {shortDate(lot.receivedAt)} · {supplierLabel(lot.supplierId)}
+                                  {formatTableDate(lot.receivedAt)} ·{" "}
+                                  {supplierLabel(lot.supplierId)}
                                 </span>
                                 <span
                                   style={{
@@ -605,6 +627,7 @@ export function LotsPage() {
             {show("original") ? <Th>Original</Th> : null}
             {show("left") ? <Th>Left</Th> : null}
             {show("damaged") ? <Th>Damaged</Th> : null}
+            {show("expiry") ? <Th>{LOT_COPY.expiryLabel}</Th> : null}
             <Th>Actions</Th>
           </tr>
         </THead>
@@ -612,8 +635,17 @@ export function LotsPage() {
           {loading ? (
             <TableRowsSkeleton columnCount={cols.length} rows={6} selectable hasActions />
           ) : null}
-          {!loading && shown.length === 0 ? <EmptyRow cols={cols.length + 2} /> : null}
-          {!loading
+          {!loading && loadError ? (
+            <EmptyRow cols={cols.length + 2} text={loadError} description={LOT_COPY.loadFailed}>
+              <Button variant="outline" onClick={() => setReloadToken((n) => n + 1)}>
+                {LOT_COPY.retry}
+              </Button>
+            </EmptyRow>
+          ) : null}
+          {!loading && !loadError && shown.length === 0 ? (
+            <EmptyRow cols={cols.length + 2} />
+          ) : null}
+          {!loading && !loadError
             ? shown.map((row) => (
                 <tr key={row.id} className="cursor-pointer" onClick={() => setDetail(row)}>
                   <Td className="ui-check-col">
@@ -664,6 +696,7 @@ export function LotsPage() {
                       <LotQty product={productOf(row.productId)} qty={row.damagedQuantity} />
                     </Td>
                   ) : null}
+                  {show("expiry") ? <Td>{formatTableDate(row.expiryDate)}</Td> : null}
                   <Td>
                     <div
                       className="relative flex items-center justify-end"
@@ -685,9 +718,11 @@ export function LotsPage() {
                         >
                           {REORDER_COPY.createAction}
                         </MenuItem>
-                        <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
-                          Edit
-                        </MenuItem>
+                        {lotEditAllowed ? (
+                          <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
+                            {LOT_COPY.editAction}
+                          </MenuItem>
+                        ) : null}
                         <MenuItem danger icon={<Trash2 size={14} />} onClick={() => removeRow(row)}>
                           Delete
                         </MenuItem>
@@ -707,7 +742,9 @@ export function LotsPage() {
         product={detail ? productOf(detail.productId) : undefined}
         supplierLabel={detail ? supplierLabel(detail.supplierId) : undefined}
         onClose={() => setDetail(null)}
+        canEdit={lotEditAllowed}
         onEdit={(row) => {
+          if (!lotEditAllowed) return;
           setDetail(null);
           openEdit(row);
         }}

@@ -11,10 +11,12 @@ import {
   TextArea,
   TextInput,
   Toggle,
+  UnitQuantityEntry,
   toaster,
 } from "@/components/common";
 import { STORAGE_KEYS, MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
+import { uniqueUnitSymbol } from "@/shared/constants/units";
 import {
   PRODUCT_COPY,
   PRODUCT_FORM_SECTIONS,
@@ -44,26 +46,34 @@ import { LinkedUnitBoxes, UnitQtyFields } from "@/pages/products/LotFields";
 import { ensureSession } from "@/services/auth";
 import { listAllBranches } from "@/services/org";
 import {
-  applyBaseUnitChange,
   applyDerivedPrices,
+  applyBaseUnitChange,
   biggerUnit,
   canonicalUnit,
   containsLabel,
+  containsRelationHint,
   conversionFactor,
   deriveAll,
-  emptyPrices,
   extraKind,
+  factorDirectionForContains,
   formatMixedQty,
   formatStockQty,
   isLinearStockUnit,
+  isSubdivisionSymbol,
   normalizeSellUnits,
   preferredUnit,
   priceFromStock,
   pricePerStock,
   productSellUnits,
   qtyUnits,
+  sellUnitOptionValue,
+  sellUnitOptions,
+  setPreferredUnit,
+  suggestedExtraUnit,
   unitInStock,
   unitLabel,
+  validateOpeningStock,
+  validateSellUnits,
 } from "@/pages/products/productQty";
 import { createMasterRecord, listMasterRecords } from "@/services/masters";
 
@@ -75,38 +85,38 @@ function numVal(raw: string) {
 }
 
 function numStr(n: number) {
-  return n ? String(n) : "";
+  if (!Number.isFinite(n) || n === 0) return "";
+  return String(n);
+}
+
+const SKU_PATTERN = /^[A-Za-z0-9._/-]+$/;
+
+function validateSkuValue(raw: string): string | null {
+  const sku = raw.trim();
+  if (!sku) return null; // blank → auto on create; keep existing on edit
+  if (sku.length > FIELD_LIMITS.sku || !SKU_PATTERN.test(sku)) {
+    return "SKU must be 1–32 characters: letters, digits, - _ . /";
+  }
+  return null;
 }
 
 function validationToastMessage(field: string): string {
   const messages: Record<string, string> = {
     name: "Name is required",
-    category: PRODUCT_COPY.categoryRequired,
+    sku: "Enter a valid unique SKU",
     unit: PRODUCT_COPY.unitRequired,
     openingQty: PRODUCT_COPY.openingQtyRequired,
-    lowStock: PRODUCT_COPY.lowStockRequired,
     cost: PRODUCT_COPY.unitPriceRequired,
     min: PRODUCT_COPY.unitPriceRequired,
     wholesale: PRODUCT_COPY.unitPriceRequired,
     retail: PRODUCT_COPY.unitPriceRequired,
     unitPrices: PRODUCT_COPY.unitPricesIncomplete,
+    unitNameRequired: PRODUCT_COPY.unitNameRequired,
+    unitNameDuplicate: PRODUCT_COPY.unitNameDuplicate,
+    unitFactorInvalid: PRODUCT_COPY.unitFactorInvalid,
+    unitBaseRequired: PRODUCT_COPY.unitBaseRequired,
   };
   return messages[field] ?? PRODUCT_COPY.unitPricesIncomplete;
-}
-
-function newExtraUnit(): ProductSellUnit {
-  return {
-    id: crypto.randomUUID(),
-    name: "",
-    symbol: "",
-    kind: "bigger",
-    contains: 0,
-    ...emptyPrices(),
-    barcode: "",
-    priceManual: {},
-    isBase: false,
-    isDefault: false,
-  };
 }
 
 function defaultSellUnits(product: Product): ProductSellUnit[] {
@@ -175,15 +185,18 @@ export function ProductForm({
   product: Product;
   catalog: Product[];
   onChange: (next: Product) => void;
-  onCommit: (next: Product) => boolean | Promise<boolean>;
+  /** `true` saved; `false` failed (toast already shown); string = inline SKU error. */
+  onCommit: (next: Product) => boolean | string | Promise<boolean | string>;
   onClose: () => void;
   saving?: boolean;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [section, setSection] = useState<ProductFormSection>("details");
   const [error, setError] = useState<string | null>(null);
+  const [skuFieldError, setSkuFieldError] = useState<string | null>(null);
   const [showValidation, setShowValidation] = useState(false);
   const [flash, setFlash] = useState(false);
+  const [containsDrafts, setContainsDrafts] = useState<Record<string, string>>({});
   const [keepAdding, setKeepAdding] = useState(
     () => sessionStorage.getItem(STORAGE_KEYS.keepAddingProducts) === "1",
   );
@@ -208,6 +221,7 @@ export function ProductForm({
     { id: string; name: string; isActive: boolean }[]
   >([]);
   const [creatingCategory, setCreatingCategory] = useState(false);
+  const [creatingUnit, setCreatingUnit] = useState(false);
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [sessionBranchId, setSessionBranchId] = useState("");
   const categoryOptions = useMemo(() => {
@@ -216,7 +230,11 @@ export function ProductForm({
     if (product.category) names.add(product.category);
     return [...names].sort((a, b) => a.localeCompare(b));
   }, [hubCategories, localCategories, product.category]);
-  const unitRows = hubUnits.length ? hubUnits : localUnits;
+  const unitRows = useMemo(() => {
+    const rows = new Map<string, { id: string; name: string; symbol: string }>();
+    for (const row of [...hubUnits, ...localUnits]) rows.set(row.id, row);
+    return [...rows.values()];
+  }, [hubUnits, localUnits]);
   const suppliers = hubSuppliers.length ? hubSuppliers : localSuppliers;
   const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.name ?? "";
 
@@ -287,7 +305,7 @@ export function ProductForm({
     ];
     return ids.map((id) => ({
       id,
-      name: supplierName(id) || id,
+      name: supplierName(id) || "Supplier",
       lots: lotDraft
         .filter((l) => l.supplierId === id && l.remainingQuantity > 0)
         .map((l) => l.lotNumber),
@@ -321,10 +339,11 @@ export function ProductForm({
     setSection("details");
     setError(null);
     setShowValidation(false);
+    setContainsDrafts({});
     const mine = lots.filter((l) => l.productId === product.id);
     if (mine.length) {
       setLotDraft(mine);
-      setPriceLotId((mine.find((l) => l.remainingQuantity > 0) ?? mine[0]).id);
+      setPriceLotId((fifoLot(mine) ?? mine[0]).id);
       setLotOpened(Object.fromEntries(mine.map((l) => [l.id, l.remainingQuantity])));
     } else if (!isNew && product.stock > 0) {
       const created = openingLot(product, lots);
@@ -350,6 +369,39 @@ export function ProductForm({
       if (!root) return;
       focusField(root, "name");
     });
+    if (product.sellUnits?.some((unit) => isSubdivisionSymbol(unit.symbol) && unit.contains > 1)) {
+      const current = defaultSellUnits(product);
+      const derived = deriveAll(current);
+      const sellUnits = current.map((unit) => {
+        if (!isSubdivisionSymbol(unit.symbol) || !(unit.contains > 1)) return unit;
+        return derived.find((row) => row.id === unit.id) ?? unit;
+      });
+      const changed = sellUnits.some((unit) => {
+        const prev = current.find((row) => row.id === unit.id);
+        return (
+          !!prev &&
+          (prev.cost !== unit.cost ||
+            prev.min !== unit.min ||
+            prev.wholesale !== unit.wholesale ||
+            prev.price !== unit.price)
+        );
+      });
+      if (changed) {
+        const preferred = preferredUnit(sellUnits);
+        onChange({
+          ...product,
+          sellUnits,
+          ...(preferred
+            ? {
+                cost: preferred.cost,
+                min: preferred.min,
+                wholesale: preferred.wholesale,
+                retail: preferred.price,
+              }
+            : {}),
+        });
+      }
+    }
   }, [product.id]);
 
   useEffect(() => {
@@ -405,9 +457,14 @@ export function ProductForm({
       block: "nearest",
     });
     requestAnimationFrame(() => {
-      const input = card.querySelector<HTMLInputElement>(".product-small-top .ui-combo-input");
-      input?.focus();
-      input?.select();
+      const combo = card.querySelector<HTMLInputElement>(".product-small-top .ui-combo-input");
+      const factor = card.querySelector<HTMLInputElement>(
+        '.product-small-top input[inputmode="decimal"]',
+      );
+      // New rows are blank — pick unit first; then type conversion.
+      const target = combo?.value ? (factor ?? combo) : (combo ?? factor);
+      target?.focus();
+      target?.select();
     });
   }, [section, unitLayoutKey]);
 
@@ -417,8 +474,11 @@ export function ProductForm({
     return () => window.clearTimeout(t);
   }, [flash]);
 
+  const productRef = useRef(product);
+  productRef.current = product;
+
   function patch(next: Partial<Product>) {
-    onChange({ ...product, sellUnits, ...next });
+    onChange({ ...productRef.current, sellUnits, ...next });
   }
 
   function syncBranchStock(rows: ProductBranchStock[]) {
@@ -475,6 +535,57 @@ export function ProductForm({
     }
   }
 
+  async function addUnit(name: string, targetUnitId?: string) {
+    const trimmed = name.trim();
+    if (!trimmed || creatingUnit) return;
+    setCreatingUnit(true);
+    try {
+      const symbol = uniqueUnitSymbol(
+        trimmed,
+        unitRows.map((row) => row.symbol),
+      );
+      const created = await createMasterRecord("units", {
+        name: trimmed,
+        symbol,
+        precision: 3,
+        isActive: true,
+      });
+      const nextUnit = { id: created.id, name: created.name, symbol: created.symbol ?? symbol };
+      setLocalUnits((current) =>
+        current.some((row) => row.id === nextUnit.id) ? current : [...current, nextUnit],
+      );
+
+      const currentUnits = qtyUnits(defaultSellUnits(productRef.current));
+      const target = targetUnitId
+        ? currentUnits.find((unit) => unit.id === targetUnitId)
+        : canonicalUnit(currentUnits);
+      if (!target || target.isBase) {
+        setInventoryUnit(nextUnit.symbol, nextUnit.name);
+      } else {
+        const updated = currentUnits.map((unit) =>
+          unit.id === target.id
+            ? {
+                ...unit,
+                symbol: nextUnit.symbol,
+                name: nextUnit.name,
+                kind: extraKind(nextUnit.symbol),
+                factorDirection: isSubdivisionSymbol(nextUnit.symbol)
+                  ? ("divide" as const)
+                  : ("multiply" as const),
+              }
+            : unit,
+        );
+        patch({ sellUnits: deriveAll(updated) });
+      }
+      await refreshHub();
+      toaster.success("Unit added");
+    } catch (error) {
+      toaster.error(shortError(error, "Could not add unit"));
+    } finally {
+      setCreatingUnit(false);
+    }
+  }
+
   function setKeep(value: boolean) {
     setKeepAdding(value);
     sessionStorage.setItem(STORAGE_KEYS.keepAddingProducts, value ? "1" : "0");
@@ -485,29 +596,30 @@ export function ProductForm({
   }
 
   function addExtraUnit() {
-    const unit = newExtraUnit();
+    const unit = suggestedExtraUnit(sellUnits);
     const seeded = applyDerivedPrices([...sellUnits, unit], unit);
     pendingFocusUnitId.current = unit.id;
     changedUnitId.current = unit.id;
     setUnits([...sellUnits, seeded]);
   }
 
-  function setStockUnit(unitId: string) {
+  function setDefaultSaleUnit(unitId: string) {
     const target = sellUnits.find((unit) => unit.id === unitId);
     if (!target) return;
     const preferred = preferredUnit(sellUnits);
     if (preferred?.id === target.id) return;
 
-    // Preferred base only — never rescale stock, conversions, or prices.
-    const next = applyBaseUnitChange(sellUnits, unitId);
+    const next = setPreferredUnit(sellUnits, unitId);
     const nextPreferred = preferredUnit(next) ?? target;
-    const nextInventory = canonicalUnit(next) ?? nextPreferred;
+    const inventory = canonicalUnit(next) ?? nextPreferred;
+    const current = productRef.current;
 
     onChange({
-      ...product,
+      ...current,
+      name: current.name,
       sellUnits: next,
-      unit: nextInventory.symbol || product.unit,
-      isLinear: isLinearStockUnit(nextInventory.symbol),
+      unit: inventory.symbol || current.unit,
+      isLinear: isLinearStockUnit(inventory.symbol),
       cost: nextPreferred.cost,
       min: nextPreferred.min,
       wholesale: nextPreferred.wholesale,
@@ -515,27 +627,40 @@ export function ProductForm({
     });
   }
 
-  function setBaseUnit(v: string) {
-    const preferred = preferredUnit(sellUnits) ?? sellUnits[0];
-    if (!preferred) return;
-    const next = sellUnits.map((row) =>
-      row.id === preferred.id
-        ? {
-            ...row,
-            symbol: v,
-            name: unitLabel(v),
-            kind: "base" as const,
-            isBase: true,
-            isDefault: true,
-          }
-        : row,
+  function setInventoryUnit(v: string, displayName = unitLabel(v)) {
+    const current = productRef.current;
+    const existing = sellUnits.find(
+      (unit) => (unit.symbol || "").trim().toLowerCase() === v.trim().toLowerCase(),
     );
-    const inventory = canonicalUnit(next) ?? preferred;
+    const currentInventory = canonicalUnit(sellUnits);
+    const next = existing
+      ? applyBaseUnitChange(sellUnits, existing.id)
+      : sellUnits.map((unit) =>
+          unit.id === currentInventory?.id
+            ? {
+                ...unit,
+                symbol: v,
+                name: displayName,
+                contains: 1,
+                factorDirection: "multiply" as const,
+                isBase: true,
+                kind: "base" as const,
+              }
+            : unit,
+        );
+    const nextPreferred = preferredUnit(next);
+    const inventory = canonicalUnit(next) ?? nextPreferred;
+    if (!nextPreferred || !inventory) return;
     onChange({
-      ...product,
+      ...current,
+      name: current.name,
       sellUnits: next,
-      unit: inventory.symbol || v,
-      isLinear: isLinearStockUnit(inventory.symbol || v),
+      unit: inventory.symbol || current.unit,
+      isLinear: isLinearStockUnit(inventory.symbol || current.unit),
+      cost: nextPreferred.cost,
+      min: nextPreferred.min,
+      wholesale: nextPreferred.wholesale,
+      retail: nextPreferred.price,
     });
   }
 
@@ -563,6 +688,15 @@ export function ProductForm({
         ? {
             ...u,
             ...patchRow,
+            ...(patchRow.contains !== undefined
+              ? {
+                  factorDirection: factorDirectionForContains(
+                    u.factorDirection,
+                    patchRow.contains,
+                    patchRow.symbol ?? u.symbol,
+                  ),
+                }
+              : {}),
             priceManual: manual ? { ...u.priceManual, [manual]: true } : u.priceManual,
           }
         : u,
@@ -572,6 +706,31 @@ export function ProductForm({
       patchRow.kind !== undefined ||
       patchRow.symbol !== undefined;
     setUnits(needsDerive && !manual ? deriveAll(updated) : updated);
+  }
+
+  function editContains(row: ProductSellUnit, raw: string) {
+    setContainsDrafts((current) => ({ ...current, [row.id]: raw }));
+    const value = Number(raw);
+    if (raw.trim() && Number.isFinite(value) && value > 0) {
+      setExtraField(row.id, { contains: value });
+    }
+  }
+
+  function finishContains(row: ProductSellUnit) {
+    const raw = containsDrafts[row.id];
+    if (raw === undefined) return;
+    const value = Number(raw);
+    if (!raw.trim() || !Number.isFinite(value) || value <= 0) {
+      setError("unitFactorInvalid");
+      return;
+    }
+    setExtraField(row.id, { contains: value });
+    setContainsDrafts((current) => {
+      const next = { ...current };
+      delete next[row.id];
+      return next;
+    });
+    if (error === "unitFactorInvalid") setError(null);
   }
 
   function setUnitPrice(row: ProductSellUnit, key: PriceKey, value: number) {
@@ -598,10 +757,25 @@ export function ProductForm({
 
   function validate(): string | null {
     if (!product.name.trim()) return "name";
-    if (!product.category) return "category";
+    const skuMsg = validateSkuValue(product.sku ?? "");
+    if (skuMsg) {
+      setSkuFieldError(skuMsg);
+      return "sku";
+    }
+    const needle = product.sku.trim().toLowerCase();
+    if (
+      needle &&
+      catalog.some((row) => row.id !== product.id && row.sku.trim().toLowerCase() === needle)
+    ) {
+      setSkuFieldError("That SKU is already in use.");
+      return "sku";
+    }
     if (!(base?.symbol || product.unit)) return "unit";
-    if (isNew && product.stock <= 0) return "openingQty";
-    if ((product.minimumStock ?? 0) <= 0) return "lowStock";
+    // Opening stock may be zero (receive later via lots). Reject negatives only.
+    if (isNew) {
+      const openingError = validateOpeningStock(product.stock);
+      if (openingError) return openingError;
+    }
     if (isNew && base) {
       if (base.cost <= 0) return "cost";
       if (base.min <= 0) return "min";
@@ -630,10 +804,9 @@ export function ProductForm({
       setError(field);
       const jump: Record<string, ProductFormSection> = {
         name: "details",
-        category: "details",
+        sku: "details",
         unit: "details",
         openingQty: "details",
-        lowStock: "details",
         cost: "details",
         min: "details",
         wholesale: "details",
@@ -663,6 +836,26 @@ export function ProductForm({
       const component = catalog.find((row) => row.id === insufficient.productId);
       setSection("recipe");
       toaster.warn(`${component?.name ?? "Component"} does not have enough stock`);
+      return;
+    }
+    const unitsError = validateSellUnits(sellUnits);
+    const invalidDraft = sellUnits.find((unit) => {
+      const raw = containsDrafts[unit.id];
+      if (raw === undefined) return false;
+      const value = Number(raw);
+      return !raw.trim() || !Number.isFinite(value) || value <= 0;
+    });
+    if (invalidDraft) {
+      setError("unitFactorInvalid");
+      setSection("units");
+      pendingFocusUnitId.current = invalidDraft.id;
+      toaster.error(PRODUCT_COPY.unitFactorInvalid);
+      return;
+    }
+    if (unitsError) {
+      setError(unitsError);
+      setSection("units");
+      toaster.error(validationToastMessage(unitsError));
       return;
     }
     if (hasMissingUnitPrices(sellUnits)) {
@@ -704,8 +897,18 @@ export function ProductForm({
         ? product.components.filter((c) => c.productId && c.quantity > 0)
         : [],
     };
-    const ok = await Promise.resolve(onCommit(next));
-    if (!ok) return;
+    const result = await Promise.resolve(onCommit(next));
+    if (result === false) return;
+    if (typeof result === "string") {
+      setError("sku");
+      setSkuFieldError(result);
+      setSection("details");
+      toaster.error(result);
+      requestAnimationFrame(() => {
+        if (rootRef.current) focusField(rootRef.current, "sku");
+      });
+      return;
+    }
     if (!isNew) {
       setLots((prev) => [...prev.filter((l) => l.productId !== product.id), ...lotDraft]);
     }
@@ -823,16 +1026,11 @@ export function ProductForm({
 
   const typeValue = product.isManufactured ? "manufactured" : "standard";
   const lowStockField = (
-    <Field
-      label={PRODUCT_COPY.lowStockAlert}
-      hint={PRODUCT_COPY.lowStockHint}
-      error={error === "lowStock" ? PRODUCT_COPY.lowStockRequired : undefined}
-    >
+    <Field label={PRODUCT_COPY.lowStockAlert} hint={PRODUCT_COPY.lowStockHint}>
       <TextInput
-        data-field="lowStock"
         inputMode="decimal"
         maxLength={FIELD_LIMITS.qty}
-        placeholder="e.g. 5"
+        placeholder="Optional"
         value={numStr(product.minimumStock ?? 0)}
         onChange={(event) => setLowStock(event.target.value)}
       />
@@ -913,13 +1111,39 @@ export function ProductForm({
                 onChange={(e) => patch({ name: e.target.value })}
               />
             </Field>
-            <Field label="Category" error={error === "category" ? "Choose a category" : undefined}>
+            <Field
+              label="SKU"
+              hint={
+                isNew ? "Optional. Leave blank to auto-assign P-####." : "Owner/manager can edit."
+              }
+              error={
+                error === "sku"
+                  ? skuFieldError || "Enter a valid unique SKU (letters, digits, - _ . /)."
+                  : undefined
+              }
+            >
+              <TextInput
+                data-field="sku"
+                maxLength={FIELD_LIMITS.sku}
+                placeholder={isNew ? "e.g. PMX-002" : product.sku || "SKU"}
+                value={product.sku}
+                onChange={(e) => {
+                  setSkuFieldError(null);
+                  patch({ sku: e.target.value });
+                }}
+              />
+            </Field>
+            <Field label="Category" hint="Uses Other when left empty.">
               <SearchableSelect
                 name="category"
-                invalid={error === "category"}
                 value={product.category}
-                onChange={(v) => patch({ category: v })}
-                placeholder="Choose category"
+                onChange={(v) => {
+                  const selected = [...hubCategories, ...localCategories].find(
+                    (row) => row.name === v,
+                  );
+                  patch({ category: v, categoryId: selected?.id });
+                }}
+                placeholder="Other (automatic)"
                 searchPlaceholder="Type to search or add"
                 options={categoryOptions.map((c) => ({ value: c, label: c }))}
                 clearable={false}
@@ -928,48 +1152,6 @@ export function ProductForm({
                 createLabel="Add category"
               />
             </Field>
-            <Field label="Unit" error={error === "unit" ? "Choose a unit" : undefined}>
-              <SearchableSelect
-                name="unit"
-                invalid={error === "unit"}
-                value={base?.symbol ?? product.unit}
-                onChange={(v) => setBaseUnit(v)}
-                placeholder="Choose unit"
-                searchPlaceholder="Type to search"
-                options={unitRows.map((u) => ({ value: u.symbol, label: u.name }))}
-                clearable={false}
-              />
-            </Field>
-            {isNew ? (
-              <Field
-                label="Opening quantity"
-                hint={`Goes to ${currentBranchName}. Split on Branches tab.`}
-                error={error === "openingQty" ? PRODUCT_COPY.openingQtyRequired : undefined}
-              >
-                <TextInput
-                  data-field="openingQty"
-                  inputMode="decimal"
-                  maxLength={FIELD_LIMITS.qty}
-                  placeholder="0"
-                  value={product.stock > 0 ? String(product.stock) : ""}
-                  onChange={(event) => setOpeningQty(event.target.value)}
-                />
-              </Field>
-            ) : (
-              lowStockField
-            )}
-            {isNew ? (
-              lowStockField
-            ) : (
-              <div className="product-qty-field [display:grid] [gap:6px] is-full">
-                <LinkedUnitBoxes
-                  label="Total quantity (all lots)"
-                  units={sellUnits}
-                  stockSymbol={stockSymbol}
-                  stockQty={lotTotals(lotDraft).stock}
-                />
-              </div>
-            )}
             {isNew ? (
               <Field label="Supplier">
                 <SearchableSelect
@@ -982,32 +1164,38 @@ export function ProductForm({
                     .map((s) => ({ value: s.id, label: s.name }))}
                 />
               </Field>
+            ) : null}
+            {isNew ? (
+              <Field
+                label="Opening stock"
+                className="is-full"
+                hint={`Choose the stock unit while entering quantity. Goes to ${currentBranchName}; split it on Branches.`}
+                error={
+                  error === "unit"
+                    ? PRODUCT_COPY.unitRequired
+                    : error === "openingQty"
+                      ? PRODUCT_COPY.openingQtyRequired
+                      : undefined
+                }
+              >
+                <UnitQuantityEntry
+                  quantity={product.stock > 0 ? String(product.stock) : ""}
+                  unit={inventory?.symbol ?? product.unit}
+                  units={unitRows.map((unit) => ({ value: unit.symbol, label: unit.name }))}
+                  onQuantityChange={setOpeningQty}
+                  onUnitChange={setInventoryUnit}
+                  onCreateUnit={(label) => void addUnit(label)}
+                />
+              </Field>
             ) : (
-              <div className="product-supplier-list [display:grid] [gap:6px]">
-                <span className="field-label [font-size:12px] [font-weight:600] [color:var(--sub)]">
-                  Suppliers
-                </span>
-                {activeSuppliers.length === 0 ? (
-                  <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
-                    No active lots. Suppliers show here when a lot still has quantity.
-                  </p>
-                ) : (
-                  <div className="ui-chip-row [display:flex] [flex-wrap:wrap] [gap:6px]">
-                    {activeSuppliers.map((s) => (
-                      <span
-                        key={s.id}
-                        className="ui-chip [display:inline-flex] [align-items:center] [gap:6px] [height:26px] [padding:0_8px_0_10px] [border:1px_solid_color-mix(in_srgb,_var(--accent)_28%,_transparent)] [border-radius:999px] [background:var(--accent-bg)] [color:var(--accent-deep)] [font-size:11px] [font-weight:650] [cursor:pointer]"
-                      >
-                        <span className="ui-chip-label [opacity:0.75]">{s.name}</span>
-                        <span className="ui-chip-value [max-width:140px] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]">
-                          {s.lots.join(", ")}
-                        </span>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <Field label="Inventory unit" hint="Fixed after stock activity starts.">
+                <TextInput
+                  disabled
+                  value={inventory?.name || unitLabel(inventory?.symbol || product.unit)}
+                />
+              </Field>
             )}
+            {lowStockField}
             <Field label="Product type">
               <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Product type">
                 {(
@@ -1020,8 +1208,8 @@ export function ProductForm({
                   const Icon = option.icon;
                   const selectedStyle =
                     option.id === "manufactured"
-                      ? "border-violet-500 bg-violet-50 text-violet-700 ring-violet-500/10"
-                      : "border-accent bg-accent-bg text-accent-deep ring-accent/10";
+                      ? "border-violet-500 bg-[color-mix(in_srgb,#8b5cf6_12%,var(--paper))] text-[color-mix(in_srgb,#8b5cf6_48%,var(--ink))] ring-violet-500/10"
+                      : "border-accent bg-accent-bg text-[var(--accent-text)] ring-[var(--accent-ring)]";
                   return (
                     <button
                       key={option.id}
@@ -1048,8 +1236,57 @@ export function ProductForm({
                 })}
               </div>
             </Field>
+            {!isNew ? (
+              <div className="product-supplier-list [display:grid] [gap:6px] is-full">
+                <span className="field-label [font-size:12px] [font-weight:600] [color:var(--sub)]">
+                  Suppliers
+                </span>
+                {lotDraft.filter((lot) => lot.remainingQuantity > 0).length === 0 ? (
+                  <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
+                    No active lots. Suppliers show here when a lot still has quantity.
+                  </p>
+                ) : activeSuppliers.length === 0 ? (
+                  <p className="product-note [margin:0] [font-size:12px] [color:var(--muted)]">
+                    {lotDraft
+                      .filter((lot) => lot.remainingQuantity > 0)
+                      .map((lot) => lot.lotNumber)
+                      .join(", ")}
+                  </p>
+                ) : (
+                  <div className="ui-chip-row [display:flex] [flex-wrap:wrap] [gap:6px]">
+                    {activeSuppliers.map((s) => (
+                      <span
+                        key={s.id}
+                        className="ui-chip [display:inline-flex] [align-items:center] [gap:6px] [height:26px] [padding:0_8px_0_10px] [border:1px_solid_color-mix(in_srgb,_var(--accent)_28%,_transparent)] [border-radius:999px] [background:var(--accent-bg)] [color:var(--accent-deep)] [font-size:11px] [font-weight:650] [cursor:pointer]"
+                      >
+                        <span className="ui-chip-label [opacity:0.75]">{s.name}</span>
+                        <span className="ui-chip-value [max-width:140px] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]">
+                          {s.lots.join(", ")}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
+            {!isNew ? (
+              <div className="product-qty-field [display:grid] [gap:6px] is-full">
+                <LinkedUnitBoxes
+                  label="Total quantity (all lots)"
+                  units={sellUnits}
+                  stockSymbol={stockSymbol}
+                  stockQty={lotTotals(lotDraft).stock}
+                />
+              </div>
+            ) : null}
             {isNew ? (
-              <div className="is-full grid grid-cols-2 gap-x-3.5 gap-y-2.5">
+              <div className="is-full grid grid-cols-2 gap-x-3.5 gap-y-2.5 rounded-xl border border-line bg-[color-mix(in_srgb,var(--bg)_45%,var(--paper))] p-3">
+                <div className="col-span-2 flex items-center justify-between">
+                  <strong className="text-[12px] text-ink">Prices</strong>
+                  <span className="rounded-full bg-paper px-2 py-1 text-[10px] font-semibold text-muted">
+                    Per {inventory?.name || unitLabel(inventory?.symbol || product.unit)}
+                  </span>
+                </div>
                 <Field
                   label="Purchase cost"
                   className="product-price-field is-cost"
@@ -1201,9 +1438,9 @@ export function ProductForm({
                 placeholder="Choose lot"
                 searchPlaceholder="Search lots"
                 clearable={false}
-                options={openPriceLots.map((l) => ({
+                options={fifoLots(openPriceLots).map((l) => ({
                   value: l.id,
-                  label: `${l.lotNumber} · ${supplierName(l.supplierId) || "No supplier"} · ${formatMixedQty(product, l.remainingQuantity)} left`,
+                  label: `${l.lotNumber} · ${formatMixedQty(product, l.remainingQuantity)} left · cost ${l.purchasePrice} · ${l.receivedAt.slice(0, 10)}`,
                 }))}
               />
             </Field>
@@ -1226,6 +1463,14 @@ export function ProductForm({
             {sellUnits.map((row) => {
               const isPreferred = preferredUnit(sellUnits)?.id === row.id;
               const isCanonical = canonicalUnit(sellUnits)?.id === row.id;
+              const containsDraft = containsDrafts[row.id];
+              const draftContainsValue = Number(containsDraft ?? "");
+              const invalidContainsDraft =
+                containsDraft !== undefined &&
+                (!containsDraft.trim() ||
+                  !Number.isFinite(draftContainsValue) ||
+                  draftContainsValue <= 0);
+              const relationHint = invalidContainsDraft ? "" : containsRelationHint(sellUnits, row);
               return (
                 <div
                   key={row.id}
@@ -1238,14 +1483,31 @@ export function ProductForm({
                       : "product-small-card relative [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)]"
                   }
                 >
-                  <div className="product-small-top [display:grid] [grid-template-columns:minmax(0,_1.2fr)_minmax(100px,_0.95fr)_minmax(118px,_auto)_36px] [gap:8px] [align-items:end]">
-                    <Field label={isPreferred ? "Base unit" : "Sell as"}>
+                  <div
+                    className="product-small-top grid items-start gap-3"
+                    style={{
+                      gridTemplateColumns: isCanonical
+                        ? "minmax(0, 1.2fr) minmax(120px, 0.8fr) 150px"
+                        : "minmax(0, 1.2fr) minmax(140px, 0.8fr) 150px 36px",
+                    }}
+                  >
+                    <Field
+                      label={
+                        isCanonical
+                          ? isPreferred
+                            ? "Inventory · default sale"
+                            : "Inventory unit"
+                          : isPreferred
+                            ? "Default sale unit"
+                            : "Sell as"
+                      }
+                    >
                       <SearchableSelect
                         name={isPreferred ? "product-unit" : "sell-as"}
-                        value={row.symbol ?? ""}
+                        value={sellUnitOptionValue(row, unitRows)}
                         onChange={(v) => {
-                          if (isPreferred) {
-                            setBaseUnit(v);
+                          if (isCanonical) {
+                            setInventoryUnit(v);
                             return;
                           }
                           const patched = sellUnits.map((unit) =>
@@ -1255,45 +1517,62 @@ export function ProductForm({
                                   symbol: v,
                                   name: unitLabel(v),
                                   kind: extraKind(v),
+                                  factorDirection: isSubdivisionSymbol(v)
+                                    ? ("divide" as const)
+                                    : ("multiply" as const),
                                 }
                               : unit,
                           );
                           onChange({
-                            ...product,
+                            ...productRef.current,
+                            name: productRef.current.name,
                             sellUnits: deriveAll(patched),
                           });
                         }}
                         placeholder="Pack, Meter, Gaz…"
                         searchPlaceholder="Type to search"
-                        options={unitRows
-                          .filter(
-                            (u) =>
-                              !sellUnits.some(
-                                (other) => other.id !== row.id && other.symbol === u.symbol,
-                              ),
-                          )
-                          .map((u) => ({ value: u.symbol, label: u.name }))}
+                        options={sellUnitOptions(row, sellUnits, unitRows)}
                         clearable={false}
+                        disabled={creatingUnit}
+                        onCreate={(label) => void addUnit(label, row.id)}
+                        createLabel="Add unit"
                       />
                     </Field>
                     {isCanonical ? (
                       <Field label="Contains">
-                        <TextInput value="1" disabled />
+                        <span className="product-unit-inventory-pill">1</span>
                       </Field>
                     ) : (
-                      <Field label={containsLabel(sellUnits, row)}>
+                      <Field
+                        label={containsLabel(sellUnits, row)}
+                        hint={relationHint || undefined}
+                        error={
+                          invalidContainsDraft && error === "unitFactorInvalid"
+                            ? PRODUCT_COPY.unitFactorInvalid
+                            : undefined
+                        }
+                      >
                         <TextInput
                           inputMode="decimal"
                           maxLength={FIELD_LIMITS.qty}
-                          placeholder="12"
-                          value={numStr(row.contains)}
-                          onChange={(e) =>
-                            setExtraField(row.id, { contains: numVal(e.target.value) })
+                          placeholder={isSubdivisionSymbol(row.symbol) ? "90" : "12"}
+                          value={containsDraft ?? (row.contains > 0 ? String(row.contains) : "")}
+                          endIcon={
+                            row.name || row.symbol ? (
+                              <span className="product-unit-factor-suffix">
+                                {row.name || unitLabel(row.symbol || "")}
+                              </span>
+                            ) : undefined
                           }
+                          onChange={(e) => editContains(row, e.target.value)}
+                          onBlur={() => finishContains(row)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") event.currentTarget.blur();
+                          }}
                         />
                       </Field>
                     )}
-                    <Field label="Default">
+                    <Field label={"\u00A0"}>
                       <Button
                         type="button"
                         size="sm"
@@ -1305,7 +1584,7 @@ export function ProductForm({
                         disabled={isPreferred}
                         aria-pressed={isPreferred}
                         icon={<Check size={13} strokeWidth={2.5} />}
-                        onClick={() => setStockUnit(row.id)}
+                        onClick={() => setDefaultSaleUnit(row.id)}
                       >
                         {isPreferred ? PRODUCT_COPY.stockUnit : PRODUCT_COPY.makeStockUnit}
                       </Button>
@@ -1316,7 +1595,7 @@ export function ProductForm({
                       <Button
                         size="icon"
                         variant="ghost"
-                        className="product-small-remove"
+                        className="product-small-remove [margin-top:22px]"
                         aria-label="Remove unit"
                         onClick={() => {
                           const remaining = sellUnits.filter((u) => u.id !== row.id);
@@ -1324,10 +1603,14 @@ export function ProductForm({
                             setUnits(remaining);
                             return;
                           }
-                          const fallbackId = canonicalUnit(remaining)?.id ?? remaining[0]?.id ?? "";
+                          const fallbackId =
+                            preferredUnit(remaining)?.id ??
+                            canonicalUnit(remaining)?.id ??
+                            remaining[0]?.id ??
+                            "";
                           setUnits(
                             isPreferred && fallbackId
-                              ? applyBaseUnitChange(remaining, fallbackId)
+                              ? setPreferredUnit(remaining, fallbackId)
                               : remaining,
                           );
                         }}
@@ -1383,7 +1666,7 @@ export function ProductForm({
               icon={<Plus size={14} />}
               onClick={addExtraUnit}
             >
-              Add unit
+              {PRODUCT_COPY.addUnitAction}
             </Button>
             <kbd className="ui-kbd">Ctrl+N</kbd>
           </div>

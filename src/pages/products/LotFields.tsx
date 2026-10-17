@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Field, MoneyInput, SelectInput, TextInput } from "@/components/common";
 import { cn } from "@/utils/format";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
+import { STOCK_COUNT_COPY } from "@/shared/constants/products";
 import type { ProductSellUnit } from "@/shared/types";
 import {
   baseUnit,
   biggerUnit,
   cascadeDownPrices,
   displayQtyFromStock,
+  formatMixedQtyFromUnits,
   formatStockQty,
   priceFromStock,
   pricePerStock,
@@ -120,6 +122,19 @@ const UNIT_PRICE_FIELDS: { key: UnitPriceKey; label: string }[] = [
   { key: "price", label: "Retail" },
 ];
 
+function lockedQtyDisplay(
+  units: ProductSellUnit[],
+  stockSymbol: string,
+  unit: ProductSellUnit,
+  stockQty: number,
+) {
+  // Whole packs + pieces (or base only) — never a fractional pack in an input.
+  if (unitKind(unit) === "base") {
+    return displayQty(displayQtyFromStock(units, stockSymbol, unit, stockQty));
+  }
+  return formatMixedQtyFromUnits(units, stockSymbol, stockQty);
+}
+
 export function LotUnitLines({
   units,
   stockSymbol,
@@ -129,10 +144,13 @@ export function LotUnitLines({
   showLeft,
   showQuantity = true,
   showPricing = true,
+  /** After receive/movements: original Qty is display-only (Stock count changes on-hand). */
+  lockReceived = false,
   onReceived,
   onLeft,
   onDamaged,
   onUnitPrice,
+  onOpenStockCount,
 }: {
   units: ProductSellUnit[];
   stockSymbol: string;
@@ -142,10 +160,12 @@ export function LotUnitLines({
   showLeft?: boolean;
   showQuantity?: boolean;
   showPricing?: boolean;
+  lockReceived?: boolean;
   onReceived?: (qty: number) => void;
   onLeft?: (qty: number) => void;
   onDamaged?: (qty: number) => void;
   onUnitPrice?: (unitId: string, key: UnitPriceKey, value: number) => void;
+  onOpenStockCount?: () => void;
 }) {
   const ordered = qtyUnits(units);
   const [qtyEdit, setQtyEdit] = useState<{ id: string; field: QtyField } | null>(null);
@@ -153,16 +173,37 @@ export function LotUnitLines({
 
   function qtyValue(field: QtyField, unit: ProductSellUnit) {
     const stock = field === "received" ? received : field === "left" ? left : damaged;
+    if (field === "received" && lockReceived) {
+      return lockedQtyDisplay(units, stockSymbol, unit, stock);
+    }
     if (qtyEdit?.id === unit.id && qtyEdit.field === field) return qtyDraft;
     return displayQty(displayQtyFromStock(units, stockSymbol, unit, stock));
   }
 
   function setQty(field: QtyField, unit: ProductSellUnit, raw: string) {
+    if (field === "received" && lockReceived) return;
     setQtyDraft(raw);
     const stock = stockFromDisplayQty(units, stockSymbol, unit, numVal(raw));
     if (field === "received") onReceived?.(stock);
     else if (field === "left") onLeft?.(stock);
     else onDamaged?.(stock);
+  }
+
+  function stockCountHint() {
+    if (onOpenStockCount) {
+      return (
+        <button
+          type="button"
+          className="text-left text-[11px] font-semibold text-accent-deep underline-offset-2 hover:underline"
+          onClick={onOpenStockCount}
+        >
+          {STOCK_COUNT_COPY.leftLockedHint}
+        </button>
+      );
+    }
+    return (
+      <span className="field-hint text-[11px] text-muted">{STOCK_COUNT_COPY.leftLockedHint}</span>
+    );
   }
 
   return (
@@ -203,13 +244,17 @@ export function LotUnitLines({
                   maxLength={FIELD_LIMITS.qty}
                   placeholder="0"
                   value={qtyValue("received", unit)}
+                  disabled={lockReceived}
+                  readOnly={lockReceived}
                   onFocus={() => {
+                    if (lockReceived) return;
                     setQtyEdit({ id: unit.id, field: "received" });
                     setQtyDraft(displayQty(qtyInUnit(units, stockSymbol, unit, received)));
                   }}
                   onBlur={() => setQtyEdit(null)}
                   onChange={(event) => setQty("received", unit, event.target.value)}
                 />
+                {lockReceived ? stockCountHint() : null}
               </Field>
               {showLeft ? (
                 <Field label="Left">
@@ -217,14 +262,11 @@ export function LotUnitLines({
                     inputMode="decimal"
                     maxLength={FIELD_LIMITS.qty}
                     placeholder="0"
-                    value={qtyValue("left", unit)}
-                    onFocus={() => {
-                      setQtyEdit({ id: unit.id, field: "left" });
-                      setQtyDraft(displayQty(qtyInUnit(units, stockSymbol, unit, left)));
-                    }}
-                    onBlur={() => setQtyEdit(null)}
-                    onChange={(event) => setQty("left", unit, event.target.value)}
+                    value={lockedQtyDisplay(units, stockSymbol, unit, left)}
+                    disabled
+                    readOnly
                   />
+                  {stockCountHint()}
                 </Field>
               ) : null}
               <Field label="Damaged">

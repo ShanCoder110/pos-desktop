@@ -6,15 +6,24 @@ import { useMgmtLayout } from "@/components/layout/MgmtLayoutContext";
 import { useSession } from "@/shared/auth/session";
 import { managementNav } from "@/shared/constants/nav";
 import { routes } from "@/shared/constants/routes";
+import { userAccessRoleLabel } from "@/shared/constants/staff";
 import { useSettings } from "@/shared/settings";
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "")).toUpperCase();
+}
 
 export function Sidebar() {
   const navigate = useNavigate();
   const { collapsed, toggle } = useMgmtLayout();
-  const { logout } = useSession();
+  const { user, logout } = useSession();
   const { settings } = useSettings();
   const [menuOpen, setMenuOpen] = useState(false);
   const footRef = useRef<HTMLDivElement>(null);
+  const displayName = user?.name?.trim() || "Staff";
+  const displayRole = user?.role ? userAccessRoleLabel(user.role) : "Signed in";
+  const avatar = initials(displayName);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -31,10 +40,10 @@ export function Sidebar() {
           <img src={posMark} alt="" />
           <div className="mgmt-brand-copy [min-width:0] mgmt-label [overflow:hidden] [white-space:nowrap] [opacity:1] [max-width:150px] [transition:opacity_0.14s_ease,_max-width_0.2s_ease]">
             <p className="mgmt-brand-name [font-size:12px] [font-weight:800] [letter-spacing:-0.02em] [color:#fff] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis]">
-              {settings.shopName || "POS"}
+              Dukan
             </p>
             <p className="mgmt-brand-tag [margin-top:1px] [font-size:9px] [font-weight:600] [color:#64748b] [letter-spacing:0.04em] [text-transform:uppercase]">
-              Shop counter
+              {settings.shopName || "Shop counter"}
             </p>
           </div>
         </div>
@@ -130,17 +139,17 @@ export function Sidebar() {
               : "mgmt-user [display:flex] [align-items:center] [gap:8px] [width:100%] [padding:6px] [border:0] [border-radius:6px] [background:transparent] [color:inherit] [text-align:left] [cursor:pointer] [overflow:hidden]"
           }
           onClick={() => setMenuOpen((v) => !v)}
-          title="Shan Abbas"
+          title={`${displayName} · ${displayRole}`}
         >
           <span className="mgmt-avatar [width:26px] [height:26px] [border-radius:6px] [background:color-mix(in_srgb,_var(--accent)_22%,_transparent)] [color:#99f6e4] [display:grid] [place-items:center] [font-size:9px] [font-weight:800] [flex-shrink:0]">
-            SA
+            {avatar}
           </span>
           <span className="mgmt-user-copy mgmt-label [overflow:hidden] [white-space:nowrap] [opacity:1] [max-width:150px] [transition:opacity_0.14s_ease,_max-width_0.2s_ease]">
             <span className="mgmt-user-name [display:block] [font-size:12px] [font-weight:650] [color:#e2e8f0] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis]">
-              Shan Abbas
+              {displayName}
             </span>
             <span className="mgmt-user-role [display:block] [font-size:9px] [color:#64748b]">
-              Owner
+              {displayRole}
             </span>
           </span>
         </button>

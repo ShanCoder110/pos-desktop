@@ -255,7 +255,6 @@ CREATE TABLE IF NOT EXISTS suppliers (
   address TEXT NOT NULL DEFAULT '',
   tax_number TEXT,
   payment_terms_days INTEGER,
-  credit_limit REAL,
   notes TEXT NOT NULL DEFAULT '',
   is_active INTEGER NOT NULL DEFAULT 1,
   version INTEGER NOT NULL DEFAULT 1,
@@ -273,7 +272,6 @@ CREATE TABLE IF NOT EXISTS customers (
   phone TEXT NOT NULL DEFAULT '',
   email TEXT,
   address TEXT NOT NULL DEFAULT '',
-  credit_limit REAL,
   is_walk_in INTEGER NOT NULL DEFAULT 0,
   in_credit_book INTEGER NOT NULL DEFAULT 0,
   notes TEXT NOT NULL DEFAULT '',
@@ -310,7 +308,7 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ux_products_sku ON products(sku) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_products_sku_lower ON products(lower(sku)) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS ux_products_barcode ON products(barcode) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ix_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS ix_products_category ON products(category_id);
@@ -570,7 +568,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   customer_id TEXT REFERENCES customers(id),
   invoice_number TEXT NOT NULL UNIQUE,
   status TEXT NOT NULL CHECK (status IN ('DRAFT','CONFIRMED','COMPLETED','CANCELLED')),
-  payment_status TEXT NOT NULL CHECK (payment_status IN ('UNPAID','PARTIAL','PAID','CREDIT','REFUNDED')),
+  payment_status TEXT NOT NULL CHECK (payment_status IN ('UNPAID','PARTIAL','PAID','CREDIT','REFUNDED','RETURNED','PARTIALLY_RETURNED')),
   subtotal REAL NOT NULL,
   discount REAL NOT NULL DEFAULT 0,
   tax REAL NOT NULL DEFAULT 0,

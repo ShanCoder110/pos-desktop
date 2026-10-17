@@ -52,6 +52,8 @@ pub const LOT_BY_ID_ROUTE: &str = "/lots/{id}";
 pub const LOTS_RECEIVE_ROUTE: &str = "/lots/receive";
 pub const STOCK_ROUTE: &str = "/stock";
 pub const STOCK_MOVEMENTS_ROUTE: &str = "/stock/movements";
+pub const STOCK_COUNT_ROUTE: &str = "/stock/count";
+pub const STOCK_RECONCILE_ROUTE: &str = "/stock/reconcile";
 
 pub const PURCHASE_ORDERS_ROUTE: &str = "/purchase-orders";
 pub const PURCHASE_ORDER_BY_ID_ROUTE: &str = "/purchase-orders/{id}";
@@ -66,6 +68,7 @@ pub const SALES_HOLD_BY_ID_ROUTE: &str = "/sales/holds/{id}";
 pub const INVOICES_ROUTE: &str = "/invoices";
 pub const INVOICE_BY_ID_ROUTE: &str = "/invoices/{id}";
 pub const INVOICE_VOID_ROUTE: &str = "/invoices/{id}/void";
+pub const INVOICE_REVISE_ROUTE: &str = "/invoices/{id}/revise";
 
 pub const RETURNS_ROUTE: &str = "/returns";
 pub const RETURN_BY_ID_ROUTE: &str = "/returns/{id}";
@@ -120,6 +123,7 @@ pub const SEQUENCE_KIND_TRANSFER: &str = "transfer";
 pub const SEQUENCE_KIND_PRODUCTION: &str = "production";
 pub const SEQUENCE_KIND_REPAIR: &str = "repair";
 pub const SEQUENCE_KIND_RECEIPT: &str = "receipt";
+pub const SEQUENCE_KIND_STOCK_ADJUSTMENT: &str = "stock_adjustment";
 pub const DEFAULT_LOT_PREFIX: &str = "L";
 pub const DEFAULT_INVOICE_PREFIX: &str = "INV";
 pub const DEFAULT_PO_PREFIX: &str = "PO";
@@ -127,13 +131,16 @@ pub const DEFAULT_TRANSFER_PREFIX: &str = "TR";
 pub const DEFAULT_PRODUCTION_PREFIX: &str = "PRD";
 pub const DEFAULT_REPAIR_PREFIX: &str = "RPR";
 pub const DEFAULT_RECEIPT_PREFIX: &str = "GR";
+pub const DEFAULT_STOCK_ADJUSTMENT_PREFIX: &str = "SA";
 pub const PRODUCT_TYPE_STANDARD: &str = "STANDARD";
 pub const PRODUCT_TYPE_MANUFACTURED: &str = "MANUFACTURED";
 pub const LOT_SOURCE_OPENING: &str = "OPENING";
 pub const LOT_SOURCE_PURCHASE: &str = "PURCHASE";
 pub const LOT_SOURCE_PRODUCTION: &str = "PRODUCTION";
 pub const LOT_SOURCE_RETURN: &str = "RETURN";
+pub const LOT_SOURCE_ADJUSTMENT: &str = "ADJUSTMENT";
 pub const STOCK_MOVEMENT_ADJUSTMENT: &str = "ADJUSTMENT";
+pub const STOCK_ADJUSTMENT_STATUS_POSTED: &str = "POSTED";
 pub const STOCK_MOVEMENT_PURCHASE: &str = "PURCHASE";
 pub const STOCK_MOVEMENT_SALE: &str = "SALE";
 pub const STOCK_MOVEMENT_RETURN: &str = "RETURN";
@@ -151,6 +158,7 @@ pub const REFERENCE_TRANSFER: &str = "StockTransfer";
 pub const REFERENCE_PRODUCTION: &str = "Production";
 pub const REFERENCE_REPAIR: &str = "Repair";
 pub const REFERENCE_RETURN: &str = "SaleReturn";
+pub const REFERENCE_STOCK_ADJUSTMENT: &str = "StockAdjustment";
 pub const AUTH_HEADER: &str = "authorization";
 pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
 // Stable ids for seeded shop skeleton (branch/device/customer). Owner is created in onboarding.
@@ -183,12 +191,41 @@ pub const CODE_USER_EMAIL_DUPLICATE: &str = "USER_EMAIL_DUPLICATE";
 pub const CODE_USERNAME_DUPLICATE: &str = "USERNAME_DUPLICATE";
 pub const ERROR_INVALID_ID: &str = "The supplied identifier is invalid.";
 pub const ERROR_PRODUCT_NOT_FOUND: &str = "Product not found.";
+/// Custom SKU: max 32; letters, digits, hyphen, underscore, dot, slash.
+pub const ERROR_SKU_INVALID: &str =
+    "SKU must be 1–32 characters: letters, digits, '-', '_', '.', '/'.";
+pub const ERROR_SKU_DUPLICATE: &str = "That SKU is already in use.";
+pub const ERROR_SKU_EDIT_DENIED: &str = "Only owners and managers can change the SKU.";
+pub const SKU_MAX_LEN: usize = 32;
 pub const ERROR_CATEGORY_NOT_FOUND: &str = "Category not found.";
 pub const ERROR_CITY_NOT_FOUND: &str = "City not found.";
 pub const ERROR_UNIT_NOT_FOUND: &str = "Unit not found.";
 pub const ERROR_SUPPLIER_NOT_FOUND: &str = "Supplier not found.";
 pub const ERROR_CUSTOMER_NOT_FOUND: &str = "Customer not found.";
 pub const ERROR_LOT_NOT_FOUND: &str = "Lot not found.";
+pub const ERROR_LOT_EDIT_DENIED: &str = "Only owners and managers can edit lots.";
+pub const ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE: &str =
+    "Remaining cannot exceed original minus sold minus damaged.";
+pub const ERROR_LOT_ORIGINAL_BELOW_COMMITTED: &str =
+    "Original quantity cannot be less than sold plus damaged.";
+pub const ERROR_LOT_EXPIRY_BEFORE_RECEIVED: &str =
+    "Expiry date cannot be before the received date.";
+pub const ERROR_LOT_EXPIRY_INVALID: &str = "Expiry date must be a valid YYYY-MM-DD date.";
+pub const ERROR_LOT_REMAINING_LOCKED: &str =
+    "Remaining quantity is locked. Use stock count to change on-hand quantity.";
+pub const ERROR_LOT_ORIGINAL_LOCKED: &str =
+    "Original quantity is locked after stock movements. Use stock count to change quantity.";
+pub const ERROR_LOT_ALLOCATION_MISMATCH_PREFIX: &str = "Branch allocations sum to";
+pub const ERROR_STOCK_COUNT_DENIED: &str = "Only owners and managers can count stock.";
+pub const ERROR_STOCK_COUNT_REASON_REQUIRED: &str =
+    "Enter a reason for the stock count (max 200 characters).";
+pub const ERROR_STOCK_COUNT_NEGATIVE: &str = "Counted quantity cannot be negative.";
+pub const ERROR_STOCK_COUNT_TOO_LARGE: &str =
+    "Counted quantity cannot exceed 1,000,000 base units.";
+pub const ERROR_STOCK_COUNT_SUPPLIER_REQUIRED: &str =
+    "supplierId and supplierAmount are required when adjustSupplierPayable is set.";
+/// Hard cap on stock-count counted quantity after conversion to base units.
+pub const MAX_STOCK_COUNT_BASE_UNITS: i64 = 1_000_000;
 pub const ERROR_INVOICE_NOT_FOUND: &str = "Invoice not found.";
 pub const ERROR_USER_NOT_FOUND: &str = "User not found.";
 pub const ERROR_BRANCH_NOT_FOUND: &str = "Branch not found.";
@@ -231,6 +268,14 @@ pub const ERROR_INVALID_SOURCE_TYPE: &str = "sourceType must be OPENING or PURCH
 pub const ERROR_INVALID_LOT_SOURCE: &str = "Invalid lot source type.";
 pub const ERROR_SUPPLIER_REQUIRED: &str = "supplierId is required for purchase receipts.";
 pub const ERROR_INVOICE_ALREADY_VOIDED: &str = "Invoice is already voided.";
+pub const ERROR_INVOICE_HAS_RETURNS: &str =
+    "Returned invoices cannot be edited. Create a new sale instead.";
+pub const ERROR_REVISE_BELOW_ALLOCATED: &str =
+    "Cannot reduce this invoice below the amount already applied from customer payments. Record a refund or adjust payments first.";
+pub const ERROR_INVOICE_RETURNED_CANNOT_VOID: &str =
+    "Returned invoices cannot be voided. Stock and ledger were already reversed by the return.";
+pub const ERROR_RETURN_EXCEEDS_SOLD: &str =
+    "Return quantity exceeds the quantity still available on this invoice line.";
 pub const ERROR_EMPTY_SALE: &str = "Sale must include at least one item.";
 pub const LEDGER_SALE: &str = "SALE";
 pub const LEDGER_PURCHASE: &str = "PURCHASE";
@@ -239,6 +284,7 @@ pub const LEDGER_OPENING_BALANCE: &str = "OPENING_BALANCE";
 pub const LEDGER_PREVIOUS_BALANCE_NOTE: &str = "Opening balance";
 pub const LEDGER_PAYMENT_MADE: &str = "PAYMENT_MADE";
 pub const LEDGER_PAYMENT_RECEIVED: &str = "PAYMENT_RECEIVED";
+pub const LEDGER_RETURN: &str = "RETURN";
 pub const LEDGER_SALARY: &str = "SALARY";
 pub const LEDGER_COMMISSION: &str = "COMMISSION";
 pub const ERROR_DUPLICATE_SUPPLIER_PHONE: &str = "This phone is already used by another supplier.";
@@ -268,6 +314,8 @@ pub const PAYMENT_STATUS_PAID: &str = "PAID";
 pub const PAYMENT_STATUS_PARTIAL: &str = "PARTIAL";
 pub const PAYMENT_STATUS_UNPAID: &str = "UNPAID";
 pub const PAYMENT_STATUS_CREDIT: &str = "CREDIT";
+pub const PAYMENT_STATUS_RETURNED: &str = "RETURNED";
+pub const PAYMENT_STATUS_PARTIALLY_RETURNED: &str = "PARTIALLY_RETURNED";
 pub const PAYMENT_DIRECTION_IN: &str = "IN";
 pub const PAYMENT_DIRECTION_OUT: &str = "OUT";
 pub const PAYMENT_STATUS_COMPLETED: &str = "COMPLETED";

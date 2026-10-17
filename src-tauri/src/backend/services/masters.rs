@@ -78,6 +78,11 @@ impl MasterService {
         not_found: &'static str,
         context: Option<&RequestContext>,
     ) -> Result<(), AppError> {
+        if matches!(kind, MasterKind::Customer) {
+            if let Some(message) = MasterRepository::customer_history_message(database, id).await? {
+                return Err(AppError::Conflict(message));
+            }
+        }
         if MasterRepository::soft_delete(database, kind, id, context.map(|ctx| ctx.user_id)).await?
         {
             Ok(())

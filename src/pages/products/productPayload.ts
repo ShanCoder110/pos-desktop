@@ -1,6 +1,7 @@
 import {
   canonicalUnit,
   conversionFactor,
+  isSubdivisionSymbol,
   preferredUnit,
   qtyUnits,
   unitLabel,
@@ -56,6 +57,10 @@ function mapSellUnits(product: Product, units: UnitRow[]) {
       unitId: unitIdForSymbol(unit.symbol ?? inventorySymbol, units, baseUnitId),
       name: unit.name || unitLabel(unit.symbol ?? inventorySymbol),
       contains: isInventory ? 1 : conversionFactor(unit),
+      factorDirection: isInventory
+        ? "multiply"
+        : (unit.factorDirection ??
+          (isSubdivisionSymbol(unit.symbol) && conversionFactor(unit) > 1 ? "divide" : "multiply")),
       cost: unit.cost,
       min: unit.min,
       wholesale: unit.wholesale,
@@ -92,6 +97,8 @@ export function buildCreateProductPayload(
     sellUnits: mapped.sellUnits,
   };
 
+  const sku = product.sku?.trim();
+  if (sku) payload.sku = sku;
   if (product.barcode?.trim()) payload.barcode = product.barcode.trim();
   if (product.warrantyEnabled && product.warrantyQty > 0) {
     payload.warrantyQty = product.warrantyQty;
@@ -99,7 +106,12 @@ export function buildCreateProductPayload(
     if (product.warrantyNote?.trim()) payload.warrantyNote = product.warrantyNote.trim();
   }
 
-  const receivedDate = new Date().toISOString().slice(0, 10);
+  const receivedDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Karachi",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
   const openingRows = (product.branchStock ?? [])
     .filter((row) => row.quantity > 0)
     .map((row) => ({
@@ -137,7 +149,7 @@ export function buildUpdateProductPayload(
   const mapped = mapSellUnits(product, options.units);
   if (!mapped) return null;
 
-  return {
+  const payload: Record<string, unknown> = {
     name: product.name.trim(),
     categoryId: options.categoryId,
     minimumStock: product.minimumStock ?? 0,
@@ -146,4 +158,7 @@ export function buildUpdateProductPayload(
     warrantyNote: product.warrantyNote?.trim() || undefined,
     sellUnits: mapped.sellUnits,
   };
+  // Always send sku on update so owner/manager can change it; cashiers get 403 from API.
+  payload.sku = product.sku?.trim() ?? "";
+  return payload;
 }
