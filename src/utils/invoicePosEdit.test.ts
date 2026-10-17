@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canOpenInvoicePosEdit,
+  invoicePosEditBlockReason,
   invoicePosEditHref,
   invoicePosEditSearch,
 } from "@/utils/invoicePosEdit";
@@ -12,9 +13,19 @@ describe("invoicePosEdit", () => {
     expect(invoicePosEditHref("a/b")).toBe("/pos?edit=a%2Fb");
   });
 
-  it("only allows completed invoices (same gate as today)", () => {
-    expect(canOpenInvoicePosEdit({ status: "COMPLETED" })).toBe(true);
-    expect(canOpenInvoicePosEdit({ status: "CANCELLED" })).toBe(false);
-    expect(canOpenInvoicePosEdit({ status: "HELD" })).toBe(false);
+  it("allows completed non-returned invoices", () => {
+    expect(canOpenInvoicePosEdit({ status: "COMPLETED", paymentStatus: "CREDIT" })).toBe(true);
+    expect(canOpenInvoicePosEdit({ status: "COMPLETED", paymentStatus: "PARTIAL" })).toBe(true);
+    expect(canOpenInvoicePosEdit({ status: "COMPLETED", paymentStatus: "PAID" })).toBe(true);
+  });
+
+  it("blocks returned and cancelled invoices", () => {
+    expect(invoicePosEditBlockReason({ status: "COMPLETED", paymentStatus: "RETURNED" })).toMatch(
+      /returned/i,
+    );
+    expect(
+      invoicePosEditBlockReason({ status: "COMPLETED", paymentStatus: "PARTIALLY_RETURNED" }),
+    ).toMatch(/partially returned/i);
+    expect(canOpenInvoicePosEdit({ status: "CANCELLED", paymentStatus: "PAID" })).toBe(false);
   });
 });

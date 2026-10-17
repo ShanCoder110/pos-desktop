@@ -34,6 +34,11 @@ import { MIN_PRODUCT_SEARCH_LENGTH } from "@/shared/constants/api";
 import type { Customer, HeldBill, InvoiceLine, Product, ProductSellUnit } from "@/shared/types";
 import { moneyNum } from "@/utils/format";
 import { errorToastMessage } from "@/utils/toastErrors";
+import { canOpenInvoicePosEdit, invoicePosEditBlockReason } from "@/utils/invoicePosEdit";
+import {
+  invoiceEditLoadSnapshot,
+  previousBalanceExcludingInvoiceCredit,
+} from "@/utils/posInvoiceEdit";
 import {
   posStockLabel,
   productBranchStock,
@@ -276,6 +281,7 @@ export function PosWorkspace() {
   const [priceMode, setPriceMode] = useState<PriceMode>("retail");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [editInvoiceNumber, setEditInvoiceNumber] = useState("");
+  const [editCreditOpen, setEditCreditOpen] = useState(0);
   const [editDraft, setEditDraft] = useState<Awaited<ReturnType<typeof getInvoice>> | null>(null);
   const [selected, setSelected] = useState(-1);
   const [products, setProducts] = useState<Product[]>([]);
@@ -406,7 +412,10 @@ export function PosWorkspace() {
       setCategories(categoryRows.map(({ id, name }) => ({ id, name })));
       setCustomers(customerRows);
       const walkIn = customerRows.find((row) => row.isWalking) ?? customerRows[0];
-      if (walkIn && !customerId) setCustomerId(walkIn.id);
+      // Functional update — never clobber a customer already set by /pos?edit= load.
+      if (walkIn) {
+        setCustomerId((current) => current || walkIn.id);
+      }
       setHolds(
         holdRows.flatMap((hold) => {
           const payload = readHeldPayload(hold.payload);
@@ -459,6 +468,7 @@ export function PosWorkspace() {
   useEffect(() => {
     if (!editInvoiceId) {
       setEditInvoiceNumber("");
+      setEditCreditOpen(0);
       setEditDraft(null);
       return;
     }
@@ -466,17 +476,30 @@ export function PosWorkspace() {
     getInvoice(editInvoiceId, controller.signal)
       .then((invoice) => {
         if (controller.signal.aborted) return;
-        if (invoice.status !== "COMPLETED") {
+        const blocked = invoicePosEditBlockReason(invoice);
+        if (blocked) {
+          showToast(blocked);
+          setSearchParams({});
+          return;
+        }
+        if (!canOpenInvoicePosEdit(invoice)) {
           showToast("Only completed invoices can be edited in POS");
           setSearchParams({});
           return;
         }
+        const snap = invoiceEditLoadSnapshot(invoice);
         setEditDraft(invoice);
         setEditInvoiceNumber(invoice.invoiceNumber);
-        if (invoice.customerId) setCustomerId(invoice.customerId);
-        setBillDiscount(invoice.discount);
+        setEditCreditOpen(snap.creditOpen);
+        if (snap.customerId) setCustomerId(snap.customerId);
+        setBillDiscount(snap.billDiscount);
         setDiscMode("rs");
-        setNote(invoice.notes ?? "");
+        setNote(snap.notes);
+        setPayMethod(snap.payMethod);
+        setReceived(snap.received);
+        setCashAmt(snap.cashAmt);
+        setOnlineAmt(snap.onlineAmt);
+        setReturnChange(false);
       })
       .catch((error) => {
         const message = errorToastMessage(error, "Could not load invoice for edit");
@@ -691,9 +714,12 @@ export function PosWorkspace() {
   // Walk-in has no ledger — overpay is always change, never balance.
   const giveChange = customer.isWalking || returnChange;
   const appliedPaid = giveChange ? Math.min(amountPaid, t.total) : amountPaid;
+  const previousBalance = editInvoiceId
+    ? previousBalanceExcludingInvoiceCredit(customer.balance, editCreditOpen)
+    : customer.balance;
   const balanceAfter = customer.isWalking
     ? 0
-    : balanceAfterSale(customer.balance, t.total, appliedPaid);
+    : balanceAfterSale(previousBalance, t.total, appliedPaid);
   const paymentState = paymentStatusLabel({
     paid: amountPaid,
     unpaid,
@@ -1277,7 +1303,7 @@ export function PosWorkspace() {
       })),
       total: t.total,
       paid: amountPaid,
-      balanceBefore: customer.balance,
+      balanceBefore: previousBalance,
       balanceAfter,
       customer: displayCustomer,
       invoiceNumber: invoiceNumber || undefined,
@@ -2330,16 +2356,16 @@ export function PosWorkspace() {
                 ))}
               </div>
               <div
-                className={`t-row [display:flex] [justify-content:space-between] [align-items:center] [min-height:28px] [font-size:13px] t-prev [margin-top:6px] [padding-top:6px] [border-top:1px_dashed_var(--line)] [font-weight:600] ${customer.balance < 0 ? "is-due" : customer.balance > 0 ? "is-credit" : ""}`}
+                className={`t-row [display:flex] [justify-content:space-between] [align-items:center] [min-height:28px] [font-size:13px] t-prev [margin-top:6px] [padding-top:6px] [border-top:1px_dashed_var(--line)] [font-weight:600] ${previousBalance < 0 ? "is-due" : previousBalance > 0 ? "is-credit" : ""}`}
               >
                 <span>Previous balance</span>
                 <strong>
                   {customer.isWalking
                     ? "Walk-in"
-                    : customer.balance < 0
-                      ? `Due ${money(-customer.balance)}`
-                      : customer.balance > 0
-                        ? `Cr ${money(customer.balance)}`
+                    : previousBalance < 0
+                      ? `Due ${money(-previousBalance)}`
+                      : previousBalance > 0
+                        ? `Cr ${money(previousBalance)}`
                         : money(0)}
                 </strong>
               </div>
@@ -2644,7 +2670,7 @@ export function PosWorkspace() {
                   lines: invoiceLines,
                   total: t.total,
                   paid: amountPaid,
-                  balanceBefore: customer.balance,
+                  balanceBefore: previousBalance,
                   balanceAfter,
                   invoiceNumber: receiptInvoiceNo || undefined,
                 });

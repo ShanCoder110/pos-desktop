@@ -21,6 +21,7 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | Lot allocation mismatch names sum X vs remaining Y (+ Stock count hint) | ✅ Step 13 |
 | Invoices Edit → `/pos?edit=<id>` (list + detail); AbortError not toasted on POS edit load/save | ✅ Step 14 |
 | Cashier Products hub: catalog loads even if a side query fails; Stock count tab waits for role | ✅ Step 14 |
+| Invoice edit: preload customer/payments; block RETURNED/PARTIALLY_RETURNED (422); no walk-in credit switch | ✅ Step 15 |
 
 ## UI agent-mistakes audit (2026-09-19)
 

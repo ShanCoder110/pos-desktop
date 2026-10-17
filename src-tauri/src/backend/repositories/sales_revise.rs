@@ -8,8 +8,8 @@ use crate::backend::{
         ERROR_INVOICE_NOT_FOUND, ERROR_WALK_IN_CREDIT, INVOICE_STATUS_COMPLETED, LEDGER_SALE,
         MONEY_TYPE_SALE, MONEY_TYPE_VOID, PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT,
         PAYMENT_STATUS_COMPLETED, PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID,
-        PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_UNPAID, PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE,
-        STOCK_MOVEMENT_SALE,
+        PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_PARTIALLY_RETURNED, PAYMENT_STATUS_RETURNED,
+        PAYMENT_STATUS_UNPAID, PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE, STOCK_MOVEMENT_SALE,
     },
     context::RequestContext,
     dto::CompleteSaleRequest,
@@ -59,8 +59,12 @@ pub async fn revise_invoice(
     .await?
     .map(|row| row.count)
     .unwrap_or(0);
-    if returns > 0 {
-        return Err(AppError::Conflict(ERROR_INVOICE_HAS_RETURNS.into()));
+    // Block fully / partially returned invoices (no net-of-return edit path).
+    if header.payment_status == PAYMENT_STATUS_RETURNED
+        || header.payment_status == PAYMENT_STATUS_PARTIALLY_RETURNED
+        || returns > 0
+    {
+        return Err(AppError::Validation(ERROR_INVOICE_HAS_RETURNS.into()));
     }
 
     let before_json = serde_json::json!({

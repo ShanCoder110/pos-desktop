@@ -254,7 +254,7 @@ pub const ERROR_INVALID_LOT_SOURCE: &str = "Invalid lot source type.";
 pub const ERROR_SUPPLIER_REQUIRED: &str = "supplierId is required for purchase receipts.";
 pub const ERROR_INVOICE_ALREADY_VOIDED: &str = "Invoice is already voided.";
 pub const ERROR_INVOICE_HAS_RETURNS: &str =
-    "This invoice has returns recorded. Void the returns first or create a new sale.";
+    "Returned invoices cannot be edited. Create a new sale instead.";
 pub const ERROR_RETURN_EXCEEDS_SOLD: &str =
     "Return quantity exceeds the quantity still available on this invoice line.";
 pub const ERROR_EMPTY_SALE: &str = "Sale must include at least one item.";
