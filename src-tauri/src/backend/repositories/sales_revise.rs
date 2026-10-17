@@ -5,11 +5,12 @@ use uuid::Uuid;
 use crate::backend::{
     constants::{
         ERROR_BELOW_MINIMUM, ERROR_INVOICE_ALREADY_VOIDED, ERROR_INVOICE_HAS_RETURNS,
-        ERROR_INVOICE_NOT_FOUND, ERROR_WALK_IN_CREDIT, INVOICE_STATUS_COMPLETED, LEDGER_SALE,
-        MONEY_TYPE_SALE, MONEY_TYPE_VOID, PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT,
-        PAYMENT_STATUS_COMPLETED, PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID,
-        PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_PARTIALLY_RETURNED, PAYMENT_STATUS_RETURNED,
-        PAYMENT_STATUS_UNPAID, PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE, STOCK_MOVEMENT_SALE,
+        ERROR_INVOICE_NOT_FOUND, ERROR_REVISE_BELOW_ALLOCATED, ERROR_WALK_IN_CREDIT,
+        INVOICE_STATUS_COMPLETED, LEDGER_SALE, MONEY_TYPE_SALE, MONEY_TYPE_VOID,
+        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED,
+        PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID, PAYMENT_STATUS_PARTIAL,
+        PAYMENT_STATUS_PARTIALLY_RETURNED, PAYMENT_STATUS_RETURNED, PAYMENT_STATUS_UNPAID,
+        PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE, STOCK_MOVEMENT_SALE,
     },
     context::RequestContext,
     dto::CompleteSaleRequest,
@@ -84,6 +85,9 @@ pub async fn revise_invoice(
         "notes": header.notes,
     })
     .to_string();
+
+    // Capture before void_payments — voided rows must not inflate "allocated".
+    let allocated_paid = allocated_paid_on_invoice(transaction, &header, invoice_id).await?;
 
     let now = now_utc();
     reverse_stock(
@@ -211,10 +215,10 @@ pub async fn revise_invoice(
     let discount = money_value(request.discount);
     let tax = money_value(request.tax);
     let total = money_value(subtotal - discount + tax);
-    let mut paid_amount = Decimal::ZERO;
+    let mut sale_tender_paid = Decimal::ZERO;
     let mut change_amount = Decimal::ZERO;
     for payment in &request.payments {
-        paid_amount += money_value(payment.amount);
+        sale_tender_paid += money_value(payment.amount);
         if let Some(tendered) = payment.amount_tendered {
             let tendered = money_value(tendered);
             let amount = money_value(payment.amount);
@@ -223,11 +227,22 @@ pub async fn revise_invoice(
             }
         }
     }
-    paid_amount = money_value(paid_amount);
+    sale_tender_paid = money_value(sale_tender_paid);
     change_amount = money_value(change_amount);
-    let applied_paid = money_value(paid_amount.min(total));
+    let sale_tender_applied = money_value(sale_tender_paid.min(total));
+
+    // paid_amount may include later customer-payment allocations (no invoice payment
+    // row). Preserve that slice; do not re-post it as a new cash tender.
+    if total < allocated_paid {
+        return Err(AppError::Validation(ERROR_REVISE_BELOW_ALLOCATED.into()));
+    }
+    let allocated_applied = money_value(allocated_paid.min(total - sale_tender_applied));
+    let applied_paid = money_value(sale_tender_applied + allocated_applied);
     let credit_amount = money_value(total - applied_paid);
-    if credit_amount > Decimal::ZERO && (customer_id.is_none() || is_walk_in) {
+    // Ledger SALE is the credit taken at this sale/revise (total − tenders), not the
+    // remaining open credit after allocations.
+    let sale_ledger_debit = money_value(total - sale_tender_applied);
+    if sale_ledger_debit > Decimal::ZERO && (customer_id.is_none() || is_walk_in) {
         return Err(AppError::Validation(ERROR_WALK_IN_CREDIT.into()));
     }
     let payment_status = if credit_amount > Decimal::ZERO && applied_paid == Decimal::ZERO {
@@ -381,7 +396,7 @@ pub async fn revise_invoice(
             .await?;
     }
 
-    if credit_amount > Decimal::ZERO {
+    if sale_ledger_debit > Decimal::ZERO {
         if let Some(customer_id) = customer_id {
             let note = format!("Revised credit sale {invoice_id}");
             LedgerRepository::post_entry(
@@ -391,7 +406,7 @@ pub async fn revise_invoice(
                     party: LedgerParty::Customer(customer_id),
                     branch_id: context.branch_id,
                     entry_type: LEDGER_SALE,
-                    debit: credit_amount,
+                    debit: sale_ledger_debit,
                     credit: Decimal::ZERO,
                     notes: Some(&note),
                     occurred_at: now,
@@ -559,7 +574,7 @@ async fn revise_request_is_noop(
     .all(transaction)
     .await?;
     let mut existing_pay_keys: Vec<(String, Decimal)> = existing_payments
-        .into_iter()
+        .iter()
         .filter(|row| row.status != PAYMENT_STATUS_VOIDED)
         .map(|row| {
             (
@@ -585,19 +600,57 @@ async fn revise_request_is_noop(
         return Ok(false);
     }
 
-    let request_paid: Decimal = request.payments.iter().fold(Decimal::ZERO, |sum, payment| {
+    // Compare sale tenders only. header.paid_amount may also include later
+    // customer-payment allocations that are not invoice payment rows.
+    let existing_tender: Decimal = existing_payments
+        .iter()
+        .filter(|row| row.status != PAYMENT_STATUS_VOIDED)
+        .fold(Decimal::ZERO, |sum, row| sum + money_value(row.amount));
+    let existing_tender = money_value(existing_tender);
+    let request_tender: Decimal = request.payments.iter().fold(Decimal::ZERO, |sum, payment| {
         sum + money_value(payment.amount)
     });
-    let request_paid = money_value(request_paid.min(request_total));
-    if request_paid != money_value(header.paid_amount) {
+    let request_tender = money_value(request_tender.min(request_total));
+    if request_tender != existing_tender.min(money_value(header.total)) {
         return Ok(false);
     }
-    let request_credit = money_value(request_total - request_paid);
-    if request_credit != money_value(header.credit_amount) {
+    let allocated =
+        money_value((money_value(header.paid_amount) - existing_tender).max(Decimal::ZERO));
+    let effective_paid =
+        money_value(request_tender + allocated.min(request_total - request_tender));
+    let effective_credit = money_value(request_total - effective_paid);
+    if effective_paid != money_value(header.paid_amount) {
+        return Ok(false);
+    }
+    if effective_credit != money_value(header.credit_amount) {
         return Ok(false);
     }
 
     Ok(true)
+}
+
+/// Portion of invoice.paid_amount that came from later customer-payment allocation
+/// (not from COMPLETED payments with this invoice_id).
+async fn allocated_paid_on_invoice(
+    transaction: &DatabaseTransaction,
+    header: &InvoiceHeader,
+    invoice_id: Uuid,
+) -> Result<Decimal, AppError> {
+    let tender_rows = ExistingPaymentRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT amount, payment_method, status FROM payments WHERE invoice_id = ?",
+        [invoice_id.into()],
+    ))
+    .all(transaction)
+    .await?;
+    let tender: Decimal = tender_rows
+        .into_iter()
+        .filter(|row| row.status != PAYMENT_STATUS_VOIDED)
+        .fold(Decimal::ZERO, |sum, row| sum + money_value(row.amount));
+    let tender = money_value(tender);
+    Ok(money_value(
+        (money_value(header.paid_amount) - tender).max(Decimal::ZERO),
+    ))
 }
 
 async fn reverse_stock(

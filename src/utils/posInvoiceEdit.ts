@@ -27,14 +27,17 @@ function activePayments(
   return (payments ?? []).filter((p) => (p.status ?? "COMPLETED").toUpperCase() !== "VOIDED");
 }
 
-/** Derive cash/credit/split controls from invoice paid + credit (+ optional payment rows). */
+/**
+ * Prefill POS tender controls from payments taken **at sale** only.
+ * `paidAmount` may include later customer-payment allocations (no invoice payment
+ * row) — those must not appear as Cash received on edit.
+ */
 export function invoiceEditPaymentPrefill(invoice: {
   paidAmount: number;
   creditAmount: number;
   total: number;
   payments?: { amount?: number; paymentMethod?: string | null; status?: string | null }[] | null;
 }): InvoiceEditPaymentPrefill {
-  const paid = Math.max(0, Number(invoice.paidAmount) || 0);
   const payments = activePayments(invoice.payments);
   const cashFromRows = payments
     .filter((p) => isCashMethod(p.paymentMethod ?? "CASH"))
@@ -57,13 +60,22 @@ export function invoiceEditPaymentPrefill(invoice: {
       payMethod: "online",
       received: 0,
       cashAmt: 0,
-      onlineAmt: onlineFromRows || paid,
+      onlineAmt: onlineFromRows,
     };
   }
-  // Cash-only, credit-only (paid 0), or missing payment rows → cash tab.
+  if (cashFromRows > 0) {
+    return {
+      payMethod: "cash",
+      received: cashFromRows,
+      cashAmt: 0,
+      onlineAmt: 0,
+    };
+  }
+  // No sale-time tender rows: credit / allocation-only → cash tab with received 0.
+  // Do not fall back to paidAmount (that mixes in later customer-payment allocations).
   return {
     payMethod: "cash",
-    received: paid,
+    received: 0,
     cashAmt: 0,
     onlineAmt: 0,
   };

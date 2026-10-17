@@ -756,7 +756,8 @@ mod tests {
         .await
         .expect("payment");
 
-        // 3–4) Revise 2 → 3 @ 15 = 45: ADJUSTMENT −30 → −10, SALE 45 → 35
+        // 3–4) Revise 2 → 3 @ 15 = 45: ADJUSTMENT −30 → −10, SALE 45 → 35.
+        // Allocated customer payment (10) stays on the invoice → open credit 35.
         let revised = SalesService::revise(
             &database,
             &context,
@@ -783,7 +784,9 @@ mod tests {
         )
         .await
         .expect("revise to 45");
-        assert_eq!(revised.credit_amount, 45.0);
+        assert_eq!(revised.total, 45.0);
+        assert_eq!(revised.paid_amount, 10.0);
+        assert_eq!(revised.credit_amount, 35.0);
 
         // 5) Return 15 against revised invoice → must read prior 35, not stale ADJ −10
         let return_item_id = revised.items[0].id.clone();
@@ -2483,6 +2486,494 @@ mod tests {
             0,
             "split no-op must not void payments"
         );
+    }
+
+    /// INV-0004 style: credit sale, later customer payment allocates into paid_amount
+    /// with no invoice payment row. Raising qty must not invent a cash tender.
+    #[tokio::test]
+    async fn revise_allocated_credit_preserves_allocation_and_balance_delta() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let context = ctx();
+
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "AllocRev".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let customer = MasterService::create(
+            &database,
+            MasterKind::Customer,
+            MasterRequest {
+                name: "Alloc Revise Cust".into(),
+                symbol: None,
+                phone: Some("03001112233".into()),
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: Some(true),
+                previous_balance: None,
+            },
+            Some(&context),
+        )
+        .await
+        .expect("customer");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Alloc Revise Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(10, 0),
+                    wholesale: Decimal::new(12, 0),
+                    price: Decimal::new(15, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(200, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let unit_id = product.sell_units[0].id.clone();
+        let cid = Uuid::parse_str(&customer.id).unwrap();
+
+        let session = AuthService::open_cash_session(
+            &database,
+            &context,
+            CashSessionOpenRequest {
+                opening_float: Decimal::ZERO,
+            },
+        )
+        .await
+        .expect("open cash session");
+        let mut context = context;
+        context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
+
+        // Full credit 30 (no sale tender).
+        let sale = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "alloc-sale".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::new(2, 0),
+                    unit_price: Decimal::new(15, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("credit sale");
+        assert_eq!(sale.total, 30.0);
+        assert_eq!(sale.paid_amount, 0.0);
+        assert_eq!(sale.credit_amount, 30.0);
+        assert_eq!(
+            *ledger_balances(&database, &customer.id)
+                .await
+                .last()
+                .unwrap(),
+            30.0
+        );
+
+        // Customer payment 5 → allocates onto this invoice (paid 5 / credit 25).
+        CreditService::customer_payment(
+            &database,
+            &context,
+            cid,
+            CustomerPaymentRequest {
+                amount: Decimal::new(5, 0),
+                payment_method: "CASH".into(),
+                reference_number: None,
+                notes: None,
+                client_request_id: Some("alloc-pay".into()),
+            },
+        )
+        .await
+        .expect("customer payment");
+        let after_pay = SalesService::get(&database, Uuid::parse_str(&sale.id).unwrap())
+            .await
+            .expect("reload");
+        assert_eq!(after_pay.paid_amount, 5.0);
+        assert_eq!(after_pay.credit_amount, 25.0);
+        assert_eq!(
+            after_pay.payments.len(),
+            0,
+            "allocation must not create invoice payment"
+        );
+        assert_eq!(
+            *ledger_balances(&database, &customer.id)
+                .await
+                .last()
+                .unwrap(),
+            25.0
+        );
+        let collected_before = MasterRepository::find(&database, MasterKind::Customer, cid)
+            .await
+            .expect("cust")
+            .expect("row")
+            .collected_total
+            .unwrap_or(0.0);
+        assert!((collected_before - 5.0).abs() < 0.01);
+
+        // No-op revise with payments=[] must not churn ledger (allocation ≠ cash tender).
+        let ledger_count_before = count_rows(
+            &database,
+            "SELECT COUNT(*) AS count FROM customer_ledger_entries WHERE customer_id = ?",
+            &customer.id,
+        )
+        .await;
+        let _ = SalesService::revise(
+            &database,
+            &context,
+            Uuid::parse_str(&sale.id).unwrap(),
+            CompleteSaleRequest {
+                client_request_id: "alloc-noop".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::new(2, 0),
+                    unit_price: Decimal::new(15, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("alloc noop");
+        assert_eq!(
+            count_rows(
+                &database,
+                "SELECT COUNT(*) AS count FROM customer_ledger_entries WHERE customer_id = ?",
+                &customer.id,
+            )
+            .await,
+            ledger_count_before,
+            "allocation-only no-op must not add ledger rows"
+        );
+
+        // Qty 2→3 (total 30→45): balance +15 (25→40); paid stays 5; no new invoice payment.
+        let revised = SalesService::revise(
+            &database,
+            &context,
+            Uuid::parse_str(&sale.id).unwrap(),
+            CompleteSaleRequest {
+                client_request_id: "alloc-revise-up".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::new(3, 0),
+                    unit_price: Decimal::new(15, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("revise up");
+        assert_eq!(revised.total, 45.0);
+        assert_eq!(
+            revised.paid_amount, 5.0,
+            "allocation must stay on the invoice"
+        );
+        assert_eq!(revised.credit_amount, 40.0);
+        assert_eq!(
+            revised
+                .payments
+                .iter()
+                .filter(|p| p.status != "VOIDED")
+                .count(),
+            0,
+            "must not create a new cash payment for the allocated 5"
+        );
+        let balances = ledger_balances(&database, &customer.id).await;
+        // Hand-calc: after pay balance 25; reverse SALE 30 → −5; post SALE 45 → 40 (+15).
+        assert_eq!(*balances.last().unwrap(), 40.0);
+        let collected_after = MasterRepository::find(&database, MasterKind::Customer, cid)
+            .await
+            .expect("cust")
+            .expect("row")
+            .collected_total
+            .unwrap_or(0.0);
+        assert!(
+            (collected_after - collected_before).abs() < 0.01,
+            "Paid on credit / collected must stay {collected_before}, got {collected_after}"
+        );
+    }
+
+    #[tokio::test]
+    async fn revise_rejects_total_below_allocated_customer_payment() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let context = ctx();
+
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "AllocLow".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let customer = MasterService::create(
+            &database,
+            MasterKind::Customer,
+            MasterRequest {
+                name: "Alloc Low Cust".into(),
+                symbol: None,
+                phone: Some("03009998877".into()),
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: Some(true),
+                previous_balance: None,
+            },
+            Some(&context),
+        )
+        .await
+        .expect("customer");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Alloc Low Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(10, 0),
+                    wholesale: Decimal::new(12, 0),
+                    price: Decimal::new(15, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(200, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let unit_id = product.sell_units[0].id.clone();
+        let cid = Uuid::parse_str(&customer.id).unwrap();
+
+        let session = AuthService::open_cash_session(
+            &database,
+            &context,
+            CashSessionOpenRequest {
+                opening_float: Decimal::ZERO,
+            },
+        )
+        .await
+        .expect("open cash session");
+        let mut context = context;
+        context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
+
+        let sale = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "alloc-low-sale".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::new(2, 0),
+                    unit_price: Decimal::new(15, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("credit sale");
+
+        CreditService::customer_payment(
+            &database,
+            &context,
+            cid,
+            CustomerPaymentRequest {
+                amount: Decimal::new(5, 0),
+                payment_method: "CASH".into(),
+                reference_number: None,
+                notes: None,
+                client_request_id: Some("alloc-low-pay".into()),
+            },
+        )
+        .await
+        .expect("customer payment");
+
+        // total 4 < allocated 5 → blocked (does not invent advance).
+        let err = SalesService::revise(
+            &database,
+            &context,
+            Uuid::parse_str(&sale.id).unwrap(),
+            CompleteSaleRequest {
+                client_request_id: "alloc-low-revise".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id,
+                    quantity: Decimal::ONE,
+                    unit_price: Decimal::new(4, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: true,
+                    authorized_by: Some(SEED_USER_ID.into()),
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect_err("must reject total below allocated");
+        match err {
+            crate::backend::errors::AppError::Validation(msg) => {
+                assert!(
+                    msg.contains("already applied from customer payments")
+                        || msg.contains("Cannot reduce"),
+                    "unexpected message: {msg}"
+                );
+            }
+            other => panic!("expected Validation, got {other:?}"),
+        }
     }
 
     #[tokio::test]

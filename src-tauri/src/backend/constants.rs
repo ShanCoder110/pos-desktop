@@ -259,6 +259,8 @@ pub const ERROR_SUPPLIER_REQUIRED: &str = "supplierId is required for purchase r
 pub const ERROR_INVOICE_ALREADY_VOIDED: &str = "Invoice is already voided.";
 pub const ERROR_INVOICE_HAS_RETURNS: &str =
     "Returned invoices cannot be edited. Create a new sale instead.";
+pub const ERROR_REVISE_BELOW_ALLOCATED: &str =
+    "Cannot reduce this invoice below the amount already applied from customer payments. Record a refund or adjust payments first.";
 pub const ERROR_INVOICE_RETURNED_CANNOT_VOID: &str =
     "Returned invoices cannot be voided. Stock and ledger were already reversed by the return.";
 pub const ERROR_RETURN_EXCEEDS_SOLD: &str =

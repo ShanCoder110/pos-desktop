@@ -6,7 +6,8 @@ import {
 } from "@/utils/posInvoiceEdit";
 
 describe("posInvoiceEdit preload", () => {
-  it("loads credit invoice for customer X: paid 5 of 30 → credit open 25", () => {
+  it("allocation-only paid 5 (no sale tender rows) → received 0, credit open 25", () => {
+    // INV-0004 style: paidAmount includes later customer-payment allocation, not cash at sale.
     const snap = invoiceEditLoadSnapshot({
       customerId: "cust-x",
       discount: 0,
@@ -18,15 +19,27 @@ describe("posInvoiceEdit preload", () => {
     });
     expect(snap.customerId).toBe("cust-x");
     expect(snap.payMethod).toBe("cash");
-    expect(snap.received).toBe(5);
+    expect(snap.received).toBe(0);
     expect(snap.creditOpen).toBe(25);
     expect(
       invoiceEditPaymentPrefill({
         paidAmount: 5,
         creditAmount: 25,
         total: 30,
+        payments: [],
       }).received,
-    ).toBe(5);
+    ).toBe(0);
+  });
+
+  it("sale-time cash 5 → cash received 5 even when paidAmount also includes allocations", () => {
+    expect(
+      invoiceEditPaymentPrefill({
+        paidAmount: 10,
+        creditAmount: 20,
+        total: 30,
+        payments: [{ amount: 5, paymentMethod: "CASH", status: "COMPLETED" }],
+      }),
+    ).toEqual({ payMethod: "cash", received: 5, cashAmt: 0, onlineAmt: 0 });
   });
 
   it("previous balance excludes this invoice's open credit", () => {
