@@ -14,7 +14,7 @@ pub fn parse_uuid(value: &str, field: &str) -> Result<Uuid, AppError> {
 /// Prefer this over `Uuid.into()` on INSERT/UPDATE paths that historically
 /// risked `uuid.to_string().into()` writing 36-char TEXT and breaking SeaORM decode.
 pub fn uuid_blob(id: Uuid) -> sea_orm::Value {
-    sea_orm::Value::Bytes(Some(Box::new(id.as_bytes().to_vec())))
+    sea_orm::Value::Bytes(Some(id.as_bytes().to_vec()))
 }
 
 /// Bind an optional UUID as BLOB, or SQL NULL.

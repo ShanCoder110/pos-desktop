@@ -192,7 +192,7 @@ export function StockCountPage() {
       })
       .catch((error) => {
         const outcome = classifyListFetch({ ok: false, error }, STOCK_COUNT_COPY.loadFailed);
-        if (outcome.kind === "aborted") return;
+        if (outcome.kind !== "error") return;
         setHistory([]);
         setHistoryError(outcome.message);
         toaster.error(outcome.message);
@@ -469,7 +469,7 @@ export function StockCountPage() {
               <tbody>
                 {historyError ? (
                   <EmptyRow cols={8} text={historyError} description={STOCK_COUNT_COPY.loadFailed}>
-                    <Button variant="secondary" onClick={() => setHistoryReloadToken((n) => n + 1)}>
+                    <Button variant="outline" onClick={() => setHistoryReloadToken((n) => n + 1)}>
                       {STOCK_COUNT_COPY.retry}
                     </Button>
                   </EmptyRow>

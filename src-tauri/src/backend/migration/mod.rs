@@ -476,10 +476,36 @@ mod tests {
             .await
             .expect("apply migrations through 000022");
 
+        // Owner is onboarding-only — insert a user so product/movement FKs resolve.
         database
-            .execute_unprepared("PRAGMA foreign_keys = OFF")
+            .execute_unprepared(
+                "INSERT INTO users (id, name, username, password_hash, role, is_active, created_at, updated_at)
+                 VALUES (X'20000000000040008000000000000002', 'Owner', 'owner-uuid', 'x', 'OWNER', 1,
+                         '2026-10-17T00:00:00Z', '2026-10-17T00:00:00Z')",
+            )
             .await
-            .expect("fk off");
+            .expect("fixture user");
+
+        // Minimal product so stock_movements FKs stay valid under foreign_key_check.
+        database
+            .execute_unprepared(
+                "INSERT INTO products (
+                    id, name, category_id, base_unit_id, sku, barcode, product_type,
+                    track_lots, track_expiry, minimum_stock, is_active, created_by,
+                    version, created_at, updated_at
+                 ) VALUES (
+                    X'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                    'UUID Mig Product',
+                    (SELECT id FROM product_categories LIMIT 1),
+                    (SELECT id FROM units WHERE symbol = 'pc' LIMIT 1),
+                    'SKU-UUID-MIG', 'BC-UUID-MIG', 'STANDARD',
+                    1, 0, 0, 1,
+                    X'20000000000040008000000000000002',
+                    1, '2026-10-17T00:00:00Z', '2026-10-17T00:00:00Z'
+                 )",
+            )
+            .await
+            .expect("fixture product");
 
         // TEXT 36 hyphenated UUID (the QA failure mode).
         database
@@ -490,13 +516,13 @@ mod tests {
                     reference_type, reference_id, notes, occurred_at, created_by, created_at
                  ) VALUES (
                     'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-                    X'20000000000040008000000000000001',
-                    X'20000000000040008000000000000010',
+                    (SELECT id FROM branches LIMIT 1),
+                    X'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
                     NULL,
                     'ADJUSTMENT',
                     0, 'pc', 0,
                     'StockAdjustment',
-                    X'20000000000040008000000000000099',
+                    X'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
                     'text uuid fixture',
                     '2026-10-17T00:00:00Z',
                     X'20000000000040008000000000000002',
@@ -515,13 +541,13 @@ mod tests {
                     reference_type, reference_id, notes, occurred_at, created_by, created_at
                  ) VALUES (
                     CAST('dddddddd-dddd-4ddd-8ddd-dddddddddddd' AS BLOB),
-                    X'20000000000040008000000000000001',
-                    X'20000000000040008000000000000010',
+                    (SELECT id FROM branches LIMIT 1),
+                    X'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
                     NULL,
                     'ADJUSTMENT',
                     0, 'pc', 0,
                     'StockAdjustment',
-                    X'20000000000040008000000000000099',
+                    X'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
                     'blob36 uuid fixture',
                     '2026-10-17T00:00:00Z',
                     X'20000000000040008000000000000002',
@@ -530,11 +556,6 @@ mod tests {
             )
             .await
             .expect("insert blob36 movement");
-
-        database
-            .execute_unprepared("PRAGMA foreign_keys = ON")
-            .await
-            .expect("fk on");
 
         let before = database
             .query_one_raw(sea_orm::Statement::from_string(

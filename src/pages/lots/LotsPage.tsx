@@ -228,7 +228,7 @@ export function LotsPage() {
       .catch((error) => {
         if (!guard.isActive()) return;
         const outcome = classifyListFetch({ ok: false, error }, LOT_COPY.loadFailed);
-        if (outcome.kind === "aborted") return;
+        if (outcome.kind !== "error") return;
         setRows([]);
         setTotal(0);
         setPages(1);
@@ -641,7 +641,7 @@ export function LotsPage() {
           ) : null}
           {!loading && loadError ? (
             <EmptyRow cols={cols.length + 2} text={loadError} description={LOT_COPY.loadFailed}>
-              <Button variant="secondary" onClick={() => setReloadToken((n) => n + 1)}>
+              <Button variant="outline" onClick={() => setReloadToken((n) => n + 1)}>
                 {LOT_COPY.retry}
               </Button>
             </EmptyRow>
