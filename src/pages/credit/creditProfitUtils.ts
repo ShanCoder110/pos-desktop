@@ -53,12 +53,16 @@ export function calculateInvoiceProfitHold(invoice: InvoiceRow): number {
 
 /**
  * Calculates the Realized Profit for an invoice so far.
- * realizedProfit = totalGrossProfit - profitHold
+ * Realized tracks the paid share of GP. A full unpaid return (credit=0, paid=0)
+ * leaves both hold and realized at 0.
  */
 export function calculateInvoiceRealizedProfit(invoice: InvoiceRow): number {
+  if (invoice.total <= 0) return 0;
   const grossProfit = calculateInvoiceGrossProfit(invoice);
-  const profitHold = calculateInvoiceProfitHold(invoice);
-  return Math.max(0, grossProfit - profitHold);
+  if (grossProfit <= 0) return 0;
+  const paid = Math.max(0, Number(invoice.paidAmount) || 0);
+  const ratio = Math.min(1, paid / invoice.total);
+  return grossProfit * ratio;
 }
 
 /**

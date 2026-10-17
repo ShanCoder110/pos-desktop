@@ -877,5 +877,394 @@ mod tests {
             expected,
             "recompute must repair broken RETURN and tip"
         );
+
+        // All-customers ledger list must use posting order (ADJUSTMENT then SALE).
+        let listed = CreditService::list_customer_ledgers(
+            &database,
+            crate::backend::dto::CustomerLedgerListQuery {
+                page: Default::default(),
+                customer: Some(customer.name.clone()),
+                entry_type: None,
+                debit: None,
+                credit: None,
+                occurred_from: None,
+                occurred_to: None,
+            },
+        )
+        .await
+        .expect("list ledgers");
+        let types: Vec<&str> = listed.data.iter().map(|e| e.entry_type.as_str()).collect();
+        let adj = types.iter().position(|t| *t == "ADJUSTMENT").expect("ADJ");
+        assert_eq!(
+            types.get(adj + 1).copied(),
+            Some("SALE"),
+            "revised SALE must follow ADJUSTMENT in posting order, got {types:?}"
+        );
+        // Adjacent balances must chain: each after = prior + debit − credit
+        for window in listed.data.windows(2) {
+            let prev = &window[0];
+            let next = &window[1];
+            assert!(
+                (next.balance_after - (prev.balance_after + next.debit - next.credit)).abs()
+                    < 0.005,
+                "list balance continuity broken at {} → {}",
+                prev.entry_type,
+                next.entry_type
+            );
+        }
+    }
+
+    /// QA-02 part 2 #1: returns shrink invoice.creditAmount (and thus profit on hold).
+    #[tokio::test]
+    async fn credit_return_clears_invoice_credit_and_profit_hold() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let context = ctx();
+
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "ReturnQA".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let customer = MasterService::create(
+            &database,
+            MasterKind::Customer,
+            MasterRequest {
+                name: "Return Credit Cust".into(),
+                symbol: None,
+                phone: Some("03004445566".into()),
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: Some(true),
+                previous_balance: None,
+            },
+            Some(&context),
+        )
+        .await
+        .expect("customer");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Return Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(10, 0),
+                    wholesale: Decimal::new(12, 0),
+                    price: Decimal::new(20, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(500, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let unit_id = product.sell_units[0].id.clone();
+        let cid = Uuid::parse_str(&customer.id).unwrap();
+
+        let session = AuthService::open_cash_session(
+            &database,
+            &context,
+            CashSessionOpenRequest {
+                opening_float: Decimal::ZERO,
+            },
+        )
+        .await
+        .expect("open cash session");
+        let mut context = context;
+        context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
+
+        // (1) Full return on credit 40 → creditAmount 0, profit on hold 0
+        let full = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "ret-full-40".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::new(2, 0),
+                    unit_price: Decimal::new(20, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("sale 40");
+        assert_eq!(full.credit_amount, 40.0);
+        let before_hold = MasterRepository::find(&database, MasterKind::Customer, cid)
+            .await
+            .expect("cust")
+            .expect("row")
+            .profit_on_hold
+            .unwrap_or(0.0);
+        assert!(before_hold > 0.0, "open credit must hold profit");
+
+        CreditService::create_return(
+            &database,
+            &context,
+            CreateReturnRequest {
+                invoice_id: full.id.clone(),
+                return_type: "REFUND".into(),
+                reason: "full return".into(),
+                notes: None,
+                items: vec![ReturnItemInput {
+                    invoice_item_id: full.items[0].id.clone(),
+                    quantity: Decimal::new(2, 0),
+                    condition: "GOOD".into(),
+                    refund_amount: Decimal::new(40, 0),
+                    original_product_lot_id: None,
+                }],
+                replacements: vec![],
+            },
+        )
+        .await
+        .expect("full return");
+        let after_full = SalesService::get(&database, Uuid::parse_str(&full.id).unwrap())
+            .await
+            .expect("invoice after full return");
+        assert_eq!(after_full.credit_amount, 0.0);
+        let after_hold = MasterRepository::find(&database, MasterKind::Customer, cid)
+            .await
+            .expect("cust")
+            .expect("row")
+            .profit_on_hold
+            .unwrap_or(-1.0);
+        assert_eq!(after_hold, 0.0, "full return clears profit on hold");
+        assert_eq!(
+            *ledger_balances(&database, &customer.id)
+                .await
+                .last()
+                .unwrap(),
+            0.0
+        );
+
+        // (2) Partial return: sale 60, return 20 → creditAmount 40
+        let partial_sale = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "ret-partial-60".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::new(3, 0),
+                    unit_price: Decimal::new(20, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("sale 60");
+        assert_eq!(partial_sale.credit_amount, 60.0);
+        CreditService::create_return(
+            &database,
+            &context,
+            CreateReturnRequest {
+                invoice_id: partial_sale.id.clone(),
+                return_type: "REFUND".into(),
+                reason: "partial return".into(),
+                notes: None,
+                items: vec![ReturnItemInput {
+                    invoice_item_id: partial_sale.items[0].id.clone(),
+                    quantity: Decimal::ONE,
+                    condition: "GOOD".into(),
+                    refund_amount: Decimal::new(20, 0),
+                    original_product_lot_id: None,
+                }],
+                replacements: vec![],
+            },
+        )
+        .await
+        .expect("partial return");
+        let after_partial =
+            SalesService::get(&database, Uuid::parse_str(&partial_sale.id).unwrap())
+                .await
+                .expect("invoice after partial");
+        assert_eq!(after_partial.credit_amount, 40.0);
+        let hold_partial = MasterRepository::find(&database, MasterKind::Customer, cid)
+            .await
+            .expect("cust")
+            .expect("row")
+            .profit_on_hold
+            .unwrap_or(0.0);
+        // Remaining credit 40 of 60 → 2/3 of that invoice's GP still on hold (> 0)
+        assert!(hold_partial > 0.0);
+
+        // (3) Sale 40, pay 10, return 15 → creditAmount 15, balance 15
+        let pay_cust = MasterService::create(
+            &database,
+            MasterKind::Customer,
+            MasterRequest {
+                name: "Return Pay Cust".into(),
+                symbol: None,
+                phone: Some("03007778899".into()),
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: Some(true),
+                previous_balance: None,
+            },
+            Some(&context),
+        )
+        .await
+        .expect("pay cust");
+        let pay_cid = Uuid::parse_str(&pay_cust.id).unwrap();
+        let sale40 = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "ret-pay-40".into(),
+                customer_id: Some(pay_cust.id.clone()),
+                items: vec![SaleItemInput {
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::new(2, 0),
+                    unit_price: Decimal::new(20, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("sale 40 pay-chain");
+        CreditService::customer_payment(
+            &database,
+            &context,
+            pay_cid,
+            CustomerPaymentRequest {
+                amount: Decimal::new(10, 0),
+                payment_method: "CASH".into(),
+                reference_number: None,
+                notes: None,
+                client_request_id: Some("ret-pay-10".into()),
+            },
+        )
+        .await
+        .expect("pay 10");
+        let after_pay = SalesService::get(&database, Uuid::parse_str(&sale40.id).unwrap())
+            .await
+            .expect("after pay");
+        assert_eq!(after_pay.credit_amount, 30.0);
+        CreditService::create_return(
+            &database,
+            &context,
+            CreateReturnRequest {
+                invoice_id: sale40.id.clone(),
+                return_type: "REFUND".into(),
+                reason: "return after pay".into(),
+                notes: None,
+                items: vec![ReturnItemInput {
+                    invoice_item_id: sale40.items[0].id.clone(),
+                    quantity: Decimal::ONE,
+                    // 1 of 2 @ 20 = 20 would overshoot the test amount; use explicit refund 15
+                    condition: "GOOD".into(),
+                    refund_amount: Decimal::new(15, 0),
+                    original_product_lot_id: None,
+                }],
+                replacements: vec![],
+            },
+        )
+        .await
+        .expect("return 15");
+        let after_ret = SalesService::get(&database, Uuid::parse_str(&sale40.id).unwrap())
+            .await
+            .expect("after return");
+        assert_eq!(after_ret.credit_amount, 15.0);
+        assert_eq!(
+            *ledger_balances(&database, &pay_cust.id)
+                .await
+                .last()
+                .unwrap(),
+            15.0
+        );
+        let totals = LedgerRepository::customer_credit_totals(&database, pay_cid)
+            .await
+            .expect("totals");
+        assert_eq!(totals.balance, Decimal::new(15, 0));
     }
 }

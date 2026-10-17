@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { LedgerRow } from "@/shared/domain/types";
-import { summarizeCreditLedger } from "@/pages/credit/creditProfitUtils";
+import type { InvoiceRow, LedgerRow } from "@/shared/domain/types";
+import {
+  calculateInvoiceProfitHold,
+  calculateInvoiceRealizedProfit,
+  summarizeCreditLedger,
+} from "@/pages/credit/creditProfitUtils";
 
 function entry(type: string, debit: number, credit: number, balanceAfter: number): LedgerRow {
   return {
@@ -45,5 +49,48 @@ describe("summarizeCreditLedger", () => {
       paid: 0,
       balance: 45,
     });
+  });
+});
+
+describe("invoice profit after return", () => {
+  function invoice(overrides: Partial<InvoiceRow> & { creditAmount: number; paidAmount: number }) {
+    return {
+      id: "inv-1",
+      invoiceNumber: "INV-1",
+      branchId: "b1",
+      customerId: "c1",
+      status: "COMPLETED",
+      paymentStatus: "CREDIT",
+      subtotal: 40,
+      discount: 0,
+      tax: 0,
+      total: 40,
+      changeAmount: 0,
+      items: [
+        {
+          id: "ii-1",
+          productId: "p1",
+          productUnitId: "u1",
+          quantity: 2,
+          unitPrice: 20,
+          lineTotal: 40,
+          fifoCost: 16,
+          grossProfit: 24,
+        } as InvoiceRow["items"][number],
+      ],
+      createdAt: "2026-10-17T00:00:00Z",
+      ...overrides,
+    } as InvoiceRow;
+  }
+
+  it("full unpaid return: credit 0 → hold 0 and realized 0", () => {
+    const inv = invoice({ creditAmount: 0, paidAmount: 0 });
+    expect(calculateInvoiceProfitHold(inv)).toBe(0);
+    expect(calculateInvoiceRealizedProfit(inv)).toBe(0);
+  });
+
+  it("partial credit remaining: hold is proportional to credit/total", () => {
+    const inv = invoice({ creditAmount: 20, paidAmount: 0 });
+    expect(calculateInvoiceProfitHold(inv)).toBe(12); // 24 * 20/40
   });
 });

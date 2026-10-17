@@ -938,7 +938,7 @@ impl PurchasingRepository {
         .map(|row| row.count.max(0) as u64)
         .unwrap_or(0);
         let sql = format!(
-            "SELECT sle.id, sle.supplier_id, s.name AS supplier_name, sle.branch_id, sle.type AS entry_type, sle.purchase_order_id, sle.goods_receipt_id, sle.money_transaction_id, CAST(sle.debit AS REAL) AS debit, CAST(sle.credit AS REAL) AS credit, CAST(sle.balance_after AS REAL) AS balance_after, sle.notes, sle.occurred_at, sle.created_at FROM supplier_ledger_entries sle INNER JOIN suppliers s ON s.id = sle.supplier_id WHERE {where_sql} ORDER BY sle.created_at DESC, sle.id DESC LIMIT ? OFFSET ?"
+            "SELECT sle.id, sle.supplier_id, s.name AS supplier_name, sle.branch_id, sle.type AS entry_type, sle.purchase_order_id, sle.goods_receipt_id, sle.money_transaction_id, CAST(sle.debit AS REAL) AS debit, CAST(sle.credit AS REAL) AS credit, CAST(sle.balance_after AS REAL) AS balance_after, sle.notes, sle.occurred_at, sle.created_at FROM supplier_ledger_entries sle INNER JOIN suppliers s ON s.id = sle.supplier_id WHERE {where_sql} ORDER BY sle.occurred_at ASC, sle.created_at ASC, sle.rowid ASC LIMIT ? OFFSET ?"
         );
         let mut page_values = values;
         page_values.push((page.per_page as i64).into());
