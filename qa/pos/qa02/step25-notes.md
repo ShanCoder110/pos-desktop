@@ -20,5 +20,10 @@ Git archaeology (`git log -S/-G` on stock movement inserts since `d5d97d5`, migr
 
 ## M9 / M10 (this step)
 
-- **M9:** `UpdateLotRequest.expiryDate` set/change/clear; reject before received; past-after-received allowed (FE warning toast); audit `UPDATE_EXPIRY`; drawer + table use `formatTableDate`.
-- **M10:** F11 toggles cart W/R (empty cart still toggles mode); wholesale 0/unset → retail + hint toast/title; Walk-in forces retail (P2-8). No POS layout change.
+- **M9:** `UpdateLotRequest.expiryDate` set/change/clear; reject before received; past-after-received allowed (FE `toaster.info` warning, still saved); audit `UPDATE_EXPIRY`; drawer + table use `formatTableDate`.
+- **M10:** F11 toggles cart W/R (empty cart still toggles mode); wholesale 0/unset → retail + hint toast/title (`Retail used — wholesale unset` / line title); Walk-in forces retail (P2-8). No POS layout change. Add-to-cart uses same `cartLineTierPrices` fallback as F11.
+
+## Hand-check (M10)
+
+`QA Pack Barcode Widget` (P-0004) Piece: retail **15**, wholesale **12**.  
+Qty **10**: retail **150** → F11 wholesale **120**. Screenshot `step25-f11-wholesale.png`.
