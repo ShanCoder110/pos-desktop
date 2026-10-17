@@ -8,7 +8,11 @@ import {
   UnitSegmentedControl,
   toaster,
 } from "@/components/common";
-import { priceFromStock, productSellUnits } from "@/pages/products/productQty";
+import {
+  inventoryPerSellUnit,
+  priceFromStock,
+  productSellUnits,
+} from "@/pages/products/productQty";
 import { productStockUnitId, quickReorderPrefill } from "@/pages/reorders/quickReorder";
 import { REORDER_COPY } from "@/shared/constants/reorders";
 import type { ProductLotRow, SupplierRow } from "@/shared/domain/types";
@@ -185,12 +189,13 @@ export function QuickReorderPopover({
             onChange={(event) => setQty(event.target.value)}
           />
         </Field>
-        {units.length > 1 ? (
+        {units.length ? (
           <Field label="Unit">
             <UnitSegmentedControl
               units={units.map((unit) => ({
                 id: unit.id,
                 label: unit.name || unit.symbol || "Unit",
+                meta: inventoryPerSellUnit(unit) > 1 ? `×${inventoryPerSellUnit(unit)}` : undefined,
               }))}
               value={unitId}
               onChange={changeUnit}

@@ -185,7 +185,7 @@ mod tests {
         dto::{
             CashSessionOpenRequest, CompleteSaleRequest, CreateProductRequest, CreateReturnRequest,
             CustomerPaymentRequest, MasterRequest, OpeningStockInput, ProductUnitInput,
-            ReturnItemInput, SaleItemInput,
+            ReturnItemInput, SaleItemInput, SalePaymentInput,
         },
         repositories::{
             CreditRepository, LedgerParty, LedgerRepository, MasterKind, MasterRepository,
@@ -3156,5 +3156,138 @@ mod tests {
             crate::backend::errors::AppError::Validation(_)
         ));
         assert!(err.to_string().to_lowercase().contains("walk-in"));
+    }
+
+    /// Backend must reject overselling even if the POS UI shows stale Left stock.
+    #[tokio::test]
+    async fn complete_rejects_insufficient_stock() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let mut context = ctx();
+        let session = AuthService::open_cash_session(
+            &database,
+            &context,
+            CashSessionOpenRequest {
+                opening_float: Decimal::new(1000, 0),
+            },
+        )
+        .await
+        .expect("open cash session");
+        context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "OversellCat".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Oversell Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(10, 0),
+                    wholesale: Decimal::new(12, 0),
+                    price: Decimal::new(15, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(5, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let unit_id = product.sell_units[0].id.clone();
+
+        let err = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "oversell-sale".into(),
+                customer_id: None,
+                items: vec![SaleItemInput {
+                    product_id: product.id,
+                    product_unit_id: unit_id,
+                    quantity: Decimal::new(6, 0),
+                    unit_price: Decimal::new(15, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![SalePaymentInput {
+                    amount: Decimal::new(90, 0),
+                    amount_tendered: Some(Decimal::new(90, 0)),
+                    payment_method: "CASH".into(),
+                    reference_number: None,
+                    notes: None,
+                    client_request_id: None,
+                }],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect_err("must reject oversell");
+        assert!(
+            matches!(err, crate::backend::errors::AppError::Conflict(_)),
+            "expected Conflict, got {err:?}"
+        );
+        assert!(
+            err.to_string().to_lowercase().contains("insufficient")
+                || err.to_string().to_lowercase().contains("stock"),
+            "message={err}"
+        );
     }
 }

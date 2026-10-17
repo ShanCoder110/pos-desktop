@@ -350,9 +350,22 @@ export function PosWorkspace() {
   const [askSupplier, setAskSupplier] = useState(false);
   const [sessionUserId, setSessionUserId] = useState("");
   const [sessionBranchId, setSessionBranchId] = useState("");
+  const sessionBranchIdRef = useRef("");
   const [loading, setLoading] = useState({ page: true, sale: false, hold: false, customer: false });
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({});
   const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    sessionBranchIdRef.current = sessionBranchId;
+  }, [sessionBranchId]);
+
+  /** Fresh stock for Left / oversell guards — edit load, post-sale, and tab focus. */
+  async function reloadProducts(signal?: AbortSignal, branchId?: string) {
+    const rows = await listAllProducts(signal, branchId || sessionBranchIdRef.current || undefined);
+    if (signal?.aborted) return rows;
+    setProducts(rows);
+    return rows;
+  }
 
   const showToast = (msg: string) => {
     if (/could not|failed|exceeds|must|incomplete/i.test(msg)) toaster.error(msg);
@@ -484,9 +497,17 @@ export function PosWorkspace() {
       return;
     }
     const controller = new AbortController();
-    getInvoice(editInvoiceId, controller.signal)
-      .then((invoice) => {
+    void (async () => {
+      try {
+        // Refetch stock before edit Left math so a prior sale/count cannot leave stale cache.
+        const session = await ensureSession(controller.signal);
+        const branchId = session?.branchId || sessionBranchIdRef.current || undefined;
+        const [productRows, invoice] = await Promise.all([
+          listAllProducts(controller.signal, branchId).catch(() => [] as Product[]),
+          getInvoice(editInvoiceId, controller.signal),
+        ]);
         if (controller.signal.aborted) return;
+        if (productRows.length) setProducts(productRows);
         const blocked = invoicePosEditBlockReason(invoice);
         if (blocked) {
           showToast(blocked);
@@ -512,13 +533,28 @@ export function PosWorkspace() {
         setCashAmt(snap.cashAmt);
         setOnlineAmt(snap.onlineAmt);
         setReturnChange(false);
-      })
-      .catch((error) => {
+      } catch (error) {
         const message = errorToastMessage(error, "Could not load invoice for edit");
         if (message) showToast(message);
-      });
+      }
+    })();
     return () => controller.abort();
   }, [editInvoiceId, setSearchParams]);
+
+  // When cashier returns from another tab/page (return, stock count, second sale), refresh stock.
+  useEffect(() => {
+    function refreshIfVisible() {
+      if (document.visibilityState !== "visible") return;
+      if (!sessionBranchIdRef.current) return;
+      void reloadProducts().catch(() => undefined);
+    }
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    window.addEventListener("focus", refreshIfVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+      window.removeEventListener("focus", refreshIfVisible);
+    };
+  }, []);
 
   useEffect(() => {
     if (!editDraft || !products.length) return;
@@ -1482,25 +1518,8 @@ export function PosWorkspace() {
           ),
         )
         .catch(() => undefined);
-      setProducts((current) =>
-        current.map((product) => {
-          const sold = cart
-            .filter((item) => item.productId === product.id)
-            .reduce((sum, item) => sum + item.baseQty, 0);
-          if (!sold) return product;
-          const nextStock = Math.max(0, (product.totalStock ?? product.stock) - sold);
-          return {
-            ...product,
-            stock: Math.max(0, product.stock - sold),
-            totalStock: nextStock,
-            branchStock: product.branchStock?.map((row) =>
-              row.branchId === sessionBranchId
-                ? { ...row, quantity: Math.max(0, row.quantity - sold) }
-                : row,
-            ),
-          };
-        }),
-      );
+      // Refetch live stock after every completed sale/revise (no optimistic cache).
+      void reloadProducts().catch(() => undefined);
       setReceiptInvoiceNo(invoice.invoiceNumber);
       showToast(
         wasEditing

@@ -28,6 +28,8 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | Edit totals count allocated as paid (due/after-bill); walk-in customer switch resets price mode to retail | ✅ Step 19 |
 | SKU search case/partial/hyphen-insensitive (PMX-001); db:seed sets customer credit_limit idempotently | ✅ Step 20 |
 | Edit Left stock = on-hand + this invoice base qty − cart holds (no double-add) | ✅ Step 20 |
+| POS stock refetch on edit load, after sale, and tab focus; backend rejects oversell | ✅ Step 21 |
+| Reorder PO create drawer: per-line unit selector; qty/cost → base on save | ✅ Step 21 |
 
 ## UI agent-mistakes audit (2026-09-19)
 

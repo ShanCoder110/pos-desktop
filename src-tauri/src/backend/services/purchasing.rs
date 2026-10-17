@@ -421,4 +421,156 @@ mod tests {
             vec![1000.0, 600.0, 850.0]
         );
     }
+
+    /// 3 Pack @ 10 pcs and Rs 80/pack → ordered_base 30; cost/base = 8 on receive math.
+    #[tokio::test]
+    async fn create_po_pack_unit_converts_qty_to_base() {
+        use crate::backend::dto::{CreatePurchaseOrderRequest, PurchaseOrderItemInput};
+
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let context = ctx();
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "PoPackCat".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let supplier = MasterService::create(
+            &database,
+            MasterKind::Supplier,
+            MasterRequest {
+                name: "Pack Supplier".into(),
+                symbol: None,
+                phone: Some("03009998877".into()),
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            Some(&context),
+        )
+        .await
+        .expect("supplier");
+        let units = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data;
+        let pc = units
+            .iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let pk = units
+            .iter()
+            .find(|u| u.symbol.as_deref() == Some("pk"))
+            .expect("pk");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Pack Widget".into(),
+                category_id: category.id,
+                base_unit_id: pc.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![
+                    ProductUnitInput {
+                        id: None,
+                        unit_id: pc.id.clone(),
+                        name: "Piece".into(),
+                        contains: Decimal::ONE,
+                        cost: Decimal::new(8, 0),
+                        min: Decimal::new(10, 0),
+                        wholesale: Decimal::new(12, 0),
+                        price: Decimal::new(15, 0),
+                        barcode: None,
+                        factor_direction: None,
+                        is_base: true,
+                        is_default: true,
+                    },
+                    ProductUnitInput {
+                        id: None,
+                        unit_id: pk.id.clone(),
+                        name: "Pack".into(),
+                        contains: Decimal::new(10, 0),
+                        cost: Decimal::new(80, 0),
+                        min: Decimal::new(80, 0),
+                        wholesale: Decimal::new(90, 0),
+                        price: Decimal::new(100, 0),
+                        barcode: None,
+                        factor_direction: Some("multiply".into()),
+                        is_base: false,
+                        is_default: false,
+                    },
+                ],
+                opening_stock: None,
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let pack_unit = product
+            .sell_units
+            .iter()
+            .find(|u| u.name == "Pack")
+            .expect("pack sell unit");
+
+        let po = PurchasingService::create(
+            &database,
+            &context,
+            CreatePurchaseOrderRequest {
+                supplier_id: supplier.id,
+                order_date: None,
+                expected_date: None,
+                notes: None,
+                items: vec![PurchaseOrderItemInput {
+                    product_id: product.id,
+                    unit_id: pack_unit.id.clone(),
+                    quantity: Decimal::new(3, 0),
+                    unit_cost: Decimal::new(80, 0),
+                    notes: None,
+                }],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+            },
+        )
+        .await
+        .expect("create PO");
+
+        let item = po.items.first().expect("line");
+        assert_eq!(item.ordered_quantity, 3.0);
+        assert_eq!(item.ordered_base_quantity, 30.0);
+        assert_eq!(item.expected_unit_cost, 80.0);
+        // Cost per base implied by pack: 80 / 10 = 8
+        assert!((item.expected_unit_cost / 10.0 - 8.0).abs() < 0.0001);
+        assert_eq!(item.line_total, 240.0);
+    }
 }
