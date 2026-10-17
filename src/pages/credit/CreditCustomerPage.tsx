@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import {
-  ArrowLeft,
-  CreditCard,
-  History,
-  Pencil,
-  Plus,
-  Receipt,
-  Trash2,
-} from "lucide-react";
+import { ArrowLeft, CreditCard, History, Pencil, Plus, Receipt, Trash2 } from "lucide-react";
 import {
   Badge,
   Button,
@@ -39,7 +31,7 @@ import {
   creditBalanceAdjustNote,
   type CreditCustomerEditValues,
 } from "@/pages/credit/CreditCustomerEditForm";
-import { summarizeCreditInvoices } from "@/pages/credit/creditProfitUtils";
+import { summarizeCreditInvoices, summarizeCreditLedger } from "@/pages/credit/creditProfitUtils";
 import { ensureSession } from "@/services/auth";
 import {
   adjustCustomerBalance,
@@ -184,7 +176,11 @@ export function CreditCustomerPage() {
   }, [reload]);
 
   const balance = useMemo(() => creditState(customer?.currentBalance ?? 0), [customer]);
-  const summary = useMemo(() => summarizeCreditInvoices(creditInvoices), [creditInvoices]);
+  const invoiceSummary = useMemo(() => summarizeCreditInvoices(creditInvoices), [creditInvoices]);
+  const ledgerSummary = useMemo(
+    () => summarizeCreditLedger(ledgerEntries, customer?.currentBalance),
+    [ledgerEntries, customer?.currentBalance],
+  );
   const creditSaleLines = useMemo(
     () =>
       creditInvoices.flatMap((inv) =>
@@ -375,21 +371,21 @@ export function CreditCustomerPage() {
         />
         <KpiCard
           label={CREDIT_COPY.creditSold}
-          value={money(summary.totalInvoiced)}
-          hint={`${creditSaleLines.length} ${CREDIT_COPY.creditSoldHint}`}
+          value={money(ledgerSummary.sold)}
+          hint={`${creditInvoices.length} ${CREDIT_COPY.creditSoldHint}`}
           tone="warn"
         />
         <KpiCard
           label={CREDIT_COPY.paidOnCredit}
-          value={money(summary.totalPaid)}
+          value={money(ledgerSummary.paid)}
           hint={CREDIT_COPY.paidOnCreditHint}
           tone="ok"
         />
         <KpiCard
           label="Profit on hold"
-          value={money(summary.totalProfitOnHold)}
-          hint={`Realized: ${money(summary.totalRealizedProfit)}`}
-          tone={summary.totalProfitOnHold > 0 ? "warn" : "info"}
+          value={money(invoiceSummary.totalProfitOnHold)}
+          hint={`Realized: ${money(invoiceSummary.totalRealizedProfit)}`}
+          tone={invoiceSummary.totalProfitOnHold > 0 ? "warn" : "info"}
         />
       </div>
 
@@ -555,9 +551,7 @@ export function CreditCustomerPage() {
                         <Td numeric className="font-semibold">
                           {lineState.text}
                         </Td>
-                        <Td className="text-muted">
-                          {ledgerNoteText(line.notes)}
-                        </Td>
+                        <Td className="text-muted">{ledgerNoteText(line.notes)}</Td>
                       </tr>
                     );
                   })

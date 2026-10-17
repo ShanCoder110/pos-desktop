@@ -1364,6 +1364,20 @@ export function PosWorkspace() {
         },
         ...prev.filter((row) => row.id !== invoice.id),
       ]);
+      // Refresh ledger balances so header CREDIT matches dashboard / customer page.
+      void listCustomersWithBalances()
+        .then((records) =>
+          setCustomers(
+            records.map((record) => ({
+              id: record.id,
+              name: record.name,
+              phone: record.phone,
+              balance: -record.currentBalance,
+              isWalking: Boolean(record.isWalkIn),
+            })),
+          ),
+        )
+        .catch(() => undefined);
       setProducts((current) =>
         current.map((product) => {
           const sold = cart
@@ -1761,7 +1775,10 @@ export function PosWorkspace() {
                   <span id="todayCash">
                     Cash {money(invoices.reduce((s, i) => s + i.cash, 0))}
                     {" · "}
-                    Credit {money(invoices.reduce((s, i) => s + i.credit, 0))}
+                    Credit{" "}
+                    {money(
+                      customers.reduce((sum, row) => sum + Math.max(0, -(row.balance ?? 0)), 0),
+                    )}
                   </span>
                 </span>
                 <button

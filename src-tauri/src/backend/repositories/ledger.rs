@@ -33,6 +33,21 @@ const SUPPLIER_LATEST_SQL: &str = "SELECT CAST(balance_after AS REAL) AS balance
 const CUSTOMER_REPLAY_SQL: &str = "SELECT id, CAST(debit AS REAL) AS debit, CAST(credit AS REAL) AS credit, CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at ASC, created_at ASC, rowid ASC";
 const SUPPLIER_REPLAY_SQL: &str = "SELECT id, CAST(debit AS REAL) AS debit, CAST(credit AS REAL) AS credit, CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at ASC, created_at ASC, rowid ASC";
 
+/// Sold on credit = net of non-payment ledger rows (SALE + revise ADJUSTMENT + opening, etc.).
+/// Revise adjustments cancel the prior SALE debit so totals are not double-counted.
+pub const CUSTOMER_SOLD_SQL: &str = "CAST(COALESCE((SELECT SUM(cle.debit - cle.credit) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type NOT IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE', 'RETURN')), 0) AS REAL)";
+/// Paid on credit = payments and returns (credits reduce what the customer owes).
+pub const CUSTOMER_PAID_SQL: &str = "CAST(COALESCE((SELECT SUM(cle.credit - cle.debit) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE', 'RETURN')), 0) AS REAL)";
+pub const CUSTOMER_BALANCE_SQL: &str = "CAST((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id ORDER BY cle.occurred_at DESC, cle.created_at DESC, cle.rowid DESC LIMIT 1) AS REAL)";
+pub const SUPPLIER_BALANCE_SQL: &str = "CAST((SELECT sle.balance_after FROM supplier_ledger_entries sle WHERE sle.supplier_id = suppliers.id ORDER BY sle.occurred_at DESC, sle.created_at DESC, sle.rowid DESC LIMIT 1) AS REAL)";
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PartyCreditTotals {
+    pub balance: Decimal,
+    pub sold: Decimal,
+    pub paid: Decimal,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LedgerParty {
     Supplier(Uuid),
@@ -233,6 +248,124 @@ impl LedgerRepository {
             created_by,
         )
         .await
+    }
+
+    /// Ledger-derived credit book totals for one customer. `sold - paid` equals `balance`
+    /// when every row is classified as sold-side or paid-side (no leftover types).
+    pub async fn customer_credit_totals(
+        database: &impl ConnectionTrait,
+        customer_id: Uuid,
+    ) -> Result<PartyCreditTotals, AppError> {
+        #[derive(Debug, FromQueryResult)]
+        struct TotalsRow {
+            balance: Decimal,
+            sold: Decimal,
+            paid: Decimal,
+        }
+        let row = TotalsRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT
+                CAST(COALESCE((SELECT balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1), 0) AS REAL) AS balance,
+                CAST(COALESCE((SELECT SUM(debit - credit) FROM customer_ledger_entries WHERE customer_id = ? AND type NOT IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE', 'RETURN')), 0) AS REAL) AS sold,
+                CAST(COALESCE((SELECT SUM(credit - debit) FROM customer_ledger_entries WHERE customer_id = ? AND type IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE', 'RETURN')), 0) AS REAL) AS paid",
+            [customer_id.into(), customer_id.into(), customer_id.into()],
+        ))
+        .one(database)
+        .await?
+        .unwrap_or(TotalsRow {
+            balance: Decimal::ZERO,
+            sold: Decimal::ZERO,
+            paid: Decimal::ZERO,
+        });
+        Ok(PartyCreditTotals {
+            balance: money_value(row.balance),
+            sold: money_value(row.sold),
+            paid: money_value(row.paid),
+        })
+    }
+
+    /// Shop-wide credit outstanding: sum of each customer's latest positive balance_after.
+    pub async fn credit_outstanding(
+        database: &impl ConnectionTrait,
+        branch_id: Option<Uuid>,
+    ) -> Result<Decimal, AppError> {
+        let (sql, values): (String, Vec<sea_orm::Value>) = if let Some(branch_id) = branch_id {
+            (
+                "SELECT CAST(COALESCE(SUM(balance_after), 0) AS REAL) AS balance_after FROM (
+                    SELECT customer_id, balance_after,
+                           ROW_NUMBER() OVER (
+                             PARTITION BY customer_id
+                             ORDER BY occurred_at DESC, created_at DESC, rowid DESC
+                           ) AS rn
+                    FROM customer_ledger_entries
+                    WHERE branch_id = ?
+                  ) t WHERE rn = 1 AND balance_after > 0"
+                    .to_owned(),
+                vec![branch_id.into()],
+            )
+        } else {
+            (
+                "SELECT CAST(COALESCE(SUM(balance_after), 0) AS REAL) AS balance_after FROM (
+                    SELECT customer_id, balance_after,
+                           ROW_NUMBER() OVER (
+                             PARTITION BY customer_id
+                             ORDER BY occurred_at DESC, created_at DESC, rowid DESC
+                           ) AS rn
+                    FROM customer_ledger_entries
+                  ) t WHERE rn = 1 AND balance_after > 0"
+                    .to_owned(),
+                vec![],
+            )
+        };
+        let primary = BalanceRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            sql,
+            values,
+        ))
+        .one(database)
+        .await;
+        match primary {
+            Ok(Some(row)) => Ok(money_value(row.balance_after)),
+            Ok(None) => Ok(Decimal::ZERO),
+            Err(_) => {
+                // Older SQLite without window functions: correlate latest rowid per customer.
+                let fallback_sql = if branch_id.is_some() {
+                    "SELECT CAST(COALESCE(SUM(cle.balance_after), 0) AS REAL) AS balance_after
+                     FROM customer_ledger_entries cle
+                     WHERE cle.branch_id = ?
+                       AND cle.rowid = (
+                         SELECT c2.rowid FROM customer_ledger_entries c2
+                         WHERE c2.customer_id = cle.customer_id
+                         ORDER BY c2.occurred_at DESC, c2.created_at DESC, c2.rowid DESC
+                         LIMIT 1
+                       )
+                       AND cle.balance_after > 0"
+                } else {
+                    "SELECT CAST(COALESCE(SUM(cle.balance_after), 0) AS REAL) AS balance_after
+                     FROM customer_ledger_entries cle
+                     WHERE cle.rowid = (
+                         SELECT c2.rowid FROM customer_ledger_entries c2
+                         WHERE c2.customer_id = cle.customer_id
+                         ORDER BY c2.occurred_at DESC, c2.created_at DESC, c2.rowid DESC
+                         LIMIT 1
+                       )
+                       AND cle.balance_after > 0"
+                };
+                let values: Vec<sea_orm::Value> =
+                    branch_id.map(|id| vec![id.into()]).unwrap_or_default();
+                Ok(
+                    BalanceRow::find_by_statement(Statement::from_sql_and_values(
+                        DbBackend::Sqlite,
+                        fallback_sql,
+                        values,
+                    ))
+                    .one(database)
+                    .await?
+                    .map(|row| money_value(row.balance_after))
+                    .unwrap_or(Decimal::ZERO),
+                )
+            }
+        }
     }
 
     /// Idempotent repair: rebuild `balance_after` for every customer and supplier row in

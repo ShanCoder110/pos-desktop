@@ -188,9 +188,12 @@ mod tests {
             ReturnItemInput, SaleItemInput,
         },
         repositories::{
-            CreditRepository, LedgerParty, LedgerRepository, MasterKind, OrgRepository,
+            CreditRepository, LedgerParty, LedgerRepository, MasterKind, MasterRepository,
+            OrgRepository,
         },
-        services::{AuthService, CreditService, MasterService, ProductService, SalesService},
+        services::{
+            AuthService, CreditService, FinanceService, MasterService, ProductService, SalesService,
+        },
     };
 
     async fn seed_owner(database: &DatabaseConnection) {
@@ -436,6 +439,26 @@ mod tests {
         let after_second = ledger_balances(&database, &customer.id).await;
         assert_eq!(*after_second.last().unwrap(), 45.0);
 
+        let cid = Uuid::parse_str(&customer.id).unwrap();
+        // Open credit 45 — sold 45, paid 0, list + dashboard all show 45.
+        let open_totals = LedgerRepository::customer_credit_totals(&database, cid)
+            .await
+            .expect("open totals");
+        assert_eq!(open_totals.balance, Decimal::new(45, 0));
+        assert_eq!(open_totals.sold, Decimal::new(45, 0));
+        assert_eq!(open_totals.paid, Decimal::ZERO);
+        let listed = MasterRepository::find(&database, MasterKind::Customer, cid)
+            .await
+            .expect("list customer")
+            .expect("customer row");
+        assert_eq!(listed.balance, Some(45.0));
+        assert_eq!(listed.credit_sale_total, Some(45.0));
+        assert_eq!(listed.collected_total, Some(0.0));
+        let dash_open = FinanceService::dashboard(&database, &context)
+            .await
+            .expect("dashboard open");
+        assert_eq!(dash_open.credit_outstanding, 45.0);
+
         // Payment / return need an open till.
         let session = AuthService::open_cash_session(
             &database,
@@ -449,11 +472,11 @@ mod tests {
         let mut context = context;
         context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
 
-        // Payment 20 → 25
+        // Payment 20 → balance 25, sold 45, paid 20
         let pay = CreditService::customer_payment(
             &database,
             &context,
-            Uuid::parse_str(&customer.id).unwrap(),
+            cid,
             CustomerPaymentRequest {
                 amount: Decimal::new(20, 0),
                 payment_method: "CASH".into(),
@@ -472,6 +495,23 @@ mod tests {
                 .unwrap(),
             25.0
         );
+        let paid_totals = LedgerRepository::customer_credit_totals(&database, cid)
+            .await
+            .expect("paid totals");
+        assert_eq!(paid_totals.balance, Decimal::new(25, 0));
+        assert_eq!(paid_totals.sold, Decimal::new(45, 0));
+        assert_eq!(paid_totals.paid, Decimal::new(20, 0));
+        let listed_paid = MasterRepository::find(&database, MasterKind::Customer, cid)
+            .await
+            .expect("list customer after pay")
+            .expect("customer row");
+        assert_eq!(listed_paid.balance, Some(25.0));
+        assert_eq!(listed_paid.credit_sale_total, Some(45.0));
+        assert_eq!(listed_paid.collected_total, Some(20.0));
+        let dash_paid = FinanceService::dashboard(&database, &context)
+            .await
+            .expect("dashboard paid");
+        assert_eq!(dash_paid.credit_outstanding, 25.0);
 
         // Return 10 against second invoice → 15
         let item_id = second.items[0].id.clone();
@@ -499,7 +539,6 @@ mod tests {
         assert_eq!(*after_return.last().unwrap(), 15.0);
 
         // Deliberately break the latest row, then recompute repairs it.
-        let cid = Uuid::parse_str(&customer.id).unwrap();
         database
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,

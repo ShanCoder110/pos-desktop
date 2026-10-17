@@ -1,4 +1,6 @@
-import type { InvoiceRow } from "@/shared/domain/types";
+import type { InvoiceRow, LedgerRow } from "@/shared/domain/types";
+
+const PAID_LEDGER_TYPES = new Set(["PAYMENT_RECEIVED", "PAYMENT", "PAYMENT_MADE", "RETURN"]);
 
 /**
  * Calculates the total gross profit for an invoice across its line items.
@@ -6,6 +8,32 @@ import type { InvoiceRow } from "@/shared/domain/types";
 export function calculateInvoiceGrossProfit(invoice: InvoiceRow): number {
   if (!invoice.items || invoice.items.length === 0) return 0;
   return invoice.items.reduce((sum, item) => sum + (item.grossProfit ?? 0), 0);
+}
+
+/** Ledger-backed sold / paid / balance. Revise ADJUSTMENTs net against SALE (no double count). */
+export function summarizeCreditLedger(entries: LedgerRow[], balanceAfter?: number) {
+  let sold = 0;
+  let paid = 0;
+  for (const entry of entries) {
+    const type = (entry.type || "").toUpperCase();
+    const net = (Number(entry.debit) || 0) - (Number(entry.credit) || 0);
+    if (PAID_LEDGER_TYPES.has(type)) {
+      paid += (Number(entry.credit) || 0) - (Number(entry.debit) || 0);
+    } else {
+      sold += net;
+    }
+  }
+  const balance =
+    balanceAfter !== undefined
+      ? balanceAfter
+      : entries.length
+        ? Number(entries[entries.length - 1]?.balanceAfter) || 0
+        : 0;
+  return {
+    sold: +sold.toFixed(2),
+    paid: +paid.toFixed(2),
+    balance: +balance.toFixed(2),
+  };
 }
 
 /**
