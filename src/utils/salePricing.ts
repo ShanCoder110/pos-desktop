@@ -1,11 +1,7 @@
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { inventoryPerSellUnit, normalizeSellUnits } from "@/pages/products/productQty";
 import { productSellUnits as creditUnits } from "@/pages/credit/creditSaleUtils";
-import {
-  defaultTransactionUnit,
-  displayedToStockQuantity,
-  stockToDisplayedQuantity,
-} from "@/utils/unitConversion";
+import { defaultTransactionUnit, displayedToStockQuantity } from "@/utils/unitConversion";
 
 export type SalePriceTier = "retail" | "wholesale" | "minimum";
 
@@ -109,6 +105,11 @@ export function displayToBaseQty(unit: ProductSellUnit, displayQty: number): num
   return round6(displayedToStockQuantity(unit, displayQty));
 }
 
+/** Whether inventory contains at least one complete unit (for example one full pack). */
+export function hasCompleteSellUnit(unit: ProductSellUnit, baseAvailable: number): boolean {
+  return baseAvailable + 0.000001 >= displayToBaseQty(unit, 1);
+}
+
 /** Positive balance is an advance. paidNow is money kept, not change handed back. */
 export function balanceAfterSale(currentBalance: number, billTotal: number, paidNow: number) {
   return +(currentBalance - billTotal + paidNow).toFixed(2);
@@ -189,7 +190,10 @@ export function convertLineToUnit(
   );
   return {
     productUnitId: target.id,
-    qty: +stockToDisplayedQuantity(target, baseQty).toFixed(4),
+    // Keep the unrounded converted quantity in cart state. The POS formats it for
+    // display, but calculations must retain the exact value (for example, one
+    // piece is 1 / 12 of a 12-piece pack, not 0.0833 packs).
+    qty: baseQty / stockPerUnit(target),
     listPrice,
     unitPrice: listPrice,
     minPrice,

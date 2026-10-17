@@ -10,6 +10,7 @@ import { normalizeSellUnits, productSellUnits } from "@/pages/products/productQt
 import {
   balanceAfterSale,
   displayToBaseQty,
+  hasCompleteSellUnit,
   stockPerUnit,
   toBaseQty,
   productMatchesQuery,
@@ -28,6 +29,7 @@ import { CartUnitDropdown } from "@/pages/pos/CartUnitDropdown";
 import { PosProductSearch, type PosSearchResult } from "@/pages/pos/PosProductSearch";
 import { PosSaleEntryControls } from "@/pages/pos/PosSaleEntryControls";
 import { PosBillsMenu, PosFunctionBar, PosLoadingOverlay } from "@/pages/pos/PosChrome";
+import { PosShortcutsDrawer } from "@/pages/pos/PosShortcutsDrawer";
 import {
   convertBillDiscount,
   paymentStatusLabel,
@@ -296,6 +298,7 @@ export function PosWorkspace() {
   const suppressSearchMenuRef = useRef(true);
   const qtyRef = useRef<HTMLInputElement>(null);
   const unitBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const cartRowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
   const focusAfterSelect = useRef<"unit" | "qty" | null>(null);
   const [unitFocused, setUnitFocused] = useState(false);
   const fnRef = useRef<Record<string, () => void>>({});
@@ -357,6 +360,7 @@ export function PosWorkspace() {
   >([]);
   const [billsTip, setBillsTip] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: "", phone: "" });
   const [holdsOpen, setHoldsOpen] = useState(false);
@@ -415,6 +419,16 @@ export function PosWorkspace() {
     });
   }
 
+  function focusCartRow(index: number) {
+    if (!cart.length) return;
+    const next = Math.max(0, Math.min(index, cart.length - 1));
+    setSelected(next);
+    window.requestAnimationFrame(() => {
+      cartRowRefs.current[next]?.focus();
+      cartRowRefs.current[next]?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
   useEffect(() => {
     const id = window.setInterval(() => setClock(clockNow()), 1000);
     return () => window.clearInterval(id);
@@ -428,11 +442,18 @@ export function PosWorkspace() {
     function closeSearch(event: PointerEvent) {
       const target = event.target as Node;
       if (searchWrapRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest(".cat-btn")) return;
       setMenuOpen(false);
+      if (categoryPickerOpen || selectedCategoryId) {
+        setCategoryPickerOpen(false);
+        setSelectedCategoryId("");
+        setQuery("");
+        setHit(0);
+      }
     }
     document.addEventListener("pointerdown", closeSearch);
     return () => document.removeEventListener("pointerdown", closeSearch);
-  }, []);
+  }, [categoryPickerOpen, selectedCategoryId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -866,8 +887,12 @@ export function PosWorkspace() {
   function togglePendingUnit(stay = true) {
     if (!pending || !packOf(pending)) return;
     const next: SellUnit = sellUnit === "pack" ? "base" : "pack";
-    setSellUnit(next);
     const unit = sellUnitOf(pending, next);
+    if (unit && !hasCompleteSellUnit(unit, cartStock(pending.id))) {
+      showToast(`No complete ${formatSellUnitLabel(unit)} available`);
+      return;
+    }
+    setSellUnit(next);
     if (unit?.id) setPendingProductUnitId(unit.id);
     if (stay) {
       setUnitFocused(true);
@@ -877,6 +902,10 @@ export function PosWorkspace() {
 
   function selectPendingUnit(unit: ProductSellUnit) {
     if (!pending) return;
+    if (!hasCompleteSellUnit(unit, cartStock(pending.id))) {
+      showToast(`No complete ${formatSellUnitLabel(unit)} available`);
+      return;
+    }
     setPendingProductUnitId(unit.id);
     const packN = packOf(pending);
     if (unit.contains > 1 && packN > 1 && unit.contains === packN) setSellUnit("pack");
@@ -939,7 +968,12 @@ export function PosWorkspace() {
       preferredUnitId ? "" : query,
       preferredUnitId ?? product.matchedUnitId,
     );
-    const unit = resolveSellUnit(product, matchedId);
+    const matchedUnit = resolveSellUnit(product, matchedId);
+    const left = cartStock(product.id);
+    const unit =
+      matchedUnit && hasCompleteSellUnit(matchedUnit, left)
+        ? matchedUnit
+        : unitsForProduct(product).find((row) => hasCompleteSellUnit(row, left));
     setPending(product);
     setPendingProductUnitId(unit?.id ?? "");
     setSellUnit("base");
@@ -984,6 +1018,10 @@ export function PosWorkspace() {
     const productUnit = resolveSellUnit(pending, pendingProductUnitId);
     if (!productUnit?.id) {
       showToast("Select a sell unit first");
+      return;
+    }
+    if (!hasCompleteSellUnit(productUnit, cartStock(pending.id))) {
+      showToast(`No complete ${formatSellUnitLabel(productUnit)} available`);
       return;
     }
     const baseQty = displayToBaseQty(productUnit, entered);
@@ -1187,6 +1225,17 @@ export function PosWorkspace() {
   }
 
   function convertCartUnitId(id: string, productUnitId: string) {
+    const current = cart.find((item) => item.id === id);
+    const product = current ? products.find((item) => item.id === current.productId) : undefined;
+    const target = product ? resolveSellUnit(product, productUnitId) : undefined;
+    if (
+      current &&
+      target &&
+      !hasCompleteSellUnit(target, cartStock(current.productId, current.id))
+    ) {
+      showToast(`No complete ${formatSellUnitLabel(target)} available`);
+      return;
+    }
     setCart((prev) =>
       prev.map((item) => {
         if (item.id !== id || item.productUnitId === productUnitId) return item;
@@ -1265,12 +1314,6 @@ export function PosWorkspace() {
   }
 
   function switchAllCart(mode?: PriceMode) {
-    const walkIn = customers.find((c) => c.id === customerId)?.isWalking;
-    if (walkIn) {
-      applyPriceModeToCart("retail", { toast: false });
-      showToast("Walk-in uses retail");
-      return;
-    }
     if (!cart.length) {
       const next = mode ?? (priceMode === "wholesale" ? "retail" : "wholesale");
       setPriceMode(next);
@@ -1413,7 +1456,6 @@ export function PosWorkspace() {
 
   function setPay(method: PayMethod) {
     setPayMethod(method);
-    if (method === "cash" && customer.isWalking) setReceived(t.total || received);
     if (method === "online") {
       setOnlineAmt(t.total || onlineAmt);
       setCashAmt(0);
@@ -1624,8 +1666,8 @@ export function PosWorkspace() {
       F5: () => clearCart(),
       F6: () => {
         if (cart.length) {
-          setSelected(0);
-          showToast("Cart focused — edit qty on the selected row");
+          focusCartRow(selected >= 0 ? selected : 0);
+          showToast("Cart focused — use ↑ and ↓");
         } else showToast("Cart is empty");
       },
       F7: () => applyExact(),
@@ -1661,6 +1703,7 @@ export function PosWorkspace() {
         setHoldsOpen(false);
         setRecentOpen(false);
         setQuickOpen(false);
+        setShortcutsOpen(false);
         setAddCustomerOpen(false);
         return;
       }
@@ -1684,11 +1727,6 @@ export function PosWorkspace() {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [printOpen, holdsOpen, recentOpen, askSupplier, addCustomerOpen]);
-
-  useEffect(() => {
-    if (payMethod !== "cash" || !t.total || !customer.isWalking) return;
-    if (received === 0 || received < t.total - 0.001) setReceived(t.total);
-  }, [t.total, payMethod, customer.isWalking]); // eslint-disable-line
 
   const invoiceLines: InvoiceLine[] = cart.map((c) => ({
     id: c.id,
@@ -1785,13 +1823,18 @@ export function PosWorkspace() {
         aria-busy={loading.page}
         className="workspace pos-workspace relative [grid-column:2] [grid-row:1] [display:grid] [grid-template-columns:1fr_360px] [min-height:0] [overflow:hidden]"
       >
-        {editInvoiceNumber ? (
-          <div className="absolute left-2 right-[368px] top-2 z-40 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] font-semibold text-ink">
-            Editing invoice {editInvoiceNumber} — saving updates the same bill (no duplicate sale).
-          </div>
-        ) : null}
         {loading.page ? <PosLoadingOverlay /> : null}
         <section className="stage [display:flex] [flex-direction:column] [min-height:0] [padding:8px_6px_8px_8px] [gap:4px]">
+          {editInvoiceNumber ? (
+            <div className="flex shrink-0 items-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--warn)_40%,var(--line))] bg-[color-mix(in_srgb,var(--warn)_14%,var(--paper))] px-3 py-1.5 text-[12px] font-semibold text-ink">
+              <span className="rounded bg-[color-mix(in_srgb,var(--warn)_28%,transparent)] px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-[var(--warn-ink)]">
+                Editing
+              </span>
+              <span className="min-w-0 truncate">
+                {editInvoiceNumber} — save updates this bill (no new sale).
+              </span>
+            </div>
+          ) : null}
           <div className="search-row [display:flex] [gap:6px] [align-items:stretch] [flex-shrink:0] [height:48px]">
             <PosProductSearch
               rootRef={searchWrapRef}
@@ -1861,17 +1904,24 @@ export function PosWorkspace() {
                 window.requestAnimationFrame(() => searchRef.current?.focus());
               }}
               onEnter={onSearchEnter}
-              onClose={() => setMenuOpen(false)}
+              onClose={() => {
+                setMenuOpen(false);
+                setCategoryPickerOpen(false);
+                setSelectedCategoryId("");
+                setQuery("");
+              }}
             />
 
             <PosSaleEntryControls
               hasProduct={Boolean(pending)}
+              categoryActive={categoryPickerOpen || Boolean(selectedCategoryId)}
               unitFocused={unitFocused}
               units={
                 pending
                   ? unitsForProduct(pending).map((unit) => ({
                       id: unit.id,
                       label: formatSellUnitLabel(unit, prettyUnit(pending.unit)),
+                      disabled: !hasCompleteSellUnit(unit, cartStock(pending.id)),
                     }))
                   : []
               }
@@ -1881,7 +1931,9 @@ export function PosWorkspace() {
               quantityHint={qtyHint}
               quantityInputRef={qtyRef}
               onCategory={() => {
-                setCategoryPickerOpen(true);
+                const shouldOpen = !(categoryPickerOpen || selectedCategoryId);
+                setCategoryPickerOpen(shouldOpen);
+                setSelectedCategoryId("");
                 setPending(null);
                 setQuery("");
                 setHit(0);
@@ -1898,12 +1950,6 @@ export function PosWorkspace() {
               }}
               onUnitKeyDown={onUnitKey}
               onPriceMode={(mode) => {
-                const walkIn = customers.find((c) => c.id === customerId)?.isWalking;
-                if (walkIn && mode === "wholesale") {
-                  setPriceMode("retail");
-                  showToast("Walk-in uses retail");
-                  return;
-                }
                 setPriceMode(mode);
               }}
               onQuantity={setQtyInput}
@@ -1977,7 +2023,9 @@ export function PosWorkspace() {
                 </button>
               </div>
             </div>
-            <div className="cart-scroll [flex:1] [overflow:auto] [min-height:0]">
+            <div
+              className={`cart-scroll [flex:1] [min-height:0] ${cart.length ? "[overflow:auto]" : "[overflow:hidden]"}`}
+            >
               <table className="cart-table [width:100%] [border-collapse:collapse] [table-layout:fixed]">
                 <thead>
                   <tr>
@@ -1986,7 +2034,7 @@ export function PosWorkspace() {
                     </th>
                     <th className="c-item [width:auto] [text-align:left]">Item</th>
                     <th className="c-unit [width:112px] [text-align:left]">Unit</th>
-                    <th className="c-stock [width:120px] [text-align:right]">Stock</th>
+                    <th className="c-stock [width:148px] [text-align:left]">Stock</th>
                     <th className="c-qty [width:136px] [text-align:right]">Qty</th>
                     <th className="c-price [width:126px] [text-align:right]">Price</th>
                     <th className="c-disc [width:88px] [text-align:right]">Disc</th>
@@ -2006,8 +2054,29 @@ export function PosWorkspace() {
                     return (
                       <tr
                         key={item.id}
+                        ref={(element) => {
+                          cartRowRefs.current[i] = element;
+                        }}
+                        tabIndex={i === selected ? 0 : -1}
                         className={`${i === selected ? "is-selected" : ""} ${item.minWarn ? "is-min-price" : ""} ${item.lineDisc > 0.001 ? "has-disc" : ""} ${left < -0.0001 ? "is-over" : ""}`}
                         onClick={() => setSelected(i)}
+                        onFocus={() => setSelected(i)}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return;
+                          if (event.key === "ArrowDown") {
+                            event.preventDefault();
+                            focusCartRow(i + 1);
+                          } else if (event.key === "ArrowUp") {
+                            event.preventDefault();
+                            focusCartRow(i - 1);
+                          } else if (event.key === "Home") {
+                            event.preventDefault();
+                            focusCartRow(0);
+                          } else if (event.key === "End") {
+                            event.preventDefault();
+                            focusCartRow(cart.length - 1);
+                          }
+                        }}
                       >
                         <td className="c-hash [width:36px] [text-align:center] [color:var(--muted)]">
                           {i + 1}
@@ -2023,11 +2092,6 @@ export function PosWorkspace() {
                               ? ` = ${qtyStr(item.baseQty)} ${prettyUnit(item.baseUnit)}`
                               : ""}
                           </span>
-                          {activeUnit ? (
-                            <span className="cart-cmwr" title="Cost · Min · Wholesale · Retail">
-                              {formatCmwrPrices(activeUnit)}
-                            </span>
-                          ) : null}
                           <span
                             className="line-units line-price [display:inline-flex] [gap:3px] [margin-top:4px] [margin-right:6px]"
                             role="group"
@@ -2076,13 +2140,18 @@ export function PosWorkspace() {
                             options={lineUnits.map((unit) => ({
                               id: unit.id,
                               label: formatSellUnitLabel(unit, prettyUnit(item.baseUnit)),
+                              disabled: !hasCompleteSellUnit(
+                                unit,
+                                cartStock(item.productId, item.id),
+                              ),
+                              disabledReason: `Requires ${qtyStr(displayToBaseQty(unit, 1))} ${prettyUnit(item.baseUnit)}`,
                             }))}
                             onChange={(unitId) => convertCartUnitId(item.id, unitId)}
                           />
                         </td>
-                        <td className="c-stock [width:120px] [text-align:right]">
+                        <td className="c-stock [width:148px] [text-align:left]">
                           <span
-                            className={`stock-val [font-family:var(--mono)] [font-size:12px] [color:var(--sub)] [white-space:nowrap] [display:inline-flex] [align-items:center] [justify-content:flex-end] [gap:4px] ${left < 10 ? "is-low" : ""}`}
+                            className={`stock-val [font-family:var(--mono)] [font-size:12px] [color:var(--sub)] [white-space:nowrap] [display:inline-flex] [align-items:center] [justify-content:flex-start] [gap:4px] ${left < 10 ? "is-low" : ""}`}
                           >
                             {left < 10 ? WARN_ICO : null}
                             <span
@@ -2192,7 +2261,7 @@ export function PosWorkspace() {
                           />
                         </td>
                         <td className="c-amt [width:112px] [text-align:right]">
-                          <span className="amt [font-family:var(--mono)] [font-weight:700] [font-size:15px] [display:block] [color:#047857]">
+                          <span className="amt [font-family:var(--mono)] [font-weight:700] [font-size:15px] [display:block] [color:var(--sale)]">
                             {money(item.amount)}
                           </span>
                         </td>
@@ -2236,17 +2305,24 @@ export function PosWorkspace() {
         </section>
 
         <aside className="ticket pos-ticket [min-height:0] [overflow:visible] [display:flex] [flex-direction:column] [gap:6px] [padding:8px_10px_8px_4px] [background:var(--shell)]">
-          <div className="ticket-head [display:flex] [align-items:center] [justify-content:space-between] [padding:0_2px] [flex-shrink:0] [gap:8px]">
-            <div className="invoice-chip [line-height:1.2] [font-size:11px] [color:var(--muted)] [min-width:0]">
-              <span>Invoice</span>
-              <strong>{loading.page ? "Loading…" : "New sale"}</strong>
+          <div className="ticket-head [display:flex] [align-items:center] [justify-content:space-between] [padding:0_2px] [flex-shrink:0] [gap:6px] [min-width:0]">
+            <div className="invoice-chip [line-height:1.2] [font-size:11px] [color:var(--muted)] [min-width:0] [flex:1]">
+              <span className="inline-flex items-center gap-2">
+                Invoice
+                <em className="not-italic font-[family-name:var(--mono)] text-[10px] text-muted">
+                  {clock}
+                </em>
+              </span>
+              <strong className="truncate">
+                {loading.page ? "Loading…" : editInvoiceNumber ? editInvoiceNumber : "New sale"}
+              </strong>
             </div>
-            <div className="ticket-tools [display:flex] [align-items:center] [gap:5px] [flex-shrink:0]">
+            <div className="ticket-tools">
               <ThemeToggle compact />
               <div className="relative">
                 <button
                   type="button"
-                  className="head-btn [height:26px] [padding:0_9px] [border:1px_solid_var(--accent)] [background:var(--accent-bg)] [border-radius:5px] [cursor:pointer] [font-size:11px] [font-weight:800] [color:var(--accent-deep)]"
+                  className="head-btn is-accent"
                   onClick={() => setQuickOpen((open) => !open)}
                   aria-expanded={quickOpen}
                 >
@@ -2310,14 +2386,30 @@ export function PosWorkspace() {
               </div>
               <button
                 type="button"
-                className="head-btn [height:26px] [padding:0_8px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-size:11px] [font-weight:700] [color:var(--sub)] [display:inline-flex] [align-items:center] [gap:4px]"
+                className="head-btn is-icon"
+                onClick={() => setShortcutsOpen(true)}
+                title="POS shortcuts"
+                aria-label="Open POS shortcuts"
+              >
+                <svg
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  aria-hidden="true"
+                >
+                  <rect x="3" y="4" width="14" height="11" rx="2" />
+                  <path d="M6 8h.01M9 8h.01M12 8h.01M15 8h.01M6 11h.01M9 11h.01M12 11h3M6 14h8" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="head-btn"
                 onClick={() => navigate(routes.dashboard)}
+                title="Leave POS"
               >
                 Dashboard
               </button>
-              <span className="clock [font-family:var(--mono)] [font-size:12px] [color:var(--muted)]">
-                {clock}
-              </span>
             </div>
           </div>
 
@@ -3054,6 +3146,15 @@ export function PosWorkspace() {
           ) : null}
         </div>
       </div>
+
+      <PosShortcutsDrawer
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+        onFunction={(key) => fnRef.current[key]?.()}
+        onAddCustomer={() => setAddCustomerOpen(true)}
+        onAddProduct={() => navigate(routes.products)}
+        onDashboard={() => navigate(routes.dashboard)}
+      />
 
       <PrintPreview
         open={printOpen}

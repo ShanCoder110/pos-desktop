@@ -489,8 +489,61 @@ input[type="number"]::-webkit-outer-spin-button {
   background: #f1f5f9;
 }
 .head-btn svg {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
+}
+
+.pos-ticket .ticket-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.pos-ticket .ticket-tools .theme-toggle,
+.pos-ticket .ticket-tools .head-btn {
+  box-sizing: border-box;
+  height: 28px;
+  min-height: 28px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.pos-ticket .ticket-tools .theme-toggle {
+  width: 28px;
+  flex: 0 0 28px;
+  padding: 0;
+}
+
+.pos-ticket .ticket-tools .head-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--sub);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pos-ticket .ticket-tools .head-btn.is-icon {
+  width: 28px;
+  padding: 0;
+}
+
+.pos-ticket .ticket-tools .head-btn.is-accent {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent-deep);
+  font-weight: 800;
 }
 .head-cancel {
   color: var(--danger);
@@ -788,33 +841,23 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .search-hit .price {
   font-family: var(--mono);
-  font-weight: 600;
   display: grid;
   justify-items: end;
-  gap: 1px;
-  line-height: 1.2;
+  gap: 3px;
+  line-height: 1.1;
+  white-space: nowrap;
 }
 .search-hit .price-main {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 800;
   color: var(--ink);
 }
 .search-hit .price-tiers {
   display: block;
-  font-size: 9px;
-  font-weight: 600;
+  font-size: 8px;
+  font-weight: 400;
   color: var(--muted);
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-.cart-cmwr {
-  display: block;
-  margin-top: 3px;
-  font-family: var(--mono);
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--muted);
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   white-space: nowrap;
 }
 .cart-table th.c-unit,
@@ -888,6 +931,13 @@ input[type="number"]::-webkit-outer-spin-button {
 .cart-unit-dd-menu button.is-active {
   background: var(--accent-bg);
   color: var(--accent-deep);
+}
+.cart-unit-dd-menu button:disabled,
+.cart-unit-dd-menu button:disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.42;
+  background: transparent;
+  color: var(--muted);
 }
 .cart-unit-badge {
   display: inline-block;
@@ -1099,11 +1149,11 @@ input[type="number"]::-webkit-outer-spin-button {
   padding: 3px 6px;
 }
 .cart-table td.c-stock {
-  padding-right: 12px;
-  overflow: hidden;
+  padding-right: 10px;
+  overflow: visible;
 }
 .cart-table td.c-qty {
-  padding-left: 12px;
+  padding-left: 10px;
   padding-right: 6px;
   overflow: visible;
 }
@@ -3624,7 +3674,7 @@ html[data-theme="dark"] {
   --warn-ink: #efe6c8;
   --warn-bg: #2f2d26;
   --warn-fill: #4a4636;
-  --disc: #0f766e;
+  --disc: #5eead4;
   --disc-bg: #243330;
   --disc-line: #2f5a54;
   --search: #0f766e;
@@ -3790,7 +3840,7 @@ html[data-theme="dark"] .pos-workspace .stage {
   background: linear-gradient(180deg, rgb(255 255 255 / 3%), transparent 40%);
 }
 
-html[data-theme="dark"] .pos-workspace .head-btn,
+html[data-theme="dark"] .pos-workspace .head-btn:not(.is-accent),
 html[data-theme="dark"] .pos-workspace .cat-btn,
 html[data-theme="dark"] .pos-workspace .price-mode,
 html[data-theme="dark"] .pos-workspace .unit-tog,
@@ -3831,7 +3881,7 @@ html[data-theme="dark"] .pos-workspace .line-price button[data-pm="wholesale"].i
   color: #fff;
 }
 
-html[data-theme="dark"] .pos-workspace .head-btn:hover,
+html[data-theme="dark"] .pos-workspace .head-btn:not(.is-accent):hover,
 html[data-theme="dark"] .pos-workspace .cat-btn:hover,
 html[data-theme="dark"] .pos-workspace .cash-notes button:hover,
 html[data-theme="dark"] .pos-workspace .extra-choice button:hover,
@@ -3839,6 +3889,22 @@ html[data-theme="dark"] .pos-workspace .round-row button:hover,
 html[data-theme="dark"] .pos-workspace .btn:hover {
   background: #3f4349;
   color: #f3f4f6;
+}
+
+html[data-theme="dark"] .pos-workspace .cat-btn.is-active,
+html[data-theme="dark"] .pos-workspace .cat-btn.is-active:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: color-mix(in srgb, var(--accent) 70%, #fff);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent),
+    0 4px 12px rgb(0 0 0 / 28%);
+}
+
+html[data-theme="dark"] .pos-workspace .cat-btn.is-active kbd {
+  background: rgb(255 255 255 / 12%);
+  color: #fff;
+  border-color: rgb(255 255 255 / 38%);
 }
 
 html[data-theme="dark"] .pos-workspace .search-wrap input {
@@ -3963,13 +4029,29 @@ html[data-theme="dark"] .pos-workspace .cart-table th.c-price {
 }
 
 html[data-theme="dark"] .pos-workspace .cart-table th.c-disc {
-  color: #9ecdc4;
+  color: #5eead4;
   background: #243330;
 }
 
 html[data-theme="dark"] .pos-workspace .cart-table th.c-amt {
   color: #6ee0b0;
   background: #24332c;
+}
+
+html[data-theme="dark"] .pos-workspace .cart-table td.c-disc input {
+  color: #5eead4;
+}
+
+html[data-theme="dark"] .pos-workspace .cart-table td.c-disc input::placeholder {
+  color: color-mix(in srgb, #5eead4 70%, transparent);
+}
+
+html[data-theme="dark"] .pos-workspace .cart-table td.c-amt .amt {
+  color: #6ee0b0;
+}
+
+html[data-theme="dark"] .pos-workspace .cart-table tbody tr.has-disc td.c-disc {
+  background: #2a403c;
 }
 
 html[data-theme="dark"] .pos-workspace .cart-table tbody tr {
@@ -5538,17 +5620,22 @@ html[data-theme="dark"] .ui-pop-item.is-on {
   --detail-tone-hover: var(--detail-tone-danger-hover);
 }
 
-.detail-toolbar-btn.is-accent:hover,
-.detail-toolbar-btn.is-warn:hover,
-.detail-toolbar-btn.is-info:hover,
-.detail-toolbar-btn.is-edit:hover,
-.detail-toolbar-btn.is-danger:hover {
+.detail-toolbar-btn.is-accent:hover:not(:disabled),
+.detail-toolbar-btn.is-warn:hover:not(:disabled),
+.detail-toolbar-btn.is-info:hover:not(:disabled),
+.detail-toolbar-btn.is-edit:hover:not(:disabled),
+.detail-toolbar-btn.is-danger:hover:not(:disabled) {
   border-color: var(--detail-tone-hover);
   background: var(--detail-tone-hover);
 }
 
 .detail-toolbar-btn.is-wide {
   grid-column: 1 / -1;
+}
+
+.detail-toolbar-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .detail-toolbar-btn-icon {
@@ -7539,6 +7626,12 @@ input[type="reset"]:disabled {
 
 .ui-menu button:hover {
   background: var(--bg);
+}
+
+.ui-menu button:disabled,
+.ui-menu button:disabled:hover {
+  opacity: 0.45;
+  background: transparent;
 }
 
 .ui-menu button.is-danger {

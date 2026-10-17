@@ -5,6 +5,7 @@ import {
   convertLineToUnit,
   balanceAfterSale,
   displayToBaseQty,
+  hasCompleteSellUnit,
   toBaseQty,
   lineProfit,
   lineTotal,
@@ -99,6 +100,13 @@ describe("conversions", () => {
     expect(lineTotal(2, 1200)).toBe(2400);
     expect(lineProfit(2, 1200, 90)).toBe(2220);
     expect(lineTotal(0, 100)).toBe(0);
+  });
+
+  it("requires enough stock for one complete pack", () => {
+    expect(hasCompleteSellUnit(pack, 4)).toBe(false);
+    expect(hasCompleteSellUnit(pack, 11.999)).toBe(false);
+    expect(hasCompleteSellUnit(pack, 12)).toBe(true);
+    expect(hasCompleteSellUnit(piece, 1)).toBe(true);
   });
 });
 
@@ -231,6 +239,13 @@ describe("cartLineTierPrices", () => {
     const toPack = convertLineToUnit(product, 24, "wholesale", "u-pack");
     expect(toPack?.qty).toBe(2);
     expect(toPack?.listPrice).toBe(1140);
+  });
+
+  it("does not round away stock when a partial pack is selected", () => {
+    const toPack = convertLineToUnit(product, 1, "retail", "u-pack");
+    expect(toPack?.qty).toBeCloseTo(1 / 12, 12);
+    expect((toPack?.qty ?? 0) * 12).toBeCloseTo(1, 12);
+    expect((toPack?.qty ?? 0) * 1200).toBeCloseTo(100, 8);
   });
 
   it("preserves stock when switching from a roll to a subdivision", () => {

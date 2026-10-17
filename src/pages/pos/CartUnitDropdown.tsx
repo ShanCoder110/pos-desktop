@@ -9,7 +9,7 @@ export function CartUnitDropdown({
   ariaLabel,
 }: {
   label: string;
-  options: { id: string; label: string }[];
+  options: { id: string; label: string; disabled?: boolean; disabledReason?: string }[];
   value: string;
   onChange: (unitId: string) => void;
   ariaLabel: string;
@@ -52,11 +52,15 @@ export function CartUnitDropdown({
             <button
               key={option.id}
               type="button"
+              disabled={option.disabled}
+              title={option.disabled ? option.disabledReason : undefined}
               role="option"
+              aria-disabled={option.disabled}
               aria-selected={option.id === value}
               className={option.id === value ? "is-active" : undefined}
               onClick={(event) => {
                 event.stopPropagation();
+                if (option.disabled) return;
                 onChange(option.id);
                 setOpen(false);
               }}

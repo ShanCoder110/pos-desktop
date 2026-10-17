@@ -179,7 +179,7 @@ export function PosProductSearch({
             <button
               key={result.product.id}
               type="button"
-              className={`search-hit grid min-h-12 w-full grid-cols-[56px_minmax(0,1fr)_minmax(92px,auto)_minmax(118px,auto)] items-center gap-x-2.5 gap-y-0 border-0 border-b border-line bg-transparent px-2.5 py-1.5 text-left text-[13px] ${index === activeIndex ? "is-active" : ""} ${result.low ? "is-low" : ""} ${result.out ? "is-out" : ""}`}
+              className={`search-hit grid min-h-12 w-full grid-cols-[56px_minmax(0,1fr)_minmax(92px,auto)_minmax(150px,auto)] items-center gap-x-2.5 gap-y-0 border-0 border-b border-line bg-transparent px-2.5 py-1.5 text-left text-[13px] ${index === activeIndex ? "is-active" : ""} ${result.low ? "is-low" : ""} ${result.out ? "is-out" : ""}`}
               onMouseEnter={() => onActiveIndex(index)}
               onMouseDown={(event) => {
                 event.preventDefault();
@@ -195,7 +195,7 @@ export function PosProductSearch({
               </span>
               <span
                 className={`stock ${result.low ? "is-low" : ""} ${result.out ? "is-over" : ""}`}
-                title={result.stockTitle}
+                title={`${result.out ? "Out of stock — " : result.low ? "Low stock — " : ""}${result.stockTitle}`}
               >
                 {result.low || result.out ? (
                   <svg className="warn-ico" viewBox="0 0 20 20" aria-hidden="true">

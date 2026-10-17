@@ -5,6 +5,8 @@ import {
   Badge,
   Button,
   ConfirmDialog,
+  DetailToolbar,
+  DetailToolbarButton,
   Drawer,
   EmptyRow,
   Field,
@@ -37,6 +39,7 @@ import {
   type CreditCustomerEditValues,
 } from "@/pages/credit/CreditCustomerEditForm";
 import { summarizeCreditInvoices, summarizeCreditLedger } from "@/pages/credit/creditProfitUtils";
+import { InvoiceProfitSummary } from "@/pages/invoices/InvoiceProfitSummary";
 import { paymentStatusTone } from "@/utils/paymentStatus";
 import { ensureSession } from "@/services/auth";
 import {
@@ -432,15 +435,14 @@ export function CreditCustomerPage() {
                 <Th>Quantity</Th>
                 <Th>Unit price</Th>
                 <Th>Line total</Th>
-                <Th>Gross profit</Th>
                 <Th />
               </tr>
             </THead>
             <tbody>
               {loading ? (
-                <EmptyRow cols={8} text="Loading credit sales…" />
+                <EmptyRow cols={7} text="Loading credit sales…" />
               ) : creditSaleLines.length === 0 ? (
-                <EmptyRow cols={8} text={CREDIT_COPY.noCreditSales} />
+                <EmptyRow cols={7} text={CREDIT_COPY.noCreditSales} />
               ) : (
                 creditSaleLines.map((line) => (
                   <tr key={line.id}>
@@ -458,9 +460,6 @@ export function CreditCustomerPage() {
                     <Td numeric>{money(line.unitPrice)}</Td>
                     <Td numeric className="font-semibold text-ink">
                       {money(line.total)}
-                    </Td>
-                    <Td numeric className="text-muted">
-                      {line.grossProfit !== undefined ? money(line.grossProfit) : "—"}
                     </Td>
                     <Td>
                       <div className="flex flex-wrap items-center justify-end gap-1">
@@ -762,26 +761,22 @@ export function CreditCustomerPage() {
             : undefined
         }
         onClose={() => setOpenInvoice(null)}
-        footer={
-          <div className="flex w-full flex-wrap justify-end gap-2">
-            {openInvoice?.status === "COMPLETED" ? (
-              <span title={invoicePosEditBlockReason(openInvoice) ?? undefined}>
-                <Button
-                  variant="outline"
-                  icon={<Pencil size={14} />}
-                  disabled={!canOpenInvoicePosEdit(openInvoice)}
-                  onClick={() => openInvoiceInPos(openInvoice.id)}
-                >
-                  Edit in POS
-                </Button>
-              </span>
-            ) : null}
-            <Button onClick={() => setOpenInvoice(null)}>Close</Button>
-          </div>
-        }
       >
         {openInvoice ? (
           <div className="grid gap-3">
+            {openInvoice.status === "COMPLETED" ? (
+              <DetailToolbar>
+                <DetailToolbarButton
+                  variant="edit"
+                  icon={<Pencil size={15} />}
+                  disabled={!canOpenInvoicePosEdit(openInvoice)}
+                  title={invoicePosEditBlockReason(openInvoice) ?? undefined}
+                  onClick={() => openInvoiceInPos(openInvoice.id)}
+                >
+                  Edit in POS
+                </DetailToolbarButton>
+              </DetailToolbar>
+            ) : null}
             <div className="grid grid-cols-3 gap-2 rounded-xl border border-line bg-bg/50 p-3 text-[12px]">
               <div>
                 <span className="block text-muted">Total</span>
@@ -794,14 +789,13 @@ export function CreditCustomerPage() {
               <div>
                 <span className="block text-muted">Credit</span>
                 <strong
-                  className={
-                    openInvoice.creditAmount > 0 ? "text-[var(--danger)]" : "text-muted"
-                  }
+                  className={openInvoice.creditAmount > 0 ? "text-[var(--danger)]" : "text-muted"}
                 >
                   {money(openInvoice.creditAmount)}
                 </strong>
               </div>
             </div>
+            <InvoiceProfitSummary invoice={openInvoice} />
             <Table>
               <THead>
                 <tr>
@@ -809,10 +803,11 @@ export function CreditCustomerPage() {
                   <Th>Qty</Th>
                   <Th>Price</Th>
                   <Th>Total</Th>
+                  <Th>Gross profit</Th>
                 </tr>
               </THead>
               <tbody>
-                {openInvoice.items.length === 0 ? <EmptyRow cols={4} /> : null}
+                {openInvoice.items.length === 0 ? <EmptyRow cols={5} /> : null}
                 {openInvoice.items.map((item) => (
                   <tr key={item.id}>
                     <Td>
@@ -826,6 +821,7 @@ export function CreditCustomerPage() {
                     </Td>
                     <Td numeric>{money(item.unitPrice)}</Td>
                     <Td numeric>{money(item.total)}</Td>
+                    <Td numeric>{item.grossProfit != null ? money(item.grossProfit) : "—"}</Td>
                   </tr>
                 ))}
               </tbody>

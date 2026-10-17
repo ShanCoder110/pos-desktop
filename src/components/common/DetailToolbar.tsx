@@ -16,12 +16,16 @@ export function DetailToolbarButton({
   icon,
   children,
   onClick,
+  disabled,
+  title,
   className,
 }: {
   variant?: "ghost" | "accent" | "warn" | "info" | "edit" | "danger";
   icon: ReactNode;
   children: ReactNode;
   onClick: () => void;
+  disabled?: boolean;
+  title?: string;
   className?: string;
 }) {
   return (
@@ -32,6 +36,8 @@ export function DetailToolbarButton({
         variant === "ghost" ? "is-ghost" : `is-${variant}`,
         className,
       )}
+      disabled={disabled}
+      title={title}
       onClick={onClick}
     >
       <span className="detail-toolbar-btn-icon">{icon}</span>
