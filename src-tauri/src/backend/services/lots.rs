@@ -440,5 +440,42 @@ mod tests {
             matches!(forbidden, Err(AppError::Forbidden(_))),
             "cashier must get 403, got {forbidden:?}"
         );
+
+        // Mismatched branchAllocations vs remaining → clear X vs Y message (not generic balance).
+        let mismatch = LotService::update(
+            &database,
+            &context,
+            lot_id,
+            UpdateLotRequest {
+                supplier_id: None,
+                original_quantity: None,
+                remaining_quantity: Some(Decimal::new(70, 0)),
+                damaged_quantity: None,
+                cost: None,
+                min: None,
+                wholesale: None,
+                retail: None,
+                branch_allocations: vec![crate::backend::dto::BranchAllocationInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    quantity: Decimal::new(50, 0),
+                }],
+            },
+        )
+        .await;
+        match mismatch {
+            Err(AppError::Validation(message)) => {
+                assert!(
+                    message.contains("50")
+                        && message.contains("70")
+                        && message.to_lowercase().contains("stock count"),
+                    "expected named mismatch + stock count hint, got: {message}"
+                );
+                assert!(
+                    !message.starts_with("Could not balance branch quantities for this lot."),
+                    "must not use the old generic-only message: {message}"
+                );
+            }
+            other => panic!("expected allocation mismatch validation, got {other:?}"),
+        }
     }
 }

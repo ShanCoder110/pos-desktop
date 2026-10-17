@@ -7,14 +7,14 @@ use uuid::Uuid;
 
 use crate::backend::{
     constants::{
-        DEFAULT_TRANSFER_PREFIX, ERROR_INVALID_CATEGORY_ID, ERROR_LOT_NOT_FOUND,
-        ERROR_LOT_ORIGINAL_BELOW_COMMITTED, ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE,
-        ERROR_LOT_REMAINING_LOCKED, ERROR_PRODUCT_NOT_FOUND, ERROR_SUPPLIER_REQUIRED,
-        LEDGER_PURCHASE, LOT_SOURCE_OPENING, LOT_SOURCE_PURCHASE, REFERENCE_GOODS_RECEIPT,
-        REFERENCE_PRODUCT_OPENING, SEQUENCE_KIND_TRANSFER, STOCK_MOVEMENT_ADJUSTMENT,
-        STOCK_MOVEMENT_PRODUCTION_USE, STOCK_MOVEMENT_PRODUCTION_WASTE, STOCK_MOVEMENT_PURCHASE,
-        STOCK_MOVEMENT_REPAIR_USE, STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN,
-        STOCK_MOVEMENT_SALE,
+        DEFAULT_TRANSFER_PREFIX, ERROR_INVALID_CATEGORY_ID, ERROR_LOT_ALLOCATION_MISMATCH_PREFIX,
+        ERROR_LOT_NOT_FOUND, ERROR_LOT_ORIGINAL_BELOW_COMMITTED,
+        ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE, ERROR_LOT_REMAINING_LOCKED, ERROR_PRODUCT_NOT_FOUND,
+        ERROR_SUPPLIER_REQUIRED, LEDGER_PURCHASE, LOT_SOURCE_OPENING, LOT_SOURCE_PURCHASE,
+        REFERENCE_GOODS_RECEIPT, REFERENCE_PRODUCT_OPENING, SEQUENCE_KIND_TRANSFER,
+        STOCK_MOVEMENT_ADJUSTMENT, STOCK_MOVEMENT_PRODUCTION_USE, STOCK_MOVEMENT_PRODUCTION_WASTE,
+        STOCK_MOVEMENT_PURCHASE, STOCK_MOVEMENT_REPAIR_USE, STOCK_MOVEMENT_REPLACEMENT,
+        STOCK_MOVEMENT_RETURN, STOCK_MOVEMENT_SALE,
     },
     context::RequestContext,
     dto::{
@@ -908,9 +908,10 @@ async fn apply_branch_reallocation(
         );
     }
     if (target_total - lot_remaining).abs() > Decimal::new(1, 6) {
-        return Err(AppError::Validation(
-            "Branch quantities must equal the lot remaining quantity.".into(),
-        ));
+        return Err(AppError::Validation(format!(
+            "{ERROR_LOT_ALLOCATION_MISMATCH_PREFIX} {target_total} but lot remaining is {lot_remaining}. \
+             Use Stock count to change on-hand quantity."
+        )));
     }
 
     let current_rows = BranchLotRemainingRow::find_by_statement(Statement::from_sql_and_values(
@@ -972,9 +973,11 @@ async fn apply_branch_reallocation(
     if decreases.iter().any(|(_, left)| *left > Decimal::ZERO)
         || increases.iter().any(|(_, left)| *left > Decimal::ZERO)
     {
-        return Err(AppError::Validation(
-            "Could not balance branch quantities for this lot.".into(),
-        ));
+        return Err(AppError::Validation(format!(
+            "Could not balance branch quantities for this lot \
+             (allocations sum {target_total}, remaining {lot_remaining}). \
+             Use Stock count to change on-hand quantity."
+        )));
     }
 
     Ok(())
