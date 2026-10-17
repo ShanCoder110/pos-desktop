@@ -17,6 +17,9 @@ jobs:
       contents: write
 
     steps:
+      - name: Use consistent Git line endings
+        run: git config --global core.autocrlf false
+
       - name: Checkout
         uses: actions/checkout@v4
 

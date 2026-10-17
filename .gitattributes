@@ -1,0 +1,13 @@
+# Keep source and generated bindings byte-for-byte identical on every OS.
+* text=auto eol=lf
+
+# Binary application assets must never be line-ending normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.sqlite3 binary
