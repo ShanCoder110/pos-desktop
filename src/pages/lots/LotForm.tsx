@@ -240,6 +240,32 @@ export function LotForm({
     });
   }
 
+  /** Keep the single active branch allocation aligned with Left so Save stays usable. */
+  function applyRemainingQuantity(quantity: number) {
+    const nextQty = Math.max(0, quantity);
+    const withQty = branchRows.filter((row) => row.quantity > 0);
+    let nextRows = branchRows;
+    if (withQty.length === 1) {
+      nextRows = branchRows.map((row) =>
+        row.branchId === withQty[0].branchId ? { ...row, quantity: nextQty } : row,
+      );
+    }
+    setBranchRows(nextRows);
+    const active = nextRows.filter((row) => row.quantity > 0);
+    const primary =
+      nextRows.find((row) => row.quantity > 0 && row.branchId === sessionBranchId)?.branchId ||
+      nextRows.find((row) => row.quantity > 0)?.branchId ||
+      "";
+    patch({
+      remainingQuantity: nextQty,
+      branchId: primary,
+      branchAllocations: active.map((row) => ({
+        branchId: row.branchId,
+        quantity: row.quantity,
+      })),
+    });
+  }
+
   useEffect(() => {
     const controller = new AbortController();
     void Promise.all([listAllBranches(controller.signal), ensureSession()])
@@ -641,7 +667,7 @@ export function LotForm({
                     showQuantity
                     showPricing
                     onReceived={applyReceivedQuantity}
-                    onLeft={(quantity) => patch({ remainingQuantity: quantity })}
+                    onLeft={applyRemainingQuantity}
                     onDamaged={(quantity) =>
                       patch({
                         damagedQuantity: quantity,
