@@ -1894,7 +1894,6 @@ mod tests {
             &context,
             CashSessionOpenRequest {
                 opening_float: Decimal::new(100, 0),
-                notes: None,
             },
         )
         .await
