@@ -18,6 +18,7 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | Lot raw `remaining` edit locked; quantity changes via stock count | ✅ |
 | Reconcile `product.stock` = Σ branch_lots = Σ lot remaining (+ migration repair) | ✅ |
 | Migration 000019 invoices rebuild: single-connection FK off + foreign_key_check | ✅ Step 12 |
+| Lot allocation mismatch names sum X vs remaining Y (+ Stock count hint) | ✅ Step 13 |
 
 ## UI agent-mistakes audit (2026-09-19)
 
