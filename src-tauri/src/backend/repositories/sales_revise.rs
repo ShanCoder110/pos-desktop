@@ -5,8 +5,8 @@ use uuid::Uuid;
 use crate::backend::{
     constants::{
         ERROR_BELOW_MINIMUM, ERROR_INVOICE_ALREADY_VOIDED, ERROR_INVOICE_HAS_RETURNS,
-        ERROR_INVOICE_NOT_FOUND, ERROR_WALK_IN_CREDIT, INVOICE_STATUS_COMPLETED, LEDGER_ADJUSTMENT,
-        LEDGER_SALE, MONEY_TYPE_SALE, MONEY_TYPE_VOID, PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT,
+        ERROR_INVOICE_NOT_FOUND, ERROR_WALK_IN_CREDIT, INVOICE_STATUS_COMPLETED, LEDGER_SALE,
+        MONEY_TYPE_SALE, MONEY_TYPE_VOID, PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT,
         PAYMENT_STATUS_COMPLETED, PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID,
         PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_UNPAID, PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE,
         STOCK_MOVEMENT_SALE,
@@ -23,9 +23,10 @@ use crate::backend::{
 };
 
 use super::{
-    BalanceRow, ConsumptionRow, CustomerFlag, InvoiceHeader, LedgerRow, PaymentRow, PreparedItem,
+    reverse_invoice_ledger, ConsumptionRow, CustomerFlag, InvoiceHeader, PaymentRow, PreparedItem,
     ProductUnitRow,
 };
+use crate::backend::repositories::{LedgerEntryInput, LedgerParty, LedgerRepository};
 
 #[derive(Debug, FromQueryResult)]
 struct ReturnCountRow {
@@ -84,7 +85,15 @@ pub async fn revise_invoice(
         now,
     )
     .await?;
-    reverse_ledger(transaction, &header, invoice_id, now, context).await?;
+    reverse_invoice_ledger(
+        transaction,
+        header.branch_id,
+        invoice_id,
+        now,
+        context,
+        &format!("Revise invoice {invoice_id}"),
+    )
+    .await?;
     void_payments(
         transaction,
         context,
@@ -364,35 +373,27 @@ pub async fn revise_invoice(
 
     if credit_amount > Decimal::ZERO {
         if let Some(customer_id) = customer_id {
-            let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "SELECT balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-                [customer_id.into()],
-            ))
-            .one(transaction)
-            .await?
-            .map(|row| row.balance_after)
-            .unwrap_or(Decimal::ZERO);
-            let balance_after = previous + credit_amount;
-            transaction
-                .execute_raw(Statement::from_sql_and_values(
-                    DbBackend::Sqlite,
-                    "INSERT INTO customer_ledger_entries (id, customer_id, branch_id, type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, 0, ?, ?, ?, ?, ?)",
-                    [
-                        Uuid::new_v4().into(),
-                        customer_id.into(),
-                        context.branch_id.into(),
-                        LEDGER_SALE.into(),
-                        invoice_id.into(),
-                        credit_amount.into(),
-                        balance_after.into(),
-                        format!("Revised credit sale {invoice_id}").into(),
-                        now.into(),
-                        context.user_id.into(),
-                        now.into(),
-                    ],
-                ))
-                .await?;
+            let note = format!("Revised credit sale {invoice_id}");
+            LedgerRepository::post_entry(
+                transaction,
+                LedgerEntryInput {
+                    party: LedgerParty::Customer(customer_id),
+                    branch_id: context.branch_id,
+                    entry_type: LEDGER_SALE,
+                    debit: credit_amount,
+                    credit: Decimal::ZERO,
+                    notes: Some(&note),
+                    occurred_at: now,
+                    created_by: context.user_id,
+                    purchase_order_id: None,
+                    goods_receipt_id: None,
+                    money_transaction_id: None,
+                    invoice_id: Some(invoice_id),
+                    payment_id: None,
+                    return_id: None,
+                },
+            )
+            .await?;
             transaction
                 .execute_raw(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
@@ -496,55 +497,6 @@ async fn reverse_stock(
                     REFERENCE_INVOICE.into(),
                     invoice_id.into(),
                     note.into(),
-                    now.into(),
-                    context.user_id.into(),
-                    now.into(),
-                ],
-            ))
-            .await?;
-    }
-    Ok(())
-}
-
-async fn reverse_ledger(
-    transaction: &DatabaseTransaction,
-    header: &InvoiceHeader,
-    invoice_id: Uuid,
-    now: chrono::DateTime<chrono::Utc>,
-    context: &RequestContext,
-) -> Result<(), AppError> {
-    let ledgers = LedgerRow::find_by_statement(Statement::from_sql_and_values(
-        DbBackend::Sqlite,
-        "SELECT customer_id, debit, credit FROM customer_ledger_entries WHERE invoice_id = ?",
-        [invoice_id.into()],
-    ))
-    .all(transaction)
-    .await?;
-    for ledger in ledgers {
-        let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "SELECT balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-            [ledger.customer_id.into()],
-        ))
-        .one(transaction)
-        .await?
-        .map(|row| row.balance_after)
-        .unwrap_or(Decimal::ZERO);
-        let balance_after = previous - ledger.debit + ledger.credit;
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "INSERT INTO customer_ledger_entries (id, customer_id, branch_id, type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    Uuid::new_v4().into(),
-                    ledger.customer_id.into(),
-                    header.branch_id.into(),
-                    LEDGER_ADJUSTMENT.into(),
-                    invoice_id.into(),
-                    ledger.credit.into(),
-                    ledger.debit.into(),
-                    balance_after.into(),
-                    format!("Revise invoice {invoice_id}").into(),
                     now.into(),
                     context.user_id.into(),
                     now.into(),

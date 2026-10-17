@@ -48,6 +48,8 @@ pub async fn connect_path(path: PathBuf) -> Result<DatabaseConnection, AppError>
     apply_pragma(&database, "PRAGMA busy_timeout = 5000").await?;
     Migrator::up(&database, None).await?;
     apply_runtime_pragmas(&database).await?;
+    // Idempotent repair for any rows written before stable rowid ordering existed.
+    crate::backend::repositories::LedgerRepository::recompute_balances(&database).await?;
     Ok(database)
 }
 
@@ -56,6 +58,7 @@ pub async fn connect_memory() -> Result<DatabaseConnection, AppError> {
     apply_pragma(&database, "PRAGMA busy_timeout = 5000").await?;
     Migrator::up(&database, None).await?;
     apply_runtime_pragmas(&database).await?;
+    crate::backend::repositories::LedgerRepository::recompute_balances(&database).await?;
     Ok(database)
 }
 

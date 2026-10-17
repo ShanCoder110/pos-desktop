@@ -562,7 +562,7 @@ impl PurchasingRepository {
 
         let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
+            "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1",
             [header.supplier_id.into()],
         ))
         .one(transaction)
@@ -849,7 +849,7 @@ impl PurchasingRepository {
         ensure_supplier(database, supplier_id).await?;
         let rows = LedgerRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, supplier_id, branch_id, type AS entry_type, purchase_order_id, goods_receipt_id, money_transaction_id, CAST(debit AS REAL) AS debit, CAST(credit AS REAL) AS credit, CAST(balance_after AS REAL) AS balance_after, notes, occurred_at, created_at FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at ASC, created_at ASC",
+            "SELECT id, supplier_id, branch_id, type AS entry_type, purchase_order_id, goods_receipt_id, money_transaction_id, CAST(debit AS REAL) AS debit, CAST(credit AS REAL) AS credit, CAST(balance_after AS REAL) AS balance_after, notes, occurred_at, created_at FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at ASC, created_at ASC, rowid ASC",
             [supplier_id.into()],
         ))
         .all(database)
@@ -1007,7 +1007,7 @@ impl PurchasingRepository {
         let ledger_id = Uuid::new_v4();
         let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
+            "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1",
             [supplier_id.into()],
         ))
         .one(transaction)

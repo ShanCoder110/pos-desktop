@@ -189,7 +189,7 @@ impl CreditRepository {
         ensure_customer(database, customer_id).await?;
         let rows = LedgerRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, customer_id, branch_id, type AS entry_type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_at FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at ASC, created_at ASC",
+            "SELECT id, customer_id, branch_id, type AS entry_type, invoice_id, payment_id, return_id, debit, credit, balance_after, notes, occurred_at, created_at FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at ASC, created_at ASC, rowid ASC",
             [customer_id.into()],
         ))
         .all(database)
@@ -250,7 +250,7 @@ impl CreditRepository {
             .unwrap_or_else(|| format!("cust-pay-{payment_id}"));
         let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
+            "SELECT CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1",
             [customer_id.into()],
         ))
         .one(transaction)
@@ -935,7 +935,7 @@ impl CreditRepository {
             if let Some(customer_id) = invoice.customer_id {
                 let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
-                    "SELECT CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
+                    "SELECT CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1",
                     [customer_id.into()],
                 ))
                 .one(transaction)

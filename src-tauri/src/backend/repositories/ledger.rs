@@ -13,6 +13,26 @@ struct BalanceRow {
     balance_after: Decimal,
 }
 
+#[derive(Debug, FromQueryResult)]
+struct PartyIdRow {
+    party_id: Uuid,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct LedgerRecomputeRow {
+    id: Uuid,
+    debit: Decimal,
+    credit: Decimal,
+    balance_after: Decimal,
+}
+
+/// Stable "latest entry" order: wall-clock first, then insert order via SQLite rowid.
+/// Ties on occurred_at/created_at (common inside one revise txn) used to pick the wrong prior balance.
+const CUSTOMER_LATEST_SQL: &str = "SELECT CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1";
+const SUPPLIER_LATEST_SQL: &str = "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1";
+const CUSTOMER_REPLAY_SQL: &str = "SELECT id, CAST(debit AS REAL) AS debit, CAST(credit AS REAL) AS credit, CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at ASC, created_at ASC, rowid ASC";
+const SUPPLIER_REPLAY_SQL: &str = "SELECT id, CAST(debit AS REAL) AS debit, CAST(credit AS REAL) AS credit, CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at ASC, created_at ASC, rowid ASC";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LedgerParty {
     Supplier(Uuid),
@@ -44,14 +64,8 @@ impl LedgerRepository {
         party: LedgerParty,
     ) -> Result<Decimal, AppError> {
         let (sql, id) = match party {
-            LedgerParty::Supplier(id) => (
-                "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-                id,
-            ),
-            LedgerParty::Customer(id) => (
-                "SELECT CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
-                id,
-            ),
+            LedgerParty::Supplier(id) => (SUPPLIER_LATEST_SQL, id),
+            LedgerParty::Customer(id) => (CUSTOMER_LATEST_SQL, id),
         };
         Ok(
             BalanceRow::find_by_statement(Statement::from_sql_and_values(
@@ -219,5 +233,68 @@ impl LedgerRepository {
             created_by,
         )
         .await
+    }
+
+    /// Idempotent repair: rebuild `balance_after` for every customer and supplier row in
+    /// (`occurred_at`, `created_at`, `rowid`) order as a running sum of debit − credit.
+    pub async fn recompute_balances(database: &impl ConnectionTrait) -> Result<u64, AppError> {
+        let mut touched = 0u64;
+        touched += Self::recompute_party_table(
+            database,
+            "customer_ledger_entries",
+            "customer_id",
+            CUSTOMER_REPLAY_SQL,
+        )
+        .await?;
+        touched += Self::recompute_party_table(
+            database,
+            "supplier_ledger_entries",
+            "supplier_id",
+            SUPPLIER_REPLAY_SQL,
+        )
+        .await?;
+        Ok(touched)
+    }
+
+    async fn recompute_party_table(
+        database: &impl ConnectionTrait,
+        table: &str,
+        party_column: &str,
+        replay_sql: &str,
+    ) -> Result<u64, AppError> {
+        let parties = PartyIdRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            format!("SELECT DISTINCT {party_column} AS party_id FROM {table}"),
+            [],
+        ))
+        .all(database)
+        .await?;
+        let mut touched = 0u64;
+        let update_sql =
+            format!("UPDATE {table} SET balance_after = ? WHERE id = ? AND balance_after != ?");
+        for party in parties {
+            let rows = LedgerRecomputeRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                replay_sql,
+                [party.party_id.into()],
+            ))
+            .all(database)
+            .await?;
+            let mut running = Decimal::ZERO;
+            for row in rows {
+                running = money_value(running + row.debit - row.credit);
+                if row.balance_after != running {
+                    database
+                        .execute_raw(Statement::from_sql_and_values(
+                            DbBackend::Sqlite,
+                            update_sql.as_str(),
+                            [running.into(), row.id.into(), running.into()],
+                        ))
+                        .await?;
+                    touched += 1;
+                }
+            }
+        }
+        Ok(touched)
     }
 }

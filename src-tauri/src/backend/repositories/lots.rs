@@ -378,7 +378,7 @@ impl LotRepository {
         if let Some(supplier_id) = supplier_id {
             let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
+                "SELECT CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1",
                 [supplier_id.into()],
             ))
             .one(transaction)

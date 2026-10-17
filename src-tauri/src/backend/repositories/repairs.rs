@@ -407,7 +407,7 @@ impl RepairRepository {
             if let Some(customer_id) = header.customer_id {
                 let previous = BalanceRow::find_by_statement(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
-                    "SELECT balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC LIMIT 1",
+                    "SELECT CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1",
                     [customer_id.into()],
                 ))
                 .one(transaction)
