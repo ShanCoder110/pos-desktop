@@ -26,6 +26,7 @@ import { ensureSession } from "@/services/auth";
 import { listAllBranches, listAllUsers } from "@/services/org";
 import { countStock, listStock, listStockMovements, mapStockMovement } from "@/services/stock";
 import { isAbortError } from "@/utils/async";
+import { classifyListFetch } from "@/utils/listLoad";
 import { formatTableDateTime, shortError } from "@/utils/format";
 import { formatStockQty } from "@/pages/products/productQty";
 import {
@@ -58,6 +59,8 @@ export function StockCountPage() {
   const [supplierAmount, setSupplierAmount] = useState("");
   const [systemBase, setSystemBase] = useState(0);
   const [history, setHistory] = useState<StockMovementRow[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyReloadToken, setHistoryReloadToken] = useState(0);
   const [loading, setLoading] = useState({
     session: true,
     stock: false,
@@ -166,6 +169,7 @@ export function StockCountPage() {
 
   function reloadHistory(signal?: AbortSignal) {
     setLoading((current) => ({ ...current, history: true }));
+    setHistoryError(null);
     return listStockMovements(
       {
         movementType: "ADJUSTMENT",
@@ -180,12 +184,18 @@ export function StockCountPage() {
             (row) => row.referenceType === "StockAdjustment" || row.movementType === "ADJUSTMENT",
           )
           .map(mapStockMovement);
-        setHistory(rows);
+        const outcome = classifyListFetch({ ok: true, rows }, STOCK_COUNT_COPY.loadFailed);
+        if (outcome.kind === "empty" || outcome.kind === "data") {
+          setHistory(rows);
+          setHistoryError(null);
+        }
       })
       .catch((error) => {
-        if (isAbortError(error)) return;
-        toaster.error(shortError(error, STOCK_COUNT_COPY.loadFailed));
+        const outcome = classifyListFetch({ ok: false, error }, STOCK_COUNT_COPY.loadFailed);
+        if (outcome.kind === "aborted") return;
         setHistory([]);
+        setHistoryError(outcome.message);
+        toaster.error(outcome.message);
       })
       .finally(() => setLoading((current) => ({ ...current, history: false })));
   }
@@ -195,7 +205,7 @@ export function StockCountPage() {
     const controller = new AbortController();
     void reloadHistory(controller.signal);
     return () => controller.abort();
-  }, [allowed, branchId]);
+  }, [allowed, branchId, historyReloadToken]);
 
   async function save() {
     if (!productId) {
@@ -457,7 +467,13 @@ export function StockCountPage() {
                 <Th>User</Th>
               </THead>
               <tbody>
-                {history.length === 0 ? (
+                {historyError ? (
+                  <EmptyRow cols={8} text={historyError} description={STOCK_COUNT_COPY.loadFailed}>
+                    <Button variant="secondary" onClick={() => setHistoryReloadToken((n) => n + 1)}>
+                      {STOCK_COUNT_COPY.retry}
+                    </Button>
+                  </EmptyRow>
+                ) : history.length === 0 ? (
                   <EmptyRow cols={8} text={STOCK_COUNT_COPY.historyEmpty} />
                 ) : (
                   history.map((row) => {

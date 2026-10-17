@@ -847,4 +847,113 @@ mod tests {
         .unwrap_or(0);
         assert!(hist >= 1, "must not delete sales/movement history");
     }
+
+    /// Stock-count ADJUSTMENT writers must persist UUID PKs as 16-byte BLOBs
+    /// (never hyphenated TEXT) so SeaORM Uuid decode succeeds.
+    #[tokio::test]
+    async fn stock_count_movements_store_uuid_as_blob() {
+        let database = connect_memory().await.expect("db");
+        seed_owner(&database).await;
+        let context = ctx("OWNER");
+        let category_id = make_category(&database).await;
+        let pc = unit_id(&database, "pc").await;
+
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Blob Uuid Widget".into(),
+                category_id,
+                base_unit_id: pc.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: pc,
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(10, 0),
+                    min: Decimal::new(10, 0),
+                    wholesale: Decimal::new(12, 0),
+                    price: Decimal::new(20, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(50, 0),
+                    cost: Decimal::new(10, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let unit_id = product.sell_units[0].id.clone();
+
+        let result = StockService::count(
+            &database,
+            &context,
+            StockCountRequest {
+                product_id: product.id.clone(),
+                branch_id: Some(SEED_BRANCH_ID.into()),
+                product_unit_id: unit_id,
+                counted_quantity: Decimal::new(45, 0),
+                reason: "blob uuid assertion".into(),
+                adjust_supplier_payable: false,
+                supplier_id: None,
+                supplier_amount: None,
+            },
+        )
+        .await
+        .expect("count");
+        assert!(!result.movement_ids.is_empty());
+
+        #[derive(Debug, FromQueryResult)]
+        struct TypeRow {
+            t: String,
+            len: i64,
+        }
+        let pid = Uuid::parse_str(&product.id).unwrap();
+        let rows = TypeRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT typeof(id) AS t, length(id) AS len
+             FROM stock_movements
+             WHERE product_id = ? AND type = 'ADJUSTMENT' AND reference_type = 'StockAdjustment'",
+            [pid.into()],
+        ))
+        .all(&database)
+        .await
+        .expect("typeof query");
+        assert!(!rows.is_empty());
+        for row in rows {
+            assert_eq!(row.t, "blob", "stock_movements.id must be blob");
+            assert_eq!(row.len, 16, "stock_movements.id must be 16 bytes");
+        }
+
+        let adj = TypeRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT typeof(id) AS t, length(id) AS len FROM stock_adjustments WHERE id = ?",
+            [Uuid::parse_str(&result.id).unwrap().into()],
+        ))
+        .one(&database)
+        .await
+        .expect("adj typeof")
+        .expect("adj row");
+        assert_eq!(adj.t, "blob");
+        assert_eq!(adj.len, 16);
+    }
 }

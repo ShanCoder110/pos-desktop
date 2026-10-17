@@ -76,7 +76,8 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | ✅ Codes | Stable `CODE_*` + `ConflictCoded`; phone duplicates map to specific codes |
 | ✅ FE mapper | `ApiError` + `mapApiError` / `handleApiError`; `apiRequest` throws `ApiError` |
 | 🔴 Call sites | Most pages still use ad-hoc `catch` + `shortError`; migrate to `handleApiError` opportunistically |
-| 🔴 Empty catches | e.g. logout `catch {}` (intentional — commented); some `.catch(() => …)` swallowers on list loads |
+| ⚠️ Empty catches | logout `catch {}` intentional; Lots + Stock count list loads now surface error + Retry (Step 23). Other pages may still soft-fail to empty. |
+| ✅ UUID storage | `uuid_blob` helper + migration `000023` converts text/blob36 → 16-byte BLOB; stock-count writers bind bytes |
 
 ## Testing
 

@@ -49,6 +49,7 @@ export const STOCK_COUNT_COPY = {
   pickUnit: "Choose a unit",
   leftLockedHint: "Use Stock count to change quantity",
   loadFailed: "Could not load stock movements",
+  retry: "Retry",
 } as const;
 
 export type ProductSectionTab = (typeof PRODUCT_SECTION_TABS)[number]["id"];
@@ -251,6 +252,8 @@ export const LOT_COPY = {
   filterCity: "City",
   valueLeftColumn: "Value left",
   filteredValueTotal: "Total value left",
+  loadFailed: "Could not load lots",
+  retry: "Retry",
 } as const;
 
 export const LOT_FILTER_FIELDS: {

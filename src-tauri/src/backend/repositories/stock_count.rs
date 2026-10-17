@@ -22,7 +22,7 @@ use crate::backend::{
     errors::AppError,
     qty::to_base_qty,
     repositories::SequenceRepository,
-    util::{money_value, now_utc, quantity},
+    util::{money_value, now_utc, optional_uuid_blob, quantity, uuid_blob},
 };
 
 #[derive(Debug, FromQueryResult)]
@@ -161,13 +161,13 @@ impl StockCountRepository {
                 DbBackend::Sqlite,
                 "INSERT INTO stock_adjustments (id, branch_id, adjustment_number, reason, notes, status, created_by, approved_by, occurred_at, created_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)",
                 [
-                    adjustment_id.into(),
-                    input.branch_id.into(),
+                    uuid_blob(adjustment_id),
+                    uuid_blob(input.branch_id),
                     adjustment_number.clone().into(),
                     input.reason.clone().into(),
                     STOCK_ADJUSTMENT_STATUS_POSTED.into(),
-                    context.user_id.into(),
-                    context.user_id.into(),
+                    uuid_blob(context.user_id),
+                    uuid_blob(context.user_id),
                     now.into(),
                     now.into(),
                 ],
@@ -179,9 +179,9 @@ impl StockCountRepository {
                 DbBackend::Sqlite,
                 "INSERT INTO stock_adjustment_items (id, stock_adjustment_id, product_id, product_lot_id, system_base_quantity, counted_base_quantity, difference_base_quantity, unit_cost, created_at) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)",
                 [
-                    Uuid::new_v4().into(),
-                    adjustment_id.into(),
-                    input.product_id.into(),
+                    uuid_blob(Uuid::new_v4()),
+                    uuid_blob(adjustment_id),
+                    uuid_blob(input.product_id),
                     old_qty.into(),
                     counted_base.into(),
                     diff.into(),
@@ -421,11 +421,11 @@ async fn insert_movement(
             DbBackend::Sqlite,
             "INSERT INTO stock_movements (id, branch_id, product_id, product_lot_id, product_unit_id, type, displayed_quantity, displayed_unit_name, base_quantity_delta, quantity_before, quantity_after, unit_cost, total_cost, reference_type, reference_id, notes, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
-                movement_id.into(),
-                branch_id.into(),
-                product_id.into(),
-                product_lot_id.into(),
-                product_unit_id.into(),
+                uuid_blob(movement_id),
+                uuid_blob(branch_id),
+                uuid_blob(product_id),
+                optional_uuid_blob(product_lot_id),
+                uuid_blob(product_unit_id),
                 STOCK_MOVEMENT_ADJUSTMENT.into(),
                 displayed.into(),
                 unit_name.into(),
@@ -435,10 +435,10 @@ async fn insert_movement(
                 unit_cost.into(),
                 total_cost.into(),
                 REFERENCE_STOCK_ADJUSTMENT.into(),
-                reference_id.into(),
+                uuid_blob(reference_id),
                 reason.into(),
                 now.into(),
-                context.user_id.into(),
+                uuid_blob(context.user_id),
                 now.into(),
             ],
         ))
@@ -491,14 +491,14 @@ async fn consume_fifo_down(
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
                 "UPDATE branch_lots SET remaining_base_quantity = remaining_base_quantity - ?, updated_at = ? WHERE id = ?",
-                [take.into(), now.into(), lot.branch_lot_id.into()],
+                [take.into(), now.into(), uuid_blob(lot.branch_lot_id)],
             ))
             .await?;
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
                 "UPDATE product_lots SET remaining_base_quantity = remaining_base_quantity - ?, version = version + 1, updated_at = ? WHERE id = ?",
-                [take.into(), now.into(), lot.product_lot_id.into()],
+                [take.into(), now.into(), uuid_blob(lot.product_lot_id)],
             ))
             .await?;
 
@@ -594,7 +594,7 @@ async fn increase_stock(
                 .execute_raw(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
                     "UPDATE branch_lots SET remaining_base_quantity = remaining_base_quantity + ?, allocated_base_quantity = allocated_base_quantity + ?, updated_at = ? WHERE id = ?",
-                    [add.into(), add.into(), now.into(), branch_lot_id.into()],
+                    [add.into(), add.into(), now.into(), uuid_blob(branch_lot_id)],
                 ))
                 .await?;
         } else {
@@ -603,9 +603,9 @@ async fn increase_stock(
                     DbBackend::Sqlite,
                     "INSERT INTO branch_lots (id, branch_id, product_lot_id, allocated_base_quantity, remaining_base_quantity, reserved_base_quantity, damaged_base_quantity, updated_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?)",
                     [
-                        Uuid::new_v4().into(),
-                        branch_id.into(),
-                        lot.product_lot_id.into(),
+                        uuid_blob(Uuid::new_v4()),
+                        uuid_blob(branch_id),
+                        uuid_blob(lot.product_lot_id),
                         add.into(),
                         add.into(),
                         now.into(),
@@ -617,7 +617,7 @@ async fn increase_stock(
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
                 "UPDATE product_lots SET remaining_base_quantity = remaining_base_quantity + ?, version = version + 1, updated_at = ? WHERE id = ?",
-                [add.into(), now.into(), lot.product_lot_id.into()],
+                [add.into(), now.into(), uuid_blob(lot.product_lot_id)],
             ))
             .await?;
 
@@ -660,16 +660,16 @@ async fn increase_stock(
                 DbBackend::Sqlite,
                 "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, NULL, ?, 1, NULL, ?, ?, ?)",
                 [
-                    lot_id.into(),
-                    product_id.into(),
+                    uuid_blob(lot_id),
+                    uuid_blob(product_id),
                     lot_number.into(),
                     LOT_SOURCE_ADJUSTMENT.into(),
                     remaining_add.into(),
                     remaining_add.into(),
                     last_cost.into(),
                     received_date.into(),
-                    context.user_id.into(),
-                    context.device_id.into(),
+                    uuid_blob(context.user_id),
+                    uuid_blob(context.device_id),
                     now.into(),
                     now.into(),
                 ],
@@ -680,9 +680,9 @@ async fn increase_stock(
                 DbBackend::Sqlite,
                 "INSERT INTO branch_lots (id, branch_id, product_lot_id, allocated_base_quantity, remaining_base_quantity, reserved_base_quantity, damaged_base_quantity, updated_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?)",
                 [
-                    Uuid::new_v4().into(),
-                    branch_id.into(),
-                    lot_id.into(),
+                    uuid_blob(Uuid::new_v4()),
+                    uuid_blob(branch_id),
+                    uuid_blob(lot_id),
                     remaining_add.into(),
                     remaining_add.into(),
                     now.into(),
@@ -753,7 +753,7 @@ async fn sync_branch_lots_to_lot(
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
                 "UPDATE branch_lots SET remaining_base_quantity = ?, updated_at = ? WHERE id = ?",
-                [assign.into(), now.into(), row.id.into()],
+                [assign.into(), now.into(), uuid_blob(row.id)],
             ))
             .await?;
     }

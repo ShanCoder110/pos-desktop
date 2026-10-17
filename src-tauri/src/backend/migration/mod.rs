@@ -22,6 +22,7 @@ mod m20261017_000019_invoice_return_payment_status;
 mod m20261017_000020_stock_count_reconcile;
 mod m20261017_000021_restore_customer_credit_limit;
 mod m20261017_000022_drop_customer_credit_limit;
+mod m20261017_000023_uuid_text_to_blob;
 
 pub struct Migrator;
 
@@ -51,6 +52,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261017_000020_stock_count_reconcile::Migration),
             Box::new(m20261017_000021_restore_customer_credit_limit::Migration),
             Box::new(m20261017_000022_drop_customer_credit_limit::Migration),
+            Box::new(m20261017_000023_uuid_text_to_blob::Migration),
         ]
     }
 }
@@ -450,6 +452,156 @@ mod tests {
             violations.len()
         );
         eprintln!("ok: foreign_key_check empty after invoices rebuild with children");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Inserts a TEXT (36-char) UUID into stock_movements.id, applies 000023, and
+    /// asserts the row is a 16-byte BLOB (and blob36 ASCII is also converted).
+    #[tokio::test]
+    async fn uuid_text_to_blob_migration_converts_text_and_blob36() {
+        let path = std::env::temp_dir().join(format!(
+            "pos-mig-uuid-{}.sqlite3",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let url = format!("sqlite://{}?mode=rwc", path.display());
+        let database = connect_sqlite_single(&url).await;
+
+        // 22 migrations through m20261017_000022_drop_customer_credit_limit.
+        Migrator::up(&database, Some(22))
+            .await
+            .expect("apply migrations through 000022");
+
+        database
+            .execute_unprepared("PRAGMA foreign_keys = OFF")
+            .await
+            .expect("fk off");
+
+        // TEXT 36 hyphenated UUID (the QA failure mode).
+        database
+            .execute_unprepared(
+                "INSERT INTO stock_movements (
+                    id, branch_id, product_id, product_lot_id, type,
+                    displayed_quantity, displayed_unit_name, base_quantity_delta,
+                    reference_type, reference_id, notes, occurred_at, created_by, created_at
+                 ) VALUES (
+                    'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+                    X'20000000000040008000000000000001',
+                    X'20000000000040008000000000000010',
+                    NULL,
+                    'ADJUSTMENT',
+                    0, 'pc', 0,
+                    'StockAdjustment',
+                    X'20000000000040008000000000000099',
+                    'text uuid fixture',
+                    '2026-10-17T00:00:00Z',
+                    X'20000000000040008000000000000002',
+                    '2026-10-17T00:00:00Z'
+                 )",
+            )
+            .await
+            .expect("insert text uuid movement");
+
+        // BLOB 36 = ASCII bytes of a hyphenated UUID.
+        database
+            .execute_unprepared(
+                "INSERT INTO stock_movements (
+                    id, branch_id, product_id, product_lot_id, type,
+                    displayed_quantity, displayed_unit_name, base_quantity_delta,
+                    reference_type, reference_id, notes, occurred_at, created_by, created_at
+                 ) VALUES (
+                    CAST('dddddddd-dddd-4ddd-8ddd-dddddddddddd' AS BLOB),
+                    X'20000000000040008000000000000001',
+                    X'20000000000040008000000000000010',
+                    NULL,
+                    'ADJUSTMENT',
+                    0, 'pc', 0,
+                    'StockAdjustment',
+                    X'20000000000040008000000000000099',
+                    'blob36 uuid fixture',
+                    '2026-10-17T00:00:00Z',
+                    X'20000000000040008000000000000002',
+                    '2026-10-17T00:00:00Z'
+                 )",
+            )
+            .await
+            .expect("insert blob36 movement");
+
+        database
+            .execute_unprepared("PRAGMA foreign_keys = ON")
+            .await
+            .expect("fk on");
+
+        let before = database
+            .query_one_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "SELECT
+                   SUM(CASE WHEN typeof(id)='text' AND length(id)=36 THEN 1 ELSE 0 END) AS text36,
+                   SUM(CASE WHEN typeof(id)='blob' AND length(id)=36 THEN 1 ELSE 0 END) AS blob36
+                 FROM stock_movements
+                 WHERE notes IN ('text uuid fixture', 'blob36 uuid fixture')"
+                    .to_owned(),
+            ))
+            .await
+            .expect("before query")
+            .expect("before row");
+        let text36: i64 = before.try_get("", "text36").unwrap_or(0);
+        let blob36: i64 = before.try_get("", "blob36").unwrap_or(0);
+        assert_eq!(text36, 1, "fixture text36 missing");
+        assert_eq!(blob36, 1, "fixture blob36 missing");
+
+        Migrator::up(&database, None)
+            .await
+            .expect("apply migration 000023");
+
+        let applied = database
+            .query_one_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "SELECT version FROM seaql_migrations WHERE version = 'm20261017_000023_uuid_text_to_blob'"
+                    .to_owned(),
+            ))
+            .await
+            .expect("query migrations")
+            .expect("migration 000023 must be recorded");
+        let version: String = applied.try_get("", "version").expect("version");
+        assert_eq!(version, "m20261017_000023_uuid_text_to_blob");
+
+        let after = database
+            .query_all_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "SELECT typeof(id) AS t, length(id) AS len, notes
+                 FROM stock_movements
+                 WHERE notes IN ('text uuid fixture', 'blob36 uuid fixture')
+                 ORDER BY notes"
+                    .to_owned(),
+            ))
+            .await
+            .expect("after query");
+        assert_eq!(after.len(), 2);
+        for row in &after {
+            let t: String = row.try_get("", "t").expect("typeof");
+            let len: i64 = row.try_get("", "len").expect("length");
+            assert_eq!(t, "blob", "id must be blob after 000023");
+            assert_eq!(len, 16, "id must be 16 bytes after 000023");
+        }
+
+        // Idempotent second apply (already recorded — Migrator::up is a no-op).
+        Migrator::up(&database, None)
+            .await
+            .expect("000023 idempotent when already applied");
+
+        let violations = database
+            .query_all_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "PRAGMA foreign_key_check".to_owned(),
+            ))
+            .await
+            .expect("foreign_key_check");
+        assert!(violations.is_empty());
 
         let _ = std::fs::remove_file(&path);
     }

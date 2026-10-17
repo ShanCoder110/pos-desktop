@@ -22,12 +22,14 @@ import {
   THead,
   Th,
   rangeForPeriod,
+  toaster,
 } from "@/components/common";
 import type { DateRangeFilter } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { applyFilterChip, chipValuesForField } from "@/utils/filterChips";
 import { chipCsv, chipCsvFromNames, chipMinNumber } from "@/utils/filterQuery";
 import { createLoadGuard, isAbortError } from "@/utils/async";
+import { classifyListFetch } from "@/utils/listLoad";
 import { listAllLots, listLots, mapLotResponse } from "@/services/lots";
 import { ensureSession } from "@/services/auth";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
@@ -133,6 +135,8 @@ export function LotsPage() {
   const [pages, setPages] = useState(1);
   const [filteredValueTotal, setFilteredValueTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const { edit, nested, supplierRows, openCreate, openEdit, unlinkLot, lotDrawer } = useLotDrawer();
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
@@ -195,6 +199,7 @@ export function LotsPage() {
     const controller = new AbortController();
     const guard = createLoadGuard();
     setLoading(true);
+    setLoadError(null);
     const load =
       pageSize === PAGE_SIZE_ALL
         ? listAllLots(apiFilters, controller.signal).then((data) => ({
@@ -212,15 +217,23 @@ export function LotsPage() {
     void load
       .then((response) => {
         if (!guard.isActive()) return;
-        setRows(response.rows);
-        setTotal(response.total);
-        setPages(response.pages);
+        const outcome = classifyListFetch({ ok: true, rows: response.rows }, LOT_COPY.loadFailed);
+        if (outcome.kind === "empty" || outcome.kind === "data") {
+          setRows(response.rows);
+          setTotal(response.total);
+          setPages(response.pages);
+          setLoadError(null);
+        }
       })
       .catch((error) => {
-        if (isAbortError(error) || !guard.isActive()) return;
+        if (!guard.isActive()) return;
+        const outcome = classifyListFetch({ ok: false, error }, LOT_COPY.loadFailed);
+        if (outcome.kind === "aborted") return;
         setRows([]);
         setTotal(0);
         setPages(1);
+        setLoadError(outcome.message);
+        toaster.error(outcome.message);
       })
       .finally(() => {
         if (guard.isActive()) setLoading(false);
@@ -229,7 +242,7 @@ export function LotsPage() {
       guard.dispose();
       controller.abort();
     };
-  }, [apiFilters, page, pageSize]);
+  }, [apiFilters, page, pageSize, reloadToken]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -245,11 +258,10 @@ export function LotsPage() {
       })
       .catch((error) => {
         if (isAbortError(error)) return;
-        setFilteredRows([]);
-        setFilteredValueTotal(0);
+        // Keep prior totals; primary table shows the loadError + Retry.
       });
     return () => controller.abort();
-  }, [apiFilters, products]);
+  }, [apiFilters, products, reloadToken]);
 
   function writeLots(nextLots: ProductLotRow[], productIds: string[]) {
     setRows(nextLots);
@@ -627,8 +639,17 @@ export function LotsPage() {
           {loading ? (
             <TableRowsSkeleton columnCount={cols.length} rows={6} selectable hasActions />
           ) : null}
-          {!loading && shown.length === 0 ? <EmptyRow cols={cols.length + 2} /> : null}
-          {!loading
+          {!loading && loadError ? (
+            <EmptyRow cols={cols.length + 2} text={loadError} description={LOT_COPY.loadFailed}>
+              <Button variant="secondary" onClick={() => setReloadToken((n) => n + 1)}>
+                {LOT_COPY.retry}
+              </Button>
+            </EmptyRow>
+          ) : null}
+          {!loading && !loadError && shown.length === 0 ? (
+            <EmptyRow cols={cols.length + 2} />
+          ) : null}
+          {!loading && !loadError
             ? shown.map((row) => (
                 <tr key={row.id} className="cursor-pointer" onClick={() => setDetail(row)}>
                   <Td className="ui-check-col">
