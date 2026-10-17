@@ -976,9 +976,13 @@ export function PosWorkspace() {
       return;
     }
 
-    const tier = priceMode === "wholesale" ? "wholesale" : "retail";
-    const sellPrice = unitTierPrice(productUnit, tier);
-    const minSell = unitTierPrice(productUnit, "minimum") || lot.minFloor;
+    const {
+      listPrice: sellPrice,
+      minPrice: tierMin,
+      usedRetailFallback,
+    } = cartLineTierPrices(pending, productUnit.id, priceMode);
+    if (usedRetailFallback) showToast("Retail used — wholesale unset");
+    const minSell = tierMin || lot.minFloor;
     const sellU = productUnit.name || productUnit.symbol || pending.unit;
     const packN = stockPerUnit(productUnit);
 

@@ -512,7 +512,7 @@ export function LotForm({
       }
       const today = new Date().toISOString().slice(0, 10);
       if (expiryDay < today) {
-        toaster.error(LOT_COPY.expiryPastWarning);
+        toaster.info(LOT_COPY.expiryPastWarning);
       }
     }
     onSave(
