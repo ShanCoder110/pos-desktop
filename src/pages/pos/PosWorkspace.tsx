@@ -202,11 +202,16 @@ function readHeldPayload(payload: unknown): HeldPayload | null {
   };
 }
 function listPrice(p: Product, mode: PriceMode, unitId?: string) {
-  const tier = mode === "wholesale" ? "wholesale" : "retail";
   const unit = resolveSellUnit(p, unitId);
-  const fromUnit = unitTierPrice(unit, tier);
-  if (fromUnit > 0) return fromUnit;
-  return mode === "wholesale" ? p.wholesale : p.retail;
+  if (mode === "wholesale") {
+    const wholesale = unitTierPrice(unit, "wholesale");
+    if (wholesale > 0) return wholesale;
+    const retail = unitTierPrice(unit, "retail");
+    if (retail > 0) return retail;
+    return Number(p.wholesale) > 0 ? p.wholesale : p.retail;
+  }
+  const retail = unitTierPrice(unit, "retail");
+  return retail > 0 ? retail : p.retail;
 }
 
 function availableInUnit(unit: ProductSellUnit | undefined, baseAvailable: number) {
@@ -1176,19 +1181,23 @@ export function PosWorkspace() {
   }
 
   function setLineMode(id: string, mode: PriceMode) {
+    const walkIn = customers.find((c) => c.id === customerId)?.isWalking;
+    const nextMode = walkIn ? "retail" : mode;
+    if (walkIn && mode === "wholesale") showToast("Walk-in uses retail");
     setCart((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
         const p = products.find((x) => x.id === item.productId);
         if (!p) return item;
-        const { listPrice: sell, minPrice: minSell } = cartLineTierPrices(
-          p,
-          item.productUnitId,
-          mode,
-        );
+        const {
+          listPrice: sell,
+          minPrice: minSell,
+          usedRetailFallback,
+        } = cartLineTierPrices(p, item.productUnitId, nextMode);
+        if (usedRetailFallback) showToast("Retail used — wholesale unset");
         return recompute({
           ...item,
-          priceMode: mode,
+          priceMode: nextMode,
           listPrice: sell,
           unitPrice: sell,
           minPrice: minSell,
@@ -1200,15 +1209,17 @@ export function PosWorkspace() {
 
   function applyPriceModeToCart(next: PriceMode, opts?: { toast?: boolean }) {
     setPriceMode(next);
+    let fallbackCount = 0;
     setCart((prev) =>
       prev.map((item) => {
         const p = products.find((x) => x.id === item.productId);
         if (!p) return item;
-        const { listPrice: sell, minPrice: minSell } = cartLineTierPrices(
-          p,
-          item.productUnitId,
-          next,
-        );
+        const {
+          listPrice: sell,
+          minPrice: minSell,
+          usedRetailFallback,
+        } = cartLineTierPrices(p, item.productUnitId, next);
+        if (usedRetailFallback) fallbackCount += 1;
         return recompute({
           ...item,
           priceMode: next,
@@ -1221,13 +1232,25 @@ export function PosWorkspace() {
     );
     setRoundTarget(0);
     if (opts?.toast !== false) {
-      showToast(next === "wholesale" ? "All items wholesale" : "All items retail");
+      if (next === "wholesale" && fallbackCount > 0) {
+        showToast("Wholesale — retail used where wholesale is unset");
+      } else {
+        showToast(next === "wholesale" ? "All items wholesale" : "All items retail");
+      }
     }
   }
 
   function switchAllCart(mode?: PriceMode) {
+    const walkIn = customers.find((c) => c.id === customerId)?.isWalking;
+    if (walkIn) {
+      applyPriceModeToCart("retail", { toast: false });
+      showToast("Walk-in uses retail");
+      return;
+    }
     if (!cart.length) {
-      showToast("Cart is empty");
+      const next = mode ?? (priceMode === "wholesale" ? "retail" : "wholesale");
+      setPriceMode(next);
+      showToast(next === "wholesale" ? "Wholesale" : "Retail");
       return;
     }
     const allW = cart.every((i) => i.priceMode === "wholesale");
@@ -2003,7 +2026,14 @@ export function PosWorkspace() {
                             <button
                               type="button"
                               data-pm="wholesale"
-                              title="Wholesale price"
+                              title={(() => {
+                                const p = products.find((x) => x.id === item.productId);
+                                if (!p) return "Wholesale price";
+                                return cartLineTierPrices(p, item.productUnitId, "wholesale")
+                                  .usedRetailFallback
+                                  ? "Wholesale unset — retail price used"
+                                  : "Wholesale price";
+                              })()}
                               aria-pressed={item.priceMode === "wholesale"}
                               className={item.priceMode === "wholesale" ? "is-active" : ""}
                               onClick={(e) => {

@@ -408,6 +408,7 @@ export function useLotDrawer() {
         min: next.minimumPrice,
         wholesale: next.wholesalePrice,
         retail: next.retailPrice,
+        expiryDate: next.expiryDate ? next.expiryDate.slice(0, 10) : null,
         branchAllocations: branchAllocations.length ? branchAllocations : undefined,
       });
       if (sellUnits?.length) {

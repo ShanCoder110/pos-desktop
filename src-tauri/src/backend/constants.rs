@@ -202,6 +202,9 @@ pub const ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE: &str =
     "Remaining cannot exceed original minus sold minus damaged.";
 pub const ERROR_LOT_ORIGINAL_BELOW_COMMITTED: &str =
     "Original quantity cannot be less than sold plus damaged.";
+pub const ERROR_LOT_EXPIRY_BEFORE_RECEIVED: &str =
+    "Expiry date cannot be before the received date.";
+pub const ERROR_LOT_EXPIRY_INVALID: &str = "Expiry date must be a valid YYYY-MM-DD date.";
 pub const ERROR_LOT_REMAINING_LOCKED: &str =
     "Remaining quantity is locked. Use stock count to change on-hand quantity.";
 pub const ERROR_LOT_ALLOCATION_MISMATCH_PREFIX: &str = "Branch allocations sum to";

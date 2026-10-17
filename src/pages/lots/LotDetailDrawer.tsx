@@ -23,13 +23,7 @@ import { REORDER_COPY } from "@/shared/constants/reorders";
 import type { ProductLotRow } from "@/shared/domain/types";
 import type { Product } from "@/shared/types";
 import { listAllBranches, type BranchResponse } from "@/services/org";
-import { cn, formatDetailDate, money } from "@/utils/format";
-
-function shortDate(iso: string) {
-  const date = new Date(`${iso.slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
+import { cn, formatDetailDate, formatTableDate, money } from "@/utils/format";
 
 export function LotDetailDrawer({
   lot,
@@ -188,11 +182,11 @@ export function LotDetailDrawer({
           <dl className="product-detail-facts is-strong">
             <div>
               <dt>Received</dt>
-              <dd>{shortDate(lot.receivedAt)}</dd>
+              <dd>{formatTableDate(lot.receivedAt)}</dd>
             </div>
             <div>
-              <dt>Expiry</dt>
-              <dd>{lot.expiryDate ? shortDate(lot.expiryDate) : "—"}</dd>
+              <dt>{LOT_COPY.expiryLabel}</dt>
+              <dd>{formatTableDate(lot.expiryDate)}</dd>
             </div>
             <div>
               <dt>Original qty</dt>

@@ -139,17 +139,29 @@ export function priceModeForCustomerSwitch(
   return nextIsWalkIn ? "retail" : currentMode;
 }
 
-/** List/min prices for a cart line's unit row at retail or wholesale (not base×factor). */
+/**
+ * List/min prices for a cart line's unit row at retail or wholesale (not base×factor).
+ * Wholesale with unset/0 unit wholesale falls back to that unit's retail price.
+ */
 export function cartLineTierPrices(
   product: Product,
   productUnitId: string,
   mode: PosPriceMode,
-): { listPrice: number; minPrice: number } {
+): { listPrice: number; minPrice: number; usedRetailFallback: boolean } {
   const unit = resolveSellUnit(product, productUnitId);
-  const tier = mode === "wholesale" ? "wholesale" : "retail";
-  const listPrice = unitTierPrice(unit, tier);
   const minPrice = unitTierPrice(unit, "minimum");
-  return { listPrice, minPrice };
+  if (mode !== "wholesale") {
+    return { listPrice: unitTierPrice(unit, "retail"), minPrice, usedRetailFallback: false };
+  }
+  const wholesale = unitTierPrice(unit, "wholesale");
+  if (wholesale > 0) {
+    return { listPrice: wholesale, minPrice, usedRetailFallback: false };
+  }
+  return {
+    listPrice: unitTierPrice(unit, "retail"),
+    minPrice,
+    usedRetailFallback: true,
+  };
 }
 
 /** When switching a line between sell units, keep base qty and apply target unit tier prices. */
@@ -166,12 +178,15 @@ export function convertLineToUnit(
   minPrice: number;
   sellUnit: string;
   packSize: number;
+  usedRetailFallback: boolean;
 } | null {
   const target = resolveSellUnit(product, targetUnitId);
   if (!target?.id) return null;
-  const tier = priceMode === "wholesale" ? "wholesale" : "retail";
-  const listPrice = unitTierPrice(target, tier);
-  const minPrice = unitTierPrice(target, "minimum");
+  const { listPrice, minPrice, usedRetailFallback } = cartLineTierPrices(
+    product,
+    target.id,
+    priceMode,
+  );
   return {
     productUnitId: target.id,
     qty: +stockToDisplayedQuantity(target, baseQty).toFixed(4),
@@ -180,5 +195,6 @@ export function convertLineToUnit(
     minPrice,
     sellUnit: target.name || target.symbol || product.unit,
     packSize: stockPerUnit(target),
+    usedRetailFallback,
   };
 }

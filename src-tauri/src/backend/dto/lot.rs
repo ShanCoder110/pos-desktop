@@ -1,10 +1,24 @@
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use validator::{Validate, ValidationError};
 
 use crate::backend::constants::MAX_STOCK_COUNT_BASE_UNITS;
 
 use super::PageQuery;
+
+/// Patch field: absent = leave unchanged; null/"" = clear; string = set.
+fn deserialize_patch_optional_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let inner = Option::<String>::deserialize(deserializer)?;
+    Ok(Some(inner.and_then(|text| {
+        let trimmed = text.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    })))
+}
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -98,6 +112,9 @@ pub struct UpdateLotRequest {
     pub wholesale: Option<Decimal>,
     #[validate(custom(function = "non_negative_optional_decimal"))]
     pub retail: Option<Decimal>,
+    /// Absent = leave unchanged; `null`/empty = clear; date string = set.
+    #[serde(default, deserialize_with = "deserialize_patch_optional_string")]
+    pub expiry_date: Option<Option<String>>,
     #[validate(nested)]
     #[serde(default)]
     pub branch_allocations: Vec<BranchAllocationInput>,

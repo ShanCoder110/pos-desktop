@@ -254,6 +254,10 @@ export const LOT_COPY = {
   filteredValueTotal: "Total value left",
   loadFailed: "Could not load lots",
   retry: "Retry",
+  expiryLabel: "Expiry",
+  expiryHint: "Optional. Leave blank to clear.",
+  expiryBeforeReceived: "Expiry cannot be before the received date",
+  expiryPastWarning: "Expiry is in the past — saved anyway",
 } as const;
 
 export const LOT_FILTER_FIELDS: {
@@ -294,6 +298,7 @@ export const LOT_TABLE_COLUMNS = [
   { id: "original", label: "Original" },
   { id: "left", label: "Left" },
   { id: "damaged", label: "Damaged" },
+  { id: "expiry", label: "Expiry" },
 ];
 
 export const CATEGORY_TABLE_COLUMNS = [

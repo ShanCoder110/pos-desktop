@@ -87,6 +87,8 @@ export interface UpdateLotPayload {
   min?: number;
   wholesale?: number;
   retail?: number;
+  /** `null` clears expiry; omit to leave unchanged. */
+  expiryDate?: string | null;
   branchAllocations?: LotBranchAllocationPayload[];
 }
 

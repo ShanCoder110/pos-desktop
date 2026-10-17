@@ -50,7 +50,7 @@ import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import { LOT_COPY, LOT_FILTER_FIELDS, LOT_TABLE_COLUMNS } from "@/shared/constants/products";
 import type { ProductLotRow } from "@/shared/domain/types";
-import { money } from "@/utils/format";
+import { formatTableDate, money } from "@/utils/format";
 
 function canEditLots(role: string | null | undefined) {
   return role === "OWNER" || role === "MANAGER";
@@ -73,12 +73,6 @@ function LotQty({
       <DetailQtyDisplay product={product} qty={qty} />
     </div>
   );
-}
-
-function shortDate(iso: string) {
-  const date = new Date(`${iso.slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 function signedMoney(value: number) {
@@ -491,7 +485,7 @@ export function LotsPage() {
               title={`${chartProduct?.name ?? "Product"} lot cost`}
               subtitle={
                 lastIncrease
-                  ? `${chartHistory.length} lots · ${chartIncreases.length} increase${chartIncreases.length === 1 ? "" : "s"} · last up ${signedMoney(lastIncrease.change)} on ${shortDate(lastIncrease.lot.receivedAt)}`
+                  ? `${chartHistory.length} lots · ${chartIncreases.length} increase${chartIncreases.length === 1 ? "" : "s"} · last up ${signedMoney(lastIncrease.change)} on ${formatTableDate(lastIncrease.lot.receivedAt)}`
                   : `${chartHistory.length} lots in the selected dates · no price increase yet`
               }
               data={chartData}
@@ -531,7 +525,7 @@ export function LotsPage() {
                           {chartIncreases
                             .map(
                               (row) =>
-                                `${row.lot.lotNumber} ${shortDate(row.lot.receivedAt)} ${signedMoney(row.change)}`,
+                                `${row.lot.lotNumber} ${formatTableDate(row.lot.receivedAt)} ${signedMoney(row.change)}`,
                             )
                             .join(" · ")}
                         </span>
@@ -560,7 +554,8 @@ export function LotsPage() {
                               </span>
                               <span className="flex items-center justify-between gap-3 text-[10px] text-muted">
                                 <span>
-                                  {shortDate(lot.receivedAt)} · {supplierLabel(lot.supplierId)}
+                                  {formatTableDate(lot.receivedAt)} ·{" "}
+                                  {supplierLabel(lot.supplierId)}
                                 </span>
                                 <span
                                   style={{
@@ -632,6 +627,7 @@ export function LotsPage() {
             {show("original") ? <Th>Original</Th> : null}
             {show("left") ? <Th>Left</Th> : null}
             {show("damaged") ? <Th>Damaged</Th> : null}
+            {show("expiry") ? <Th>{LOT_COPY.expiryLabel}</Th> : null}
             <Th>Actions</Th>
           </tr>
         </THead>
@@ -700,6 +696,7 @@ export function LotsPage() {
                       <LotQty product={productOf(row.productId)} qty={row.damagedQuantity} />
                     </Td>
                   ) : null}
+                  {show("expiry") ? <Td>{formatTableDate(row.expiryDate)}</Td> : null}
                   <Td>
                     <div
                       className="relative flex items-center justify-end"

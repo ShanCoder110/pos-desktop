@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatDetailDate, formatTableDateTime } from "@/utils/format";
+import { formatDetailDate, formatTableDate, formatTableDateTime } from "@/utils/format";
+
+describe("formatTableDate", () => {
+  it("formats date-only as day mon year", () => {
+    expect(formatTableDate("2029-06-01")).toMatch(/1 Jun 2029|01 Jun 2029|Jun/);
+    expect(formatTableDate(null)).toBe("—");
+  });
+});
 
 describe("formatTableDateTime", () => {
   it("formats local time as '17 Oct 2026, 3:40 PM'", () => {

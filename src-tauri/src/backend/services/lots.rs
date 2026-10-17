@@ -373,6 +373,7 @@ mod tests {
                 min: None,
                 wholesale: None,
                 retail: None,
+                expiry_date: None,
                 branch_allocations: vec![],
             },
         )
@@ -406,6 +407,7 @@ mod tests {
                 min: None,
                 wholesale: None,
                 retail: None,
+                expiry_date: None,
                 branch_allocations: vec![],
             },
         )
@@ -435,6 +437,7 @@ mod tests {
                 min: None,
                 wholesale: None,
                 retail: None,
+                expiry_date: None,
                 branch_allocations: vec![],
             },
         )
@@ -458,6 +461,7 @@ mod tests {
                 min: None,
                 wholesale: None,
                 retail: None,
+                expiry_date: None,
                 branch_allocations: vec![crate::backend::dto::BranchAllocationInput {
                     branch_id: SEED_BRANCH_ID.into(),
                     quantity: Decimal::new(50, 0),
@@ -480,6 +484,206 @@ mod tests {
             }
             other => panic!("expected allocation mismatch validation, got {other:?}"),
         }
+    }
+
+    /// M9: expiry can be set, changed, and cleared; not before received; audit on change.
+    #[tokio::test]
+    async fn lot_expiry_set_change_clear_and_rejects_before_received() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let context = ctx("OWNER");
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "ExpiryCat".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                name: "Expiry Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: true,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id,
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(8, 0),
+                    min: Decimal::new(8, 0),
+                    wholesale: Decimal::new(10, 0),
+                    price: Decimal::new(15, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(50, 0),
+                    cost: Decimal::new(8, 0),
+                    received_date: "2026-10-17".into(),
+                    expiry_date: Some("2028-01-15".into()),
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let lot_id = Uuid::parse_str(
+            &LotService::list(
+                &database,
+                LotListQuery {
+                    product_id: Some(product.id.clone()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("list")
+            .data[0]
+                .id,
+        )
+        .unwrap();
+
+        let set = LotService::update(
+            &database,
+            &context,
+            lot_id,
+            UpdateLotRequest {
+                supplier_id: None,
+                original_quantity: None,
+                remaining_quantity: None,
+                damaged_quantity: None,
+                cost: None,
+                min: None,
+                wholesale: None,
+                retail: None,
+                expiry_date: Some(Some("2029-06-01".into())),
+                branch_allocations: vec![],
+            },
+        )
+        .await
+        .expect("set expiry");
+        assert_eq!(set.expiry_date.as_deref(), Some("2029-06-01"));
+
+        let before_received = LotService::update(
+            &database,
+            &context,
+            lot_id,
+            UpdateLotRequest {
+                supplier_id: None,
+                original_quantity: None,
+                remaining_quantity: None,
+                damaged_quantity: None,
+                cost: None,
+                min: None,
+                wholesale: None,
+                retail: None,
+                expiry_date: Some(Some("2026-01-01".into())),
+                branch_allocations: vec![],
+            },
+        )
+        .await;
+        assert!(
+            matches!(before_received, Err(AppError::Validation(_))),
+            "expiry before received must 422"
+        );
+
+        // Past relative to today but after received is allowed.
+        let past_ok = LotService::update(
+            &database,
+            &context,
+            lot_id,
+            UpdateLotRequest {
+                supplier_id: None,
+                original_quantity: None,
+                remaining_quantity: None,
+                damaged_quantity: None,
+                cost: None,
+                min: None,
+                wholesale: None,
+                retail: None,
+                expiry_date: Some(Some("2026-10-18".into())),
+                branch_allocations: vec![],
+            },
+        )
+        .await
+        .expect("past-after-received allowed");
+        assert_eq!(past_ok.expiry_date.as_deref(), Some("2026-10-18"));
+
+        let cleared = LotService::update(
+            &database,
+            &context,
+            lot_id,
+            UpdateLotRequest {
+                supplier_id: None,
+                original_quantity: None,
+                remaining_quantity: None,
+                damaged_quantity: None,
+                cost: None,
+                min: None,
+                wholesale: None,
+                retail: None,
+                expiry_date: Some(None),
+                branch_allocations: vec![],
+            },
+        )
+        .await
+        .expect("clear expiry");
+        assert!(cleared.expiry_date.is_none());
+
+        #[derive(Debug, FromQueryResult)]
+        struct AuditCount {
+            count: i64,
+        }
+        let audits = AuditCount::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM audit_logs WHERE entity_type = 'PRODUCT_LOT' AND action = 'UPDATE_EXPIRY' AND entity_id = ?",
+            [lot_id.into()],
+        ))
+        .one(&database)
+        .await
+        .expect("audit query")
+        .map(|r| r.count)
+        .unwrap_or(0);
+        assert!(
+            audits >= 3,
+            "expected audit rows for set/change/clear, got {audits}"
+        );
     }
 
     /// QA-06: 100 @ 8, sell 10 @ 15, count down 5 → sold 10 / rev 150 / profit 70 / shrink 5 (Rs 40) / left 85.

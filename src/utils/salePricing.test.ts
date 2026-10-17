@@ -211,6 +211,17 @@ describe("cartLineTierPrices", () => {
     const w = cartLineTierPrices(product, "u-pack", "wholesale");
     expect(w.listPrice).toBe(1140);
     expect(w.minPrice).toBe(1080);
+    expect(w.usedRetailFallback).toBe(false);
+  });
+
+  it("falls back to retail when wholesale is 0 or unset", () => {
+    const noWholesale = {
+      ...product,
+      sellUnits: [{ ...pack, wholesale: 0 }],
+    };
+    const w = cartLineTierPrices(noWholesale, "u-pack", "wholesale");
+    expect(w.listPrice).toBe(1200);
+    expect(w.usedRetailFallback).toBe(true);
   });
 
   it("convertLineToUnit keeps base qty and applies target tier", () => {

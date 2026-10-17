@@ -501,12 +501,26 @@ export function LotForm({
         })),
       };
     }
+    const expiryRaw = (nextLot.expiryDate ?? "").trim();
+    const receivedDay = (nextLot.receivedAt || new Date().toISOString()).slice(0, 10);
+    if (expiryRaw) {
+      const expiryDay = expiryRaw.slice(0, 10);
+      if (expiryDay < receivedDay) {
+        toaster.error(LOT_COPY.expiryBeforeReceived);
+        setTab("lot");
+        return;
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      if (expiryDay < today) {
+        toaster.error(LOT_COPY.expiryPastWarning);
+      }
+    }
     onSave(
       {
         ...nextLot,
         ...lotPricesFromUnits(units, stockSymbol),
         receivedAt: nextLot.receivedAt || new Date().toISOString().slice(0, 10),
-        expiryDate: null,
+        expiryDate: expiryRaw ? expiryRaw.slice(0, 10) : null,
         createdBy: nextLot.createdBy || "u1",
       },
       units,
@@ -650,6 +664,15 @@ export function LotForm({
                     <TextInput value={lot.lotNumber} disabled />
                   </Field>
                 )}
+                <Field label={LOT_COPY.expiryLabel} hint={LOT_COPY.expiryHint}>
+                  <TextInput
+                    type="date"
+                    value={(lot.expiryDate ?? "").slice(0, 10)}
+                    onChange={(event) =>
+                      patch({ expiryDate: event.target.value ? event.target.value : null })
+                    }
+                  />
+                </Field>
               </div>
             </FormSection>
 

@@ -8,10 +8,11 @@ use uuid::Uuid;
 use crate::backend::{
     constants::{
         DEFAULT_TRANSFER_PREFIX, ERROR_INVALID_CATEGORY_ID, ERROR_LOT_ALLOCATION_MISMATCH_PREFIX,
-        ERROR_LOT_NOT_FOUND, ERROR_LOT_ORIGINAL_BELOW_COMMITTED,
-        ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE, ERROR_LOT_REMAINING_LOCKED, ERROR_PRODUCT_NOT_FOUND,
-        ERROR_SUPPLIER_REQUIRED, INVOICE_STATUS_COMPLETED, LEDGER_PURCHASE, LOT_SOURCE_OPENING,
-        LOT_SOURCE_PURCHASE, REFERENCE_GOODS_RECEIPT, REFERENCE_INVOICE, REFERENCE_PRODUCT_OPENING,
+        ERROR_LOT_EXPIRY_BEFORE_RECEIVED, ERROR_LOT_EXPIRY_INVALID, ERROR_LOT_NOT_FOUND,
+        ERROR_LOT_ORIGINAL_BELOW_COMMITTED, ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE,
+        ERROR_LOT_REMAINING_LOCKED, ERROR_PRODUCT_NOT_FOUND, ERROR_SUPPLIER_REQUIRED,
+        INVOICE_STATUS_COMPLETED, LEDGER_PURCHASE, LOT_SOURCE_OPENING, LOT_SOURCE_PURCHASE,
+        REFERENCE_GOODS_RECEIPT, REFERENCE_INVOICE, REFERENCE_PRODUCT_OPENING,
         SEQUENCE_KIND_TRANSFER, STOCK_MOVEMENT_ADJUSTMENT, STOCK_MOVEMENT_PRODUCTION_USE,
         STOCK_MOVEMENT_PRODUCTION_WASTE, STOCK_MOVEMENT_PURCHASE, STOCK_MOVEMENT_REPAIR_USE,
         STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN, STOCK_MOVEMENT_SALE,
@@ -26,7 +27,10 @@ use crate::backend::{
         LedgerEntryInput, LedgerParty, LedgerRepository, PurchasingRepository, SequenceRepository,
         TransferRepository,
     },
-    util::{money_value, now_utc, parse_date, parse_optional_uuid, parse_uuid, quantity, trimmed},
+    util::{
+        money_value, now_utc, parse_date, parse_optional_uuid, parse_uuid, quantity, trimmed,
+        uuid_blob,
+    },
 };
 
 #[derive(Debug, FromQueryResult)]
@@ -74,6 +78,8 @@ struct LotUpdateRow {
     remaining_base_quantity: Decimal,
     damaged_base_quantity: Decimal,
     supplier_id: Option<Uuid>,
+    received_date: chrono::NaiveDate,
+    expiry_date: Option<chrono::NaiveDate>,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -190,7 +196,7 @@ impl LotRepository {
     ) -> Result<Uuid, AppError> {
         let row = LotUpdateRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT product_id, original_base_quantity, remaining_base_quantity, damaged_base_quantity, supplier_id FROM product_lots WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+            "SELECT product_id, original_base_quantity, remaining_base_quantity, damaged_base_quantity, supplier_id, received_date, expiry_date FROM product_lots WHERE id = ? AND deleted_at IS NULL LIMIT 1",
             [id.into()],
         ))
         .one(transaction)
@@ -202,6 +208,8 @@ impl LotRepository {
         let original = quantity(row.original_base_quantity);
         let remaining = quantity(row.remaining_base_quantity);
         let damaged = quantity(row.damaged_base_quantity);
+        let received_date = row.received_date;
+        let previous_expiry = row.expiry_date;
         // Sold is committed history from movements — never derived from the editable remaining.
         let sold = lot_committed_sold(transaction, id).await?;
         let returned_to_supplier = lot_returned_to_supplier(transaction, id).await?;
@@ -260,21 +268,68 @@ impl LotRepository {
             row.supplier_id
         };
         let next_cost = request.cost.map(money_value);
+        let next_expiry = match &request.expiry_date {
+            None => None,
+            Some(None) => Some(None),
+            Some(Some(raw)) => {
+                let parsed = parse_date(raw, ERROR_LOT_EXPIRY_INVALID)?;
+                if parsed < received_date {
+                    return Err(AppError::Validation(
+                        ERROR_LOT_EXPIRY_BEFORE_RECEIVED.into(),
+                    ));
+                }
+                // Past-relative-to-today is allowed (warning is a frontend concern).
+                Some(Some(parsed))
+            }
+        };
+        let expiry_changed = match &next_expiry {
+            None => false,
+            Some(value) => *value != previous_expiry,
+        };
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "UPDATE product_lots SET supplier_id = ?, original_base_quantity = ?, remaining_base_quantity = ?, damaged_base_quantity = ?, purchase_price_per_base = COALESCE(?, purchase_price_per_base), version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+                "UPDATE product_lots SET supplier_id = ?, original_base_quantity = ?, remaining_base_quantity = ?, damaged_base_quantity = ?, purchase_price_per_base = COALESCE(?, purchase_price_per_base), expiry_date = CASE WHEN ? THEN ? ELSE expiry_date END, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
                 [
                     supplier_id.into(),
                     next_original.into(),
                     next_remaining.into(),
                     next_damaged.into(),
                     next_cost.into(),
+                    i64::from(next_expiry.is_some()).into(),
+                    next_expiry.clone().flatten().into(),
                     now.into(),
                     id.into(),
                 ],
             ))
             .await?;
+        if expiry_changed {
+            let after = next_expiry.clone().flatten();
+            let before_json = serde_json::json!({
+                "expiryDate": previous_expiry.map(|d| d.to_string()),
+            })
+            .to_string();
+            let after_json = serde_json::json!({
+                "expiryDate": after.map(|d| d.to_string()),
+            })
+            .to_string();
+            transaction
+                .execute_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "INSERT INTO audit_logs (id, branch_id, user_id, device_id, entity_type, entity_id, action, before_json, after_json, created_at) VALUES (?, ?, ?, ?, 'PRODUCT_LOT', ?, 'UPDATE_EXPIRY', ?, ?, ?)",
+                    [
+                        uuid_blob(Uuid::new_v4()),
+                        uuid_blob(context.branch_id),
+                        uuid_blob(context.user_id),
+                        uuid_blob(context.device_id),
+                        uuid_blob(id),
+                        before_json.into(),
+                        after_json.into(),
+                        now.into(),
+                    ],
+                ))
+                .await?;
+        }
         apply_product_unit_prices(transaction, product_id, request, now).await?;
         if !request.branch_allocations.is_empty() {
             apply_branch_reallocation(
@@ -902,6 +957,7 @@ async fn apply_product_unit_prices_from_receive(
         min: request.min,
         wholesale: request.wholesale,
         retail: request.retail,
+        expiry_date: None,
         branch_allocations: Vec::new(),
     };
     apply_product_unit_prices(transaction, product_id, &update, now).await
