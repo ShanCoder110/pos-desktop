@@ -570,7 +570,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   customer_id TEXT REFERENCES customers(id),
   invoice_number TEXT NOT NULL UNIQUE,
   status TEXT NOT NULL CHECK (status IN ('DRAFT','CONFIRMED','COMPLETED','CANCELLED')),
-  payment_status TEXT NOT NULL CHECK (payment_status IN ('UNPAID','PARTIAL','PAID','CREDIT','REFUNDED')),
+  payment_status TEXT NOT NULL CHECK (payment_status IN ('UNPAID','PARTIAL','PAID','CREDIT','REFUNDED','RETURNED','PARTIALLY_RETURNED')),
   subtotal REAL NOT NULL,
   discount REAL NOT NULL DEFAULT 0,
   tax REAL NOT NULL DEFAULT 0,

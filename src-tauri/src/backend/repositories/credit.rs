@@ -77,7 +77,6 @@ struct InvoiceMeta {
     branch_id: Uuid,
     customer_id: Option<Uuid>,
     invoice_number: String,
-    paid_amount: Decimal,
     credit_amount: Decimal,
 }
 
@@ -560,7 +559,7 @@ impl CreditRepository {
         let invoice_id = parse_uuid(&request.invoice_id, "invoiceId")?;
         let invoice = InvoiceMeta::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT branch_id, customer_id, invoice_number, CAST(paid_amount AS REAL) AS paid_amount, CAST(credit_amount AS REAL) AS credit_amount FROM invoices WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+            "SELECT branch_id, customer_id, invoice_number, CAST(credit_amount AS REAL) AS credit_amount FROM invoices WHERE id = ? AND deleted_at IS NULL LIMIT 1",
             [invoice_id.into()],
         ))
         .one(transaction)
