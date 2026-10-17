@@ -52,6 +52,8 @@ pub const LOT_BY_ID_ROUTE: &str = "/lots/{id}";
 pub const LOTS_RECEIVE_ROUTE: &str = "/lots/receive";
 pub const STOCK_ROUTE: &str = "/stock";
 pub const STOCK_MOVEMENTS_ROUTE: &str = "/stock/movements";
+pub const STOCK_COUNT_ROUTE: &str = "/stock/count";
+pub const STOCK_RECONCILE_ROUTE: &str = "/stock/reconcile";
 
 pub const PURCHASE_ORDERS_ROUTE: &str = "/purchase-orders";
 pub const PURCHASE_ORDER_BY_ID_ROUTE: &str = "/purchase-orders/{id}";
@@ -121,6 +123,7 @@ pub const SEQUENCE_KIND_TRANSFER: &str = "transfer";
 pub const SEQUENCE_KIND_PRODUCTION: &str = "production";
 pub const SEQUENCE_KIND_REPAIR: &str = "repair";
 pub const SEQUENCE_KIND_RECEIPT: &str = "receipt";
+pub const SEQUENCE_KIND_STOCK_ADJUSTMENT: &str = "stock_adjustment";
 pub const DEFAULT_LOT_PREFIX: &str = "L";
 pub const DEFAULT_INVOICE_PREFIX: &str = "INV";
 pub const DEFAULT_PO_PREFIX: &str = "PO";
@@ -128,13 +131,16 @@ pub const DEFAULT_TRANSFER_PREFIX: &str = "TR";
 pub const DEFAULT_PRODUCTION_PREFIX: &str = "PRD";
 pub const DEFAULT_REPAIR_PREFIX: &str = "RPR";
 pub const DEFAULT_RECEIPT_PREFIX: &str = "GR";
+pub const DEFAULT_STOCK_ADJUSTMENT_PREFIX: &str = "SA";
 pub const PRODUCT_TYPE_STANDARD: &str = "STANDARD";
 pub const PRODUCT_TYPE_MANUFACTURED: &str = "MANUFACTURED";
 pub const LOT_SOURCE_OPENING: &str = "OPENING";
 pub const LOT_SOURCE_PURCHASE: &str = "PURCHASE";
 pub const LOT_SOURCE_PRODUCTION: &str = "PRODUCTION";
 pub const LOT_SOURCE_RETURN: &str = "RETURN";
+pub const LOT_SOURCE_ADJUSTMENT: &str = "ADJUSTMENT";
 pub const STOCK_MOVEMENT_ADJUSTMENT: &str = "ADJUSTMENT";
+pub const STOCK_ADJUSTMENT_STATUS_POSTED: &str = "POSTED";
 pub const STOCK_MOVEMENT_PURCHASE: &str = "PURCHASE";
 pub const STOCK_MOVEMENT_SALE: &str = "SALE";
 pub const STOCK_MOVEMENT_RETURN: &str = "RETURN";
@@ -152,6 +158,7 @@ pub const REFERENCE_TRANSFER: &str = "StockTransfer";
 pub const REFERENCE_PRODUCTION: &str = "Production";
 pub const REFERENCE_REPAIR: &str = "Repair";
 pub const REFERENCE_RETURN: &str = "SaleReturn";
+pub const REFERENCE_STOCK_ADJUSTMENT: &str = "StockAdjustment";
 pub const AUTH_HEADER: &str = "authorization";
 pub const AUTH_BEARER_PREFIX: &str = "Bearer ";
 // Stable ids for seeded shop skeleton (branch/device/customer). Owner is created in onboarding.
@@ -195,6 +202,14 @@ pub const ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE: &str =
     "Remaining cannot exceed original minus sold minus damaged.";
 pub const ERROR_LOT_ORIGINAL_BELOW_COMMITTED: &str =
     "Original quantity cannot be less than sold plus damaged.";
+pub const ERROR_LOT_REMAINING_LOCKED: &str =
+    "Remaining quantity is locked. Use stock count to change on-hand quantity.";
+pub const ERROR_STOCK_COUNT_DENIED: &str = "Only owners and managers can count stock.";
+pub const ERROR_STOCK_COUNT_REASON_REQUIRED: &str =
+    "Enter a reason for the stock count (max 200 characters).";
+pub const ERROR_STOCK_COUNT_NEGATIVE: &str = "Counted quantity cannot be negative.";
+pub const ERROR_STOCK_COUNT_SUPPLIER_REQUIRED: &str =
+    "supplierId and supplierAmount are required when adjustSupplierPayable is set.";
 pub const ERROR_INVOICE_NOT_FOUND: &str = "Invoice not found.";
 pub const ERROR_USER_NOT_FOUND: &str = "User not found.";
 pub const ERROR_BRANCH_NOT_FOUND: &str = "Branch not found.";

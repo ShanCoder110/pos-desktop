@@ -32,6 +32,8 @@ struct MovementRow {
     displayed_quantity: Decimal,
     displayed_unit_name: String,
     base_quantity_delta: Decimal,
+    quantity_before: Option<Decimal>,
+    quantity_after: Option<Decimal>,
     unit_cost: Option<Decimal>,
     total_cost: Option<Decimal>,
     reference_type: String,
@@ -232,7 +234,7 @@ impl StockRepository {
 
         let direction = query.page.sort_direction.unwrap_or_default().sql();
         let sql = format!(
-            "SELECT sm.id, sm.branch_id, sm.product_id, p.name AS product_name, sm.product_lot_id, sm.type AS movement_type, sm.displayed_quantity, sm.displayed_unit_name, sm.base_quantity_delta, CAST(sm.unit_cost AS REAL) AS unit_cost, CAST(sm.total_cost AS REAL) AS total_cost, sm.reference_type, sm.reference_id, sm.notes, sm.occurred_at, sm.created_by, sm.created_at FROM stock_movements sm JOIN products p ON p.id = sm.product_id WHERE {conditions} ORDER BY sm.created_at {direction}, sm.id DESC LIMIT ? OFFSET ?"
+            "SELECT sm.id, sm.branch_id, sm.product_id, p.name AS product_name, sm.product_lot_id, sm.type AS movement_type, sm.displayed_quantity, sm.displayed_unit_name, sm.base_quantity_delta, CAST(sm.quantity_before AS REAL) AS quantity_before, CAST(sm.quantity_after AS REAL) AS quantity_after, CAST(sm.unit_cost AS REAL) AS unit_cost, CAST(sm.total_cost AS REAL) AS total_cost, sm.reference_type, sm.reference_id, sm.notes, sm.occurred_at, sm.created_by, sm.created_at FROM stock_movements sm JOIN products p ON p.id = sm.product_id WHERE {conditions} ORDER BY sm.created_at {direction}, sm.id DESC LIMIT ? OFFSET ?"
         );
         let mut page_values = values;
         page_values.push((query.page.per_page as i64).into());
@@ -257,6 +259,8 @@ impl StockRepository {
                     displayed_quantity: decimal(row.displayed_quantity),
                     displayed_unit_name: row.displayed_unit_name,
                     base_quantity_delta: decimal(row.base_quantity_delta),
+                    quantity_before: row.quantity_before.map(decimal),
+                    quantity_after: row.quantity_after.map(decimal),
                     unit_cost: row.unit_cost.map(decimal),
                     total_cost: row.total_cost.map(decimal),
                     reference_type: row.reference_type,

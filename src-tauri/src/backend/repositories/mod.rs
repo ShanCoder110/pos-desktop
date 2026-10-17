@@ -14,6 +14,7 @@ mod sequences;
 mod staff;
 mod stock;
 mod stock_allocation;
+mod stock_count;
 mod transfers;
 mod trash;
 
@@ -36,5 +37,6 @@ pub use sequences::*;
 pub use staff::*;
 pub use stock::*;
 pub use stock_allocation::*;
+pub use stock_count::{StockCountApply, StockCountRepository};
 pub use transfers::*;
 pub use trash::*;

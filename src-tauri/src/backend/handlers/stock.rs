@@ -5,7 +5,10 @@ use axum::{
 
 use crate::backend::{
     context::RequestContext,
-    dto::{Paginated, StockListQuery, StockMovementListQuery, StockMovementResponse, StockRow},
+    dto::{
+        Paginated, StockCountRequest, StockCountResponse, StockListQuery, StockMovementListQuery,
+        StockMovementResponse, StockReconcileResponse, StockRow,
+    },
     errors::AppError,
     services::StockService,
     AppState,
@@ -27,4 +30,19 @@ pub async fn list_stock_movements(
     Ok(Json(
         StockService::list_movements(&state.db, &ctx, query).await?,
     ))
+}
+
+pub async fn count_stock(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Json(request): Json<StockCountRequest>,
+) -> Result<Json<StockCountResponse>, AppError> {
+    Ok(Json(StockService::count(&state.db, &ctx, request).await?))
+}
+
+pub async fn reconcile_stock(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+) -> Result<Json<StockReconcileResponse>, AppError> {
+    Ok(Json(StockService::reconcile(&state.db, &ctx).await?))
 }

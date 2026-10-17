@@ -9,11 +9,12 @@ use crate::backend::{
     constants::{
         DEFAULT_TRANSFER_PREFIX, ERROR_INVALID_CATEGORY_ID, ERROR_LOT_NOT_FOUND,
         ERROR_LOT_ORIGINAL_BELOW_COMMITTED, ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE,
-        ERROR_PRODUCT_NOT_FOUND, ERROR_SUPPLIER_REQUIRED, LEDGER_PURCHASE, LOT_SOURCE_OPENING,
-        LOT_SOURCE_PURCHASE, REFERENCE_GOODS_RECEIPT, REFERENCE_PRODUCT_OPENING,
-        SEQUENCE_KIND_TRANSFER, STOCK_MOVEMENT_ADJUSTMENT, STOCK_MOVEMENT_PRODUCTION_USE,
-        STOCK_MOVEMENT_PRODUCTION_WASTE, STOCK_MOVEMENT_PURCHASE, STOCK_MOVEMENT_REPAIR_USE,
-        STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN, STOCK_MOVEMENT_SALE,
+        ERROR_LOT_REMAINING_LOCKED, ERROR_PRODUCT_NOT_FOUND, ERROR_SUPPLIER_REQUIRED,
+        LEDGER_PURCHASE, LOT_SOURCE_OPENING, LOT_SOURCE_PURCHASE, REFERENCE_GOODS_RECEIPT,
+        REFERENCE_PRODUCT_OPENING, SEQUENCE_KIND_TRANSFER, STOCK_MOVEMENT_ADJUSTMENT,
+        STOCK_MOVEMENT_PRODUCTION_USE, STOCK_MOVEMENT_PRODUCTION_WASTE, STOCK_MOVEMENT_PURCHASE,
+        STOCK_MOVEMENT_REPAIR_USE, STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN,
+        STOCK_MOVEMENT_SALE,
     },
     context::RequestContext,
     dto::{
@@ -203,19 +204,27 @@ impl LotRepository {
             )));
         }
         let max_remaining = quantity(next_original - committed - next_damaged);
-        let next_remaining = if let Some(value) = request.remaining_quantity {
-            quantity(value)
-        } else if request.original_quantity.is_some() || request.damaged_quantity.is_some() {
-            // Keep remaining within the new ceiling when original/damaged change.
-            remaining.min(max_remaining)
-        } else {
-            remaining
-        };
+        // Raw Left edits are locked — on-hand changes go through stock count.
+        // Step 9 caps remain as a safety net when original/damaged force a clamp.
+        if let Some(value) = request.remaining_quantity {
+            let requested = quantity(value);
+            if requested != remaining {
+                return Err(AppError::Validation(ERROR_LOT_REMAINING_LOCKED.into()));
+            }
+        }
+        let next_remaining =
+            if request.original_quantity.is_some() || request.damaged_quantity.is_some() {
+                // Keep remaining within the new ceiling when original/damaged change.
+                remaining.min(max_remaining)
+            } else {
+                remaining
+            };
         if next_remaining < Decimal::ZERO {
             return Err(AppError::Validation(
                 "Remaining quantity cannot be negative.".into(),
             ));
         }
+        // Safety net (Step 9): never allow remaining above original − sold − damaged.
         if next_remaining > max_remaining {
             return Err(AppError::Validation(format!(
                 "{ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE} Sold {sold}, damaged {next_damaged}, returned to supplier {returned_to_supplier}. Maximum remaining is {max_remaining}."
@@ -713,7 +722,7 @@ async fn apply_product_unit_prices_from_receive(
 
 /// Sold quantity committed by stock movements / sale consumptions for this lot.
 /// Never derived from the editable remaining field.
-async fn lot_committed_sold(
+pub(crate) async fn lot_committed_sold(
     database: &impl ConnectionTrait,
     lot_id: Uuid,
 ) -> Result<Decimal, AppError> {
@@ -755,7 +764,7 @@ async fn lot_committed_sold(
 }
 
 /// Permanent removals to supplier (or similar) that are not the damaged field.
-async fn lot_returned_to_supplier(
+pub(crate) async fn lot_returned_to_supplier(
     database: &impl ConnectionTrait,
     lot_id: Uuid,
 ) -> Result<Decimal, AppError> {

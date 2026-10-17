@@ -19,6 +19,7 @@ mod m20261015_000016_restore_qa_customer;
 mod m20261017_000017_default_other_category;
 mod m20261017_000018_recompute_ledger_balances;
 mod m20261017_000019_invoice_return_payment_status;
+mod m20261017_000020_stock_count_reconcile;
 
 pub struct Migrator;
 
@@ -45,6 +46,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261017_000017_default_other_category::Migration),
             Box::new(m20261017_000018_recompute_ledger_balances::Migration),
             Box::new(m20261017_000019_invoice_return_payment_status::Migration),
+            Box::new(m20261017_000020_stock_count_reconcile::Migration),
         ]
     }
 }

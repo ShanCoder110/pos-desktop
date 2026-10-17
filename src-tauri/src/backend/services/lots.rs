@@ -378,7 +378,9 @@ mod tests {
             Err(AppError::Validation(message)) => {
                 assert!(
                     message.contains("Remaining cannot exceed")
-                        || message.contains("Maximum remaining"),
+                        || message.contains("Maximum remaining")
+                        || message.contains("stock count")
+                        || message.contains("locked"),
                     "unexpected message: {message}"
                 );
             }
@@ -387,7 +389,8 @@ mod tests {
         // Stock unchanged after rejected edit (no 293 vs 242 style mismatch).
         assert!((product_stock(&database, &product.id).await - 70.0).abs() < 0.01);
 
-        let updated = LotService::update(
+        // Step 10: raw Left edits are locked — use stock count instead.
+        let locked = LotService::update(
             &database,
             &context,
             lot_id,
@@ -403,19 +406,17 @@ mod tests {
                 branch_allocations: vec![],
             },
         )
-        .await
-        .expect("remaining 60 allowed");
-        assert_eq!(updated.remaining_base_quantity, 60.0);
-        assert!((product_stock(&database, &product.id).await - 60.0).abs() < 0.01);
-        let branch_sum: f64 = updated
-            .branch_lots
-            .iter()
-            .map(|row| row.remaining_base_quantity)
-            .sum();
-        assert!(
-            (branch_sum - 60.0).abs() < 0.01,
-            "branch_lots must match lot remaining, got {branch_sum}"
-        );
+        .await;
+        match locked {
+            Err(AppError::Validation(message)) => {
+                assert!(
+                    message.contains("stock count") || message.contains("locked"),
+                    "unexpected lock message: {message}"
+                );
+            }
+            other => panic!("expected remaining locked validation, got {other:?}"),
+        }
+        assert!((product_stock(&database, &product.id).await - 70.0).abs() < 0.01);
 
         let cashier = ctx("CASHIER");
         let forbidden = LotService::update(

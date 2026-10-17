@@ -178,6 +178,8 @@ pub struct StockMovementResponse {
     pub displayed_quantity: f64,
     pub displayed_unit_name: String,
     pub base_quantity_delta: f64,
+    pub quantity_before: Option<f64>,
+    pub quantity_after: Option<f64>,
     pub unit_cost: Option<f64>,
     pub total_cost: Option<f64>,
     pub reference_type: String,
@@ -186,6 +188,66 @@ pub struct StockMovementResponse {
     pub occurred_at: String,
     pub created_by: String,
     pub created_at: String,
+}
+
+/// Count on-hand stock for one product at a branch, in any sell unit.
+#[derive(Clone, Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct StockCountRequest {
+    pub product_id: String,
+    #[serde(default)]
+    pub branch_id: Option<String>,
+    pub product_unit_id: String,
+    #[validate(custom(function = "non_negative_decimal"))]
+    pub counted_quantity: Decimal,
+    /// Required reason, max 200 characters.
+    #[validate(length(min = 1, max = 200))]
+    pub reason: String,
+    /// When true, also post a supplier ledger ADJUSTMENT (default off).
+    #[serde(default)]
+    pub adjust_supplier_payable: bool,
+    pub supplier_id: Option<String>,
+    pub supplier_amount: Option<Decimal>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockCountResponse {
+    pub id: String,
+    pub adjustment_number: String,
+    pub product_id: String,
+    pub branch_id: String,
+    pub product_unit_id: String,
+    pub displayed_unit_name: String,
+    pub counted_quantity: f64,
+    pub old_quantity: f64,
+    pub new_quantity: f64,
+    pub difference: f64,
+    pub reason: String,
+    pub movement_ids: Vec<String>,
+    pub created_adjustment_lot_id: Option<String>,
+    pub supplier_ledger_posted: bool,
+    pub occurred_at: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockReconcileFix {
+    pub product_id: String,
+    pub product_name: String,
+    pub lot_id: String,
+    pub lot_number: String,
+    pub lot_remaining: f64,
+    pub branch_lots_before: f64,
+    pub branch_lots_after: f64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockReconcileResponse {
+    pub checked_products: u64,
+    pub mismatched_before: u64,
+    pub fixes: Vec<StockReconcileFix>,
 }
 
 fn positive_decimal(value: &Decimal) -> Result<(), ValidationError> {
