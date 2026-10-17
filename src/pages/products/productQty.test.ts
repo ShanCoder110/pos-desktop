@@ -17,6 +17,7 @@ import {
   sellUnitOptions,
   setPreferredUnit,
   suggestedExtraUnit,
+  validateOpeningStock,
   validateSellUnits,
 } from "@/pages/products/productQty";
 import type { Product } from "@/shared/types";
@@ -198,8 +199,23 @@ describe("gaz in 1 roll prices", () => {
       factorDirection: "divide",
     });
     expect(validateSellUnits([roll, gazEmpty])).toBe("unitFactorInvalid");
+    const gazNegative = unit({
+      id: "gaz-neg",
+      symbol: "gaz",
+      name: "Gaz",
+      contains: -1,
+      factorDirection: "divide",
+    });
+    expect(validateSellUnits([roll, gazNegative])).toBe("unitFactorInvalid");
     const dup = unit({ id: "r2", symbol: "roll2", name: "Roll", contains: 12 });
     expect(validateSellUnits([roll, dup])).toBe("unitNameDuplicate");
+  });
+
+  it("allows zero opening stock and rejects negatives", () => {
+    expect(validateOpeningStock(0)).toBeNull();
+    expect(validateOpeningStock(12)).toBeNull();
+    expect(validateOpeningStock(-0.01)).toBe("openingQty");
+    expect(validateOpeningStock(Number.NaN)).toBe("openingQty");
   });
 
   it("keeps a new secondary unit blank until its conversion is entered", () => {

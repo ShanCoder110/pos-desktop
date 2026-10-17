@@ -131,7 +131,7 @@ export const PRODUCT_COPY = {
   unitPriceTierRetail: "Retail",
   unitPricesInvalid: "Fix unit prices before saving",
   unitPriceRequired: "Enter a price",
-  openingQtyRequired: "Enter opening quantity",
+  openingQtyRequired: "Opening quantity cannot be negative",
   lowStockAlert: "Low stock alert (optional)",
   lowStockHint:
     "Alerts when overall stock — total remaining qty from all open lots (all branches) — reaches this or below.",

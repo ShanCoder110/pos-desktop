@@ -72,6 +72,7 @@ import {
   suggestedExtraUnit,
   unitInStock,
   unitLabel,
+  validateOpeningStock,
   validateSellUnits,
 } from "@/pages/products/productQty";
 import { createMasterRecord, listMasterRecords } from "@/services/masters";
@@ -743,7 +744,11 @@ export function ProductForm({
   function validate(): string | null {
     if (!product.name.trim()) return "name";
     if (!(base?.symbol || product.unit)) return "unit";
-    if (isNew && product.stock <= 0) return "openingQty";
+    // Opening stock may be zero (receive later via lots). Reject negatives only.
+    if (isNew) {
+      const openingError = validateOpeningStock(product.stock);
+      if (openingError) return openingError;
+    }
     if (isNew && base) {
       if (base.cost <= 0) return "cost";
       if (base.min <= 0) return "min";

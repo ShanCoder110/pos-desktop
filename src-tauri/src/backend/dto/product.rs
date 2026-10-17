@@ -230,6 +230,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rejects_sell_unit_contains_zero() {
+        let unit = ProductUnitInput {
+            id: None,
+            unit_id: uuid::Uuid::new_v4().to_string(),
+            name: "Pack".into(),
+            contains: Decimal::ZERO,
+            cost: Decimal::new(10, 0),
+            min: Decimal::new(12, 0),
+            wholesale: Decimal::new(14, 0),
+            price: Decimal::new(16, 0),
+            barcode: None,
+            factor_direction: None,
+            is_base: false,
+            is_default: false,
+        };
+        assert!(unit.validate().is_err());
+    }
+
+    #[test]
     fn rejects_price_order_that_can_lose_money() {
         let request = CreateProductRequest {
             name: "Cable".into(),
