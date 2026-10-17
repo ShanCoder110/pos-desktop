@@ -50,6 +50,15 @@ describe("summarizeCreditLedger", () => {
       balance: 45,
     });
   });
+
+  it("full return nets sold (sold 40 returned 40 → sold 0, paid 0, balance 0)", () => {
+    const entries = [entry("SALE", 40, 0, 40), entry("RETURN", 0, 40, 0)];
+    expect(summarizeCreditLedger(entries)).toEqual({
+      sold: 0,
+      paid: 0,
+      balance: 0,
+    });
+  });
 });
 
 describe("invoice profit after return", () => {

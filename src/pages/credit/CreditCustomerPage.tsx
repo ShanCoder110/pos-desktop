@@ -32,6 +32,7 @@ import {
   type CreditCustomerEditValues,
 } from "@/pages/credit/CreditCustomerEditForm";
 import { summarizeCreditInvoices, summarizeCreditLedger } from "@/pages/credit/creditProfitUtils";
+import { paymentStatusTone } from "@/utils/paymentStatus";
 import { ensureSession } from "@/services/auth";
 import {
   adjustCustomerBalance,
@@ -65,7 +66,13 @@ import { Controller, useAppForm } from "@/hooks/useAppForm";
 import { assignApiError, fieldMessage } from "@/utils/form";
 
 function isCreditInvoice(row: InvoiceRow) {
-  return row.creditAmount > 0 || row.paymentStatus === "CREDIT" || row.paymentStatus === "PARTIAL";
+  return (
+    row.creditAmount > 0 ||
+    row.paymentStatus === "CREDIT" ||
+    row.paymentStatus === "PARTIAL" ||
+    row.paymentStatus === "RETURNED" ||
+    row.paymentStatus === "PARTIALLY_RETURNED"
+  );
 }
 
 function isSaleLedger(line: LedgerRow) {
@@ -78,10 +85,7 @@ function isSaleLedger(line: LedgerRow) {
 
 function isPaymentLedger(line: LedgerRow) {
   return (
-    line.type === "PAYMENT_RECEIVED" ||
-    line.type === "PAYMENT" ||
-    line.type === "PAYMENT_MADE" ||
-    line.credit > 0
+    line.type === "PAYMENT_RECEIVED" || line.type === "PAYMENT" || line.type === "PAYMENT_MADE"
   );
 }
 
@@ -372,7 +376,7 @@ export function CreditCustomerPage() {
         <KpiCard
           label={CREDIT_COPY.creditSold}
           value={money(ledgerSummary.sold)}
-          hint={`${creditInvoices.length} ${CREDIT_COPY.creditSoldHint}`}
+          hint={`${creditSaleLines.length} ${CREDIT_COPY.creditSoldHint}`}
           tone="warn"
         />
         <KpiCard
@@ -484,15 +488,7 @@ export function CreditCustomerPage() {
                         {money(inv.creditAmount)}
                       </Td>
                       <Td>
-                        <Badge
-                          tone={
-                            inv.paymentStatus === "PAID"
-                              ? "ok"
-                              : inv.paymentStatus === "PARTIAL"
-                                ? "info"
-                                : "warn"
-                          }
-                        >
+                        <Badge tone={paymentStatusTone(inv.paymentStatus)}>
                           {inv.paymentStatus}
                         </Badge>
                       </Td>

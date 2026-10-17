@@ -1088,13 +1088,28 @@ mod tests {
             .await
             .expect("invoice after full return");
         assert_eq!(after_full.credit_amount, 0.0);
-        let after_hold = MasterRepository::find(&database, MasterKind::Customer, cid)
+        assert_eq!(
+            after_full.payment_status, "RETURNED",
+            "full credit return must not stay PAID"
+        );
+        // Sold 40, returned 40 → net sold 0; nothing collected → paid 0; balance 0.
+        let full_totals = LedgerRepository::customer_credit_totals(&database, cid)
+            .await
+            .expect("full-return totals");
+        assert_eq!(full_totals.sold, Decimal::ZERO);
+        assert_eq!(full_totals.paid, Decimal::ZERO);
+        assert_eq!(full_totals.balance, Decimal::ZERO);
+        let after_cust = MasterRepository::find(&database, MasterKind::Customer, cid)
             .await
             .expect("cust")
-            .expect("row")
-            .profit_on_hold
-            .unwrap_or(-1.0);
-        assert_eq!(after_hold, 0.0, "full return clears profit on hold");
+            .expect("row");
+        assert_eq!(after_cust.profit_on_hold.unwrap_or(-1.0), 0.0);
+        assert_eq!(after_cust.credit_sale_total, Some(0.0));
+        assert_eq!(after_cust.collected_total, Some(0.0));
+        assert!(
+            after_cust.credit_sale_count.unwrap_or(0) >= 1,
+            "returned credit invoice still counts as a credit sale"
+        );
         assert_eq!(
             *ledger_balances(&database, &customer.id)
                 .await
@@ -1155,6 +1170,10 @@ mod tests {
                 .await
                 .expect("invoice after partial");
         assert_eq!(after_partial.credit_amount, 40.0);
+        assert_eq!(
+            after_partial.payment_status, "PARTIALLY_RETURNED",
+            "partial credit return keeps open credit with returned status"
+        );
         let hold_partial = MasterRepository::find(&database, MasterKind::Customer, cid)
             .await
             .expect("cust")

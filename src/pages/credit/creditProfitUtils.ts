@@ -1,6 +1,7 @@
 import type { InvoiceRow, LedgerRow } from "@/shared/domain/types";
 
-const PAID_LEDGER_TYPES = new Set(["PAYMENT_RECEIVED", "PAYMENT", "PAYMENT_MADE", "RETURN"]);
+/** Cash collected (or refunded). Returns are not paid — they net sold instead. */
+const PAID_LEDGER_TYPES = new Set(["PAYMENT_RECEIVED", "PAYMENT", "PAYMENT_MADE"]);
 
 /**
  * Calculates the total gross profit for an invoice across its line items.
@@ -10,7 +11,11 @@ export function calculateInvoiceGrossProfit(invoice: InvoiceRow): number {
   return invoice.items.reduce((sum, item) => sum + (item.grossProfit ?? 0), 0);
 }
 
-/** Ledger-backed sold / paid / balance. Revise ADJUSTMENTs net against SALE (no double count). */
+/**
+ * Ledger-backed sold / paid / balance.
+ * Sold nets SALE + revise ADJUSTMENT + RETURN (returns reduce sold).
+ * Paid is cash only so sold − paid = balance.
+ */
 export function summarizeCreditLedger(entries: LedgerRow[], balanceAfter?: number) {
   let sold = 0;
   let paid = 0;

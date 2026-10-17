@@ -20,8 +20,9 @@ import {
 import { InvoiceReturnPanel } from "@/pages/invoices/InvoiceReturnPanel";
 import { useSalesHub } from "@/pages/sales/SalesLayout";
 import type { TableExportColumn } from "@/utils/exportFile";
-import type { InvoiceRow, PaymentStatus } from "@/shared/domain/types";
+import type { InvoiceRow } from "@/shared/domain/types";
 import { money } from "@/utils/format";
+import { paymentStatusTone } from "@/utils/paymentStatus";
 import { listAllInvoices, voidInvoice } from "@/services/sales";
 import { isAbortError } from "@/utils/async";
 import { listAllBranches } from "@/services/org";
@@ -29,12 +30,6 @@ import { listMasterRecords } from "@/services/masters";
 import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 
 const PAGE = 10;
-
-function payTone(s: PaymentStatus) {
-  if (s === "PAID") return "ok" as const;
-  if (s === "PARTIAL") return "warn" as const;
-  return "danger" as const;
-}
 
 export function InvoicesPage() {
   const navigate = useNavigate();
@@ -113,8 +108,7 @@ export function InvoicesPage() {
     { label: "Branch", value: (row) => branchNames[row.branchId] ?? row.branchId },
     {
       label: "Customer",
-      value: (row) =>
-        row.customerId ? (customerNames[row.customerId] ?? "Customer") : "Walk-in",
+      value: (row) => (row.customerId ? (customerNames[row.customerId] ?? "Customer") : "Walk-in"),
     },
     { label: "Total", value: (row) => row.total },
     { label: "Paid", value: (row) => row.paidAmount },
@@ -174,14 +168,12 @@ export function InvoicesPage() {
               <Td>{row.invoiceNumber}</Td>
               <Td>{businessDayKey(row.createdAt) || row.createdAt}</Td>
               <Td>{branchNames[row.branchId] ?? row.branchId}</Td>
-              <Td>
-                {row.customerId ? (customerNames[row.customerId] ?? "Customer") : "Walk-in"}
-              </Td>
+              <Td>{row.customerId ? (customerNames[row.customerId] ?? "Customer") : "Walk-in"}</Td>
               <Td numeric>{money(row.total)}</Td>
               <Td numeric>{money(row.paidAmount)}</Td>
               <Td numeric>{money(row.creditAmount)}</Td>
               <Td>
-                <Badge tone={payTone(row.paymentStatus)}>{row.paymentStatus}</Badge>
+                <Badge tone={paymentStatusTone(row.paymentStatus)}>{row.paymentStatus}</Badge>
               </Td>
               <Td>
                 <Badge tone={row.status === "COMPLETED" ? "ok" : "danger"}>{row.status}</Badge>

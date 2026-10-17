@@ -28,7 +28,8 @@ import {
   rangeLabel,
 } from "@/shared/constants/reports";
 import { useQueryTab } from "@/hooks/useQueryTab";
-import type { DomainCustomer, ExpenseRow, InvoiceRow, PaymentStatus } from "@/shared/domain/types";
+import type { DomainCustomer, ExpenseRow, InvoiceRow } from "@/shared/domain/types";
+import { paymentStatusTone } from "@/utils/paymentStatus";
 import { useSettings } from "@/shared/settings";
 import { money } from "@/utils/format";
 import { exportReportPdf } from "@/utils/exportFile";
@@ -37,12 +38,6 @@ import { listCustomersWithBalances } from "@/services/credit";
 import { listAllExpenses, listExpenseCategories, reportsAnalytics } from "@/services/finance";
 import { listAllInvoices } from "@/services/sales";
 import { listAllStockMovementDetails, type StockMovementResponse } from "@/services/stock";
-
-function payTone(status: PaymentStatus) {
-  if (status === "PAID") return "ok" as const;
-  if (status === "PARTIAL") return "warn" as const;
-  return "danger" as const;
-}
 
 function inRange(iso: string, range: DateRangeFilter) {
   return dateInRange(iso, range);
@@ -388,7 +383,7 @@ export function AnalyticsPage() {
                     </span>
                   </Td>
                   <Td>
-                    <Badge tone={payTone(row.paymentStatus)}>{row.paymentStatus}</Badge>
+                    <Badge tone={paymentStatusTone(row.paymentStatus)}>{row.paymentStatus}</Badge>
                   </Td>
                   <Td numeric>{money(row.total)}</Td>
                   <Td numeric>{money(row.paidAmount)}</Td>

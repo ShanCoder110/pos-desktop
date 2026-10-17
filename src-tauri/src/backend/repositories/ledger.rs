@@ -33,11 +33,11 @@ const SUPPLIER_LATEST_SQL: &str = "SELECT CAST(balance_after AS REAL) AS balance
 const CUSTOMER_REPLAY_SQL: &str = "SELECT id, CAST(debit AS REAL) AS debit, CAST(credit AS REAL) AS credit, CAST(balance_after AS REAL) AS balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at ASC, created_at ASC, rowid ASC";
 const SUPPLIER_REPLAY_SQL: &str = "SELECT id, CAST(debit AS REAL) AS debit, CAST(credit AS REAL) AS credit, CAST(balance_after AS REAL) AS balance_after FROM supplier_ledger_entries WHERE supplier_id = ? ORDER BY occurred_at ASC, created_at ASC, rowid ASC";
 
-/// Sold on credit = net of non-payment ledger rows (SALE + revise ADJUSTMENT + opening, etc.).
-/// Revise adjustments cancel the prior SALE debit so totals are not double-counted.
-pub const CUSTOMER_SOLD_SQL: &str = "CAST(COALESCE((SELECT SUM(cle.debit - cle.credit) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type NOT IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE', 'RETURN')), 0) AS REAL)";
-/// Paid on credit = payments and returns (credits reduce what the customer owes).
-pub const CUSTOMER_PAID_SQL: &str = "CAST(COALESCE((SELECT SUM(cle.credit - cle.debit) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE', 'RETURN')), 0) AS REAL)";
+/// Sold on credit = net of sales/adjustments/returns (RETURN reduces sold; revise ADJUSTMENT nets).
+/// Excludes cash payments so sold − paid = ledger balance.
+pub const CUSTOMER_SOLD_SQL: &str = "CAST(COALESCE((SELECT SUM(cle.debit - cle.credit) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type NOT IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE')), 0) AS REAL)";
+/// Paid on credit = cash actually received (or refunded). Returns are not paid.
+pub const CUSTOMER_PAID_SQL: &str = "CAST(COALESCE((SELECT SUM(cle.credit - cle.debit) FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id AND cle.type IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE')), 0) AS REAL)";
 pub const CUSTOMER_BALANCE_SQL: &str = "CAST((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = customers.id ORDER BY cle.occurred_at DESC, cle.created_at DESC, cle.rowid DESC LIMIT 1) AS REAL)";
 pub const SUPPLIER_BALANCE_SQL: &str = "CAST((SELECT sle.balance_after FROM supplier_ledger_entries sle WHERE sle.supplier_id = suppliers.id ORDER BY sle.occurred_at DESC, sle.created_at DESC, sle.rowid DESC LIMIT 1) AS REAL)";
 
@@ -254,7 +254,7 @@ impl LedgerRepository {
     }
 
     /// Ledger-derived credit book totals for one customer. `sold - paid` equals `balance`
-    /// when every row is classified as sold-side or paid-side (no leftover types).
+    /// (sold already nets RETURN rows; paid is cash only).
     pub async fn customer_credit_totals(
         database: &impl ConnectionTrait,
         customer_id: Uuid,
@@ -269,8 +269,8 @@ impl LedgerRepository {
             DbBackend::Sqlite,
             "SELECT
                 CAST(COALESCE((SELECT balance_after FROM customer_ledger_entries WHERE customer_id = ? ORDER BY occurred_at DESC, created_at DESC, rowid DESC LIMIT 1), 0) AS REAL) AS balance,
-                CAST(COALESCE((SELECT SUM(debit - credit) FROM customer_ledger_entries WHERE customer_id = ? AND type NOT IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE', 'RETURN')), 0) AS REAL) AS sold,
-                CAST(COALESCE((SELECT SUM(credit - debit) FROM customer_ledger_entries WHERE customer_id = ? AND type IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE', 'RETURN')), 0) AS REAL) AS paid",
+                CAST(COALESCE((SELECT SUM(debit - credit) FROM customer_ledger_entries WHERE customer_id = ? AND type NOT IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE')), 0) AS REAL) AS sold,
+                CAST(COALESCE((SELECT SUM(credit - debit) FROM customer_ledger_entries WHERE customer_id = ? AND type IN ('PAYMENT_RECEIVED', 'PAYMENT', 'PAYMENT_MADE')), 0) AS REAL) AS paid",
             [customer_id.into(), customer_id.into(), customer_id.into()],
         ))
         .one(database)

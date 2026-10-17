@@ -45,7 +45,8 @@ export interface EmployeeLedgerEntry {
   notes: string;
 }
 export type BranchType = "STORE" | "WAREHOUSE" | "REPAIR" | "PRODUCTION";
-export type PaymentStatus = "PAID" | "PARTIAL" | "CREDIT";
+export type PaymentStatus =
+  "PAID" | "PARTIAL" | "CREDIT" | "UNPAID" | "RETURNED" | "PARTIALLY_RETURNED";
 export type InvoiceState = "COMPLETED" | "CANCELLED";
 export type ReturnType = "REFUND" | "REPLACEMENT";
 export type ItemCondition = "GOOD" | "DAMAGED" | "WARRANTY";

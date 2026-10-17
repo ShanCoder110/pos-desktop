@@ -10,7 +10,7 @@ use crate::backend::{
         ERROR_INVOICE_NOT_FOUND, ERROR_PRODUCT_NOT_FOUND, ERROR_RETURN_NOT_FOUND,
         LEDGER_PAYMENT_MADE, LEDGER_PAYMENT_RECEIVED, LEDGER_RETURN, LOT_SOURCE_RETURN,
         PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED,
-        PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID, PAYMENT_STATUS_PARTIAL, REFERENCE_RETURN,
+        PAYMENT_STATUS_PARTIALLY_RETURNED, PAYMENT_STATUS_RETURNED, REFERENCE_RETURN,
         STOCK_MOVEMENT_REPLACEMENT, STOCK_MOVEMENT_RETURN,
     },
     context::RequestContext,
@@ -923,26 +923,36 @@ impl CreditRepository {
         let refund = money_value(refund_total);
         let credit_before = money_value(invoice.credit_amount);
         let new_credit = money_value(credit_before - refund.min(credit_before));
-        let paid_amount = money_value(invoice.paid_amount);
-        let payment_status = if new_credit <= Decimal::ZERO {
-            PAYMENT_STATUS_PAID
-        } else if paid_amount > Decimal::ZERO {
-            PAYMENT_STATUS_PARTIAL
-        } else {
-            PAYMENT_STATUS_CREDIT
-        };
-        transaction
-            .execute_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "UPDATE invoices SET credit_amount = ?, payment_status = ?, updated_at = ? WHERE id = ?",
-                [
-                    new_credit.into(),
-                    payment_status.into(),
-                    now.into(),
-                    invoice_id.into(),
-                ],
-            ))
-            .await?;
+        // Only rewrite payment_status when this return touched open credit — cash-only
+        // invoices that never had credit keep their existing PAID/etc. status.
+        if credit_before > Decimal::ZERO {
+            let payment_status = if new_credit <= Decimal::ZERO {
+                PAYMENT_STATUS_RETURNED
+            } else {
+                PAYMENT_STATUS_PARTIALLY_RETURNED
+            };
+            transaction
+                .execute_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "UPDATE invoices SET credit_amount = ?, payment_status = ?, updated_at = ? WHERE id = ?",
+                    [
+                        new_credit.into(),
+                        payment_status.into(),
+                        now.into(),
+                        invoice_id.into(),
+                    ],
+                ))
+                .await?;
+        } else if refund > Decimal::ZERO {
+            // No open credit to clear; still bump updated_at for audit consistency.
+            transaction
+                .execute_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "UPDATE invoices SET updated_at = ? WHERE id = ?",
+                    [now.into(), invoice_id.into()],
+                ))
+                .await?;
+        }
 
         // Always post the full refund on the ledger when there is a named customer.
         // Prior tip uses stable rowid order (revise ADJUSTMENT+SALE share timestamps).
