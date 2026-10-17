@@ -215,7 +215,7 @@ describe("invoice profit after return", () => {
       creditAmount: 30,
       paidAmount: 0,
       status: "CANCELLED",
-      paymentStatus: "REFUNDED",
+      paymentStatus: "CREDIT",
     });
     expect(isOpenCreditInvoice(voided)).toBe(false);
     expect(calculateInvoiceProfitHold(voided)).toBe(0);
