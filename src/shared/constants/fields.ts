@@ -12,7 +12,7 @@ export const FIELD_LIMITS = {
   symbol: 32,
   currency: 16,
   prefix: 16,
-  sku: 64,
+  sku: 32,
   barcode: 128,
   phoneDigits: PK_MOBILE_LENGTH,
   phoneDisplay: 12,

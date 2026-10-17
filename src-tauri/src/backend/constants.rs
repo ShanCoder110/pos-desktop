@@ -191,6 +191,12 @@ pub const CODE_USER_EMAIL_DUPLICATE: &str = "USER_EMAIL_DUPLICATE";
 pub const CODE_USERNAME_DUPLICATE: &str = "USERNAME_DUPLICATE";
 pub const ERROR_INVALID_ID: &str = "The supplied identifier is invalid.";
 pub const ERROR_PRODUCT_NOT_FOUND: &str = "Product not found.";
+/// Custom SKU: max 32; letters, digits, hyphen, underscore, dot, slash.
+pub const ERROR_SKU_INVALID: &str =
+    "SKU must be 1–32 characters: letters, digits, '-', '_', '.', '/'.";
+pub const ERROR_SKU_DUPLICATE: &str = "That SKU is already in use.";
+pub const ERROR_SKU_EDIT_DENIED: &str = "Only owners and managers can change the SKU.";
+pub const SKU_MAX_LEN: usize = 32;
 pub const ERROR_CATEGORY_NOT_FOUND: &str = "Category not found.";
 pub const ERROR_CITY_NOT_FOUND: &str = "City not found.";
 pub const ERROR_UNIT_NOT_FOUND: &str = "Unit not found.";

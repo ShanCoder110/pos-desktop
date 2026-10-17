@@ -75,7 +75,8 @@ pub struct CreateProductRequest {
     pub base_unit_id: String,
     #[serde(default)]
     pub created_by: Option<String>,
-    #[validate(length(max = 64))]
+    /// Optional custom SKU. Blank → auto P-####. Max 32; letters, digits, `-_./`.
+    #[validate(length(max = 32))]
     pub sku: Option<String>,
     #[validate(length(max = 128))]
     pub barcode: Option<String>,
@@ -109,6 +110,11 @@ pub struct UpdateProductRequest {
     #[validate(length(min = 1, max = 160))]
     pub name: Option<String>,
     pub category_id: Option<String>,
+    /// When present, owner/manager may change SKU (same rules as create). Cashiers get 403.
+    /// Omit the field to leave SKU unchanged — other edits must never rewrite it.
+    #[serde(default)]
+    #[validate(length(max = 32))]
+    pub sku: Option<String>,
     #[validate(custom(function = "non_negative_optional_decimal"))]
     pub minimum_stock: Option<Decimal>,
     pub warranty_qty: Option<i32>,

@@ -23,6 +23,7 @@ mod m20261017_000020_stock_count_reconcile;
 mod m20261017_000021_restore_customer_credit_limit;
 mod m20261017_000022_drop_customer_credit_limit;
 mod m20261017_000023_uuid_text_to_blob;
+mod m20261017_000024_products_sku_lower_unique;
 
 pub struct Migrator;
 
@@ -53,6 +54,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261017_000021_restore_customer_credit_limit::Migration),
             Box::new(m20261017_000022_drop_customer_credit_limit::Migration),
             Box::new(m20261017_000023_uuid_text_to_blob::Migration),
+            Box::new(m20261017_000024_products_sku_lower_unique::Migration),
         ]
     }
 }

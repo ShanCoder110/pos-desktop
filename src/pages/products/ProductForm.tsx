@@ -89,9 +89,21 @@ function numStr(n: number) {
   return String(n);
 }
 
+const SKU_PATTERN = /^[A-Za-z0-9._/-]+$/;
+
+function validateSkuValue(raw: string): string | null {
+  const sku = raw.trim();
+  if (!sku) return null; // blank → auto on create; keep existing on edit
+  if (sku.length > FIELD_LIMITS.sku || !SKU_PATTERN.test(sku)) {
+    return "SKU must be 1–32 characters: letters, digits, - _ . /";
+  }
+  return null;
+}
+
 function validationToastMessage(field: string): string {
   const messages: Record<string, string> = {
     name: "Name is required",
+    sku: "Enter a valid unique SKU",
     unit: PRODUCT_COPY.unitRequired,
     openingQty: PRODUCT_COPY.openingQtyRequired,
     cost: PRODUCT_COPY.unitPriceRequired,
@@ -173,13 +185,15 @@ export function ProductForm({
   product: Product;
   catalog: Product[];
   onChange: (next: Product) => void;
-  onCommit: (next: Product) => boolean | Promise<boolean>;
+  /** `true` saved; `false` failed (toast already shown); string = inline SKU error. */
+  onCommit: (next: Product) => boolean | string | Promise<boolean | string>;
   onClose: () => void;
   saving?: boolean;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [section, setSection] = useState<ProductFormSection>("details");
   const [error, setError] = useState<string | null>(null);
+  const [skuFieldError, setSkuFieldError] = useState<string | null>(null);
   const [showValidation, setShowValidation] = useState(false);
   const [flash, setFlash] = useState(false);
   const [containsDrafts, setContainsDrafts] = useState<Record<string, string>>({});
@@ -743,6 +757,19 @@ export function ProductForm({
 
   function validate(): string | null {
     if (!product.name.trim()) return "name";
+    const skuMsg = validateSkuValue(product.sku ?? "");
+    if (skuMsg) {
+      setSkuFieldError(skuMsg);
+      return "sku";
+    }
+    const needle = product.sku.trim().toLowerCase();
+    if (
+      needle &&
+      catalog.some((row) => row.id !== product.id && row.sku.trim().toLowerCase() === needle)
+    ) {
+      setSkuFieldError("That SKU is already in use.");
+      return "sku";
+    }
     if (!(base?.symbol || product.unit)) return "unit";
     // Opening stock may be zero (receive later via lots). Reject negatives only.
     if (isNew) {
@@ -777,6 +804,7 @@ export function ProductForm({
       setError(field);
       const jump: Record<string, ProductFormSection> = {
         name: "details",
+        sku: "details",
         unit: "details",
         openingQty: "details",
         cost: "details",
@@ -869,8 +897,18 @@ export function ProductForm({
         ? product.components.filter((c) => c.productId && c.quantity > 0)
         : [],
     };
-    const ok = await Promise.resolve(onCommit(next));
-    if (!ok) return;
+    const result = await Promise.resolve(onCommit(next));
+    if (result === false) return;
+    if (typeof result === "string") {
+      setError("sku");
+      setSkuFieldError(result);
+      setSection("details");
+      toaster.error(result);
+      requestAnimationFrame(() => {
+        if (rootRef.current) focusField(rootRef.current, "sku");
+      });
+      return;
+    }
     if (!isNew) {
       setLots((prev) => [...prev.filter((l) => l.productId !== product.id), ...lotDraft]);
     }
@@ -1071,6 +1109,28 @@ export function ProductForm({
                 placeholder="e.g. 1.5mm copper wire"
                 value={product.name}
                 onChange={(e) => patch({ name: e.target.value })}
+              />
+            </Field>
+            <Field
+              label="SKU"
+              hint={
+                isNew ? "Optional. Leave blank to auto-assign P-####." : "Owner/manager can edit."
+              }
+              error={
+                error === "sku"
+                  ? skuFieldError || "Enter a valid unique SKU (letters, digits, - _ . /)."
+                  : undefined
+              }
+            >
+              <TextInput
+                data-field="sku"
+                maxLength={FIELD_LIMITS.sku}
+                placeholder={isNew ? "e.g. PMX-002" : product.sku || "SKU"}
+                value={product.sku}
+                onChange={(e) => {
+                  setSkuFieldError(null);
+                  patch({ sku: e.target.value });
+                }}
               />
             </Field>
             <Field label="Category" hint="Uses Other when left empty.">

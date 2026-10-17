@@ -198,6 +198,35 @@ impl ProductRepository {
             .await?)
     }
 
+    /// Case-insensitive SKU collision check (active products only).
+    pub async fn sku_taken<C: ConnectionTrait>(
+        database: &C,
+        sku: &str,
+        exclude_id: Option<Uuid>,
+    ) -> Result<bool, AppError> {
+        let sql = if exclude_id.is_some() {
+            "SELECT COUNT(*) AS count FROM products
+             WHERE deleted_at IS NULL AND lower(sku) = lower(?) AND id != ?"
+        } else {
+            "SELECT COUNT(*) AS count FROM products
+             WHERE deleted_at IS NULL AND lower(sku) = lower(?)"
+        };
+        let mut values: Vec<sea_orm::Value> = vec![sku.into()];
+        if let Some(id) = exclude_id {
+            values.push(id.into());
+        }
+        let count = CountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            sql,
+            values,
+        ))
+        .one(database)
+        .await?
+        .map(|row| row.count)
+        .unwrap_or(0);
+        Ok(count > 0)
+    }
+
     pub async fn soft_delete(database: &DatabaseConnection, id: Uuid) -> Result<bool, AppError> {
         let Some(model) = Self::model(database, id).await? else {
             return Ok(false);

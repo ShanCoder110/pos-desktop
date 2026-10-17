@@ -59,8 +59,8 @@ function mapSellUnits(product: Product, units: UnitRow[]) {
       contains: isInventory ? 1 : conversionFactor(unit),
       factorDirection: isInventory
         ? "multiply"
-        : unit.factorDirection ??
-          (isSubdivisionSymbol(unit.symbol) && conversionFactor(unit) > 1 ? "divide" : "multiply"),
+        : (unit.factorDirection ??
+          (isSubdivisionSymbol(unit.symbol) && conversionFactor(unit) > 1 ? "divide" : "multiply")),
       cost: unit.cost,
       min: unit.min,
       wholesale: unit.wholesale,
@@ -97,6 +97,8 @@ export function buildCreateProductPayload(
     sellUnits: mapped.sellUnits,
   };
 
+  const sku = product.sku?.trim();
+  if (sku) payload.sku = sku;
   if (product.barcode?.trim()) payload.barcode = product.barcode.trim();
   if (product.warrantyEnabled && product.warrantyQty > 0) {
     payload.warrantyQty = product.warrantyQty;
@@ -147,7 +149,7 @@ export function buildUpdateProductPayload(
   const mapped = mapSellUnits(product, options.units);
   if (!mapped) return null;
 
-  return {
+  const payload: Record<string, unknown> = {
     name: product.name.trim(),
     categoryId: options.categoryId,
     minimumStock: product.minimumStock ?? 0,
@@ -156,4 +158,7 @@ export function buildUpdateProductPayload(
     warrantyNote: product.warrantyNote?.trim() || undefined,
     sellUnits: mapped.sellUnits,
   };
+  // Always send sku on update so owner/manager can change it; cashiers get 403 from API.
+  payload.sku = product.sku?.trim() ?? "";
+  return payload;
 }

@@ -23,7 +23,7 @@ Frontend hold/realized: `src/pages/credit/creditProfitUtils.ts`
 | F7 Shrinkage is loss ≠ COGS | 40 | `f7_shrinkage_*` | **PASS** | — |
 | Hold + realized = remaining gross | 100 | `hold_plus_realized_*` | **PASS** | — |
 | Fixture scenario totals | see §3 | `fixture_scenario_expected_totals` | **PASS** | — |
-| **Bill discount → stored line GP** (integration) | A 100, B 95 (cost 8), sum **195** (not 230) | `bill_discount_allocates_into_line_gross_profit` | **PASS** (was FAIL before fix) | this commit |
+| **Bill discount → stored line GP** (integration) | A 100, B 95 (cost 8), sum **195** (not 230) | `bill_discount_allocates_into_line_gross_profit` | **PASS** (was FAIL before fix) | `37668fd` |
 
 **Bug proven & fixed:** `sales.rs` / `sales_revise.rs` computed `gross_profit = line_total − fifo_cost` and ignored invoice `discount`. Invoice total correctly subtracts bill discount, so Σ line GP overstated. Fix: `accounting::line_gross_profit` with proportional bill share. Lot `sold_profit` now allocates from `invoice_items.gross_profit` (same shared GP) instead of revenue−cogs.
 

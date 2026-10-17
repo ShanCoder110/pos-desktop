@@ -308,7 +308,7 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ux_products_sku ON products(sku) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_products_sku_lower ON products(lower(sku)) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS ux_products_barcode ON products(barcode) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS ix_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS ix_products_category ON products(category_id);

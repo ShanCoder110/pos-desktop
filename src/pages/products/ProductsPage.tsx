@@ -626,7 +626,7 @@ export function ProductsPage() {
     setPage(1);
   }
 
-  async function commit(next: Product): Promise<boolean> {
+  async function commit(next: Product): Promise<boolean | string> {
     const isNewRow = !rows.some((r) => r.id === next.id);
     if (!units.some((row) => row.symbol === next.unit)) {
       toaster.error(PRODUCT_COPY.unitRequired);
@@ -671,12 +671,15 @@ export function ProductsPage() {
         const updated = await updateProduct(next.id, payload);
         next.categoryId = updated.categoryId;
         next.category = updated.category;
+        next.sku = updated.sku;
         setLots((prev) => [...prev.filter((lot) => lot.productId !== next.id)]);
       }
       await refreshHub();
       return true;
     } catch (error) {
-      toaster.error(shortError(error, PRODUCT_COPY.saveFailed));
+      const message = shortError(error, PRODUCT_COPY.saveFailed);
+      if (/sku/i.test(message)) return message;
+      toaster.error(message);
       return false;
     } finally {
       setProductLoading((current) => ({ ...current, saving: false }));
