@@ -33,6 +33,7 @@ import { routes } from "@/shared/constants/routes";
 import { MIN_PRODUCT_SEARCH_LENGTH } from "@/shared/constants/api";
 import type { Customer, HeldBill, InvoiceLine, Product, ProductSellUnit } from "@/shared/types";
 import { moneyNum } from "@/utils/format";
+import { errorToastMessage } from "@/utils/toastErrors";
 import {
   posStockLabel,
   productBranchStock,
@@ -443,8 +444,15 @@ export function PosWorkspace() {
         })),
       );
     })()
-      .catch((error) => showToast(error instanceof Error ? error.message : "Could not load POS"))
-      .finally(() => setLoading((current) => ({ ...current, page: false })));
+      .catch((error) => {
+        const message = errorToastMessage(error, "Could not load POS");
+        if (message) showToast(message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading((current) => ({ ...current, page: false }));
+        }
+      });
     return () => controller.abort();
   }, []);
 
@@ -457,6 +465,7 @@ export function PosWorkspace() {
     const controller = new AbortController();
     getInvoice(editInvoiceId, controller.signal)
       .then((invoice) => {
+        if (controller.signal.aborted) return;
         if (invoice.status !== "COMPLETED") {
           showToast("Only completed invoices can be edited in POS");
           setSearchParams({});
@@ -469,7 +478,10 @@ export function PosWorkspace() {
         setDiscMode("rs");
         setNote(invoice.notes ?? "");
       })
-      .catch(() => showToast("Could not load invoice for edit"));
+      .catch((error) => {
+        const message = errorToastMessage(error, "Could not load invoice for edit");
+        if (message) showToast(message);
+      });
     return () => controller.abort();
   }, [editInvoiceId, setSearchParams]);
 
@@ -1405,7 +1417,8 @@ export function PosWorkspace() {
       );
       newBill(true);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not complete sale");
+      const message = errorToastMessage(error, "Could not complete sale");
+      if (message) showToast(message);
     } finally {
       setLoading((current) => ({ ...current, sale: false }));
     }

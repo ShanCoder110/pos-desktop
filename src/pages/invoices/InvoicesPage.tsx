@@ -25,6 +25,7 @@ import { money } from "@/utils/format";
 import { paymentStatusTone } from "@/utils/paymentStatus";
 import { listAllInvoices, voidInvoice } from "@/services/sales";
 import { isAbortError } from "@/utils/async";
+import { canOpenInvoicePosEdit, invoicePosEditSearch } from "@/utils/invoicePosEdit";
 import { listAllBranches } from "@/services/org";
 import { listMasterRecords } from "@/services/masters";
 import { MAX_PAGE_SIZE } from "@/shared/constants/config";
@@ -101,6 +102,11 @@ export function InvoicesPage() {
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const shown = filtered.slice((page - 1) * PAGE, page * PAGE);
+
+  function openInvoiceInPos(invoiceId: string) {
+    setOpen(null);
+    navigate({ pathname: routes.pos, search: invoicePosEditSearch(invoiceId) });
+  }
 
   const exportColumns: TableExportColumn<InvoiceRow>[] = [
     { label: "Number", value: (row) => row.invoiceNumber },
@@ -179,9 +185,20 @@ export function InvoicesPage() {
                 <Badge tone={row.status === "COMPLETED" ? "ok" : "danger"}>{row.status}</Badge>
               </Td>
               <Td>
-                <Button variant="ghost" icon={<Eye size={14} />} onClick={() => setOpen(row)}>
-                  View
-                </Button>
+                <div className="flex flex-wrap items-center justify-end gap-1">
+                  <Button variant="ghost" icon={<Eye size={14} />} onClick={() => setOpen(row)}>
+                    View
+                  </Button>
+                  {canOpenInvoicePosEdit(row) ? (
+                    <Button
+                      variant="ghost"
+                      icon={<Pencil size={14} />}
+                      onClick={() => openInvoiceInPos(row.id)}
+                    >
+                      Edit
+                    </Button>
+                  ) : null}
+                </div>
               </Td>
             </tr>
           ))}
@@ -194,7 +211,7 @@ export function InvoicesPage() {
         onClose={() => setOpen(null)}
         footer={
           <div className="flex w-full flex-wrap justify-end gap-2">
-            {open?.status === "COMPLETED" ? (
+            {open && canOpenInvoicePosEdit(open) ? (
               <Button
                 variant="outline"
                 onClick={() => {
@@ -213,17 +230,13 @@ export function InvoicesPage() {
                 Void
               </Button>
             ) : null}
-            {open?.status === "COMPLETED" ? (
+            {open && canOpenInvoicePosEdit(open) ? (
               <Button
                 variant="outline"
                 icon={<Pencil size={14} />}
-                onClick={() => {
-                  const id = open.id;
-                  setOpen(null);
-                  navigate(`${routes.pos}?edit=${encodeURIComponent(id)}`);
-                }}
+                onClick={() => openInvoiceInPos(open.id)}
               >
-                Edit in POS
+                Edit
               </Button>
             ) : null}
             <Button onClick={() => setOpen(null)}>Close</Button>
@@ -260,7 +273,7 @@ export function InvoicesPage() {
             </tbody>
           </Table>
         ) : null}
-        {open?.status === "COMPLETED" ? (
+        {open && canOpenInvoicePosEdit(open) ? (
           <InvoiceReturnPanel invoice={open} onSuccess={() => refreshHub()} />
         ) : null}
       </Drawer>

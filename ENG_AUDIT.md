@@ -19,6 +19,7 @@ Phased rollout — tooling scaffolded; full retrofit is follow-up. This lists cu
 | Reconcile `product.stock` = Σ branch_lots = Σ lot remaining (+ migration repair) | ✅ |
 | Migration 000019 invoices rebuild: single-connection FK off + foreign_key_check | ✅ Step 12 |
 | Lot allocation mismatch names sum X vs remaining Y (+ Stock count hint) | ✅ Step 13 |
+| Invoices Edit → `/pos?edit=<id>` (list + detail); AbortError not toasted on POS edit load/save | ✅ Step 14 |
 
 ## UI agent-mistakes audit (2026-09-19)
 
