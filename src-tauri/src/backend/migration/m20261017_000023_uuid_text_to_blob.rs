@@ -58,23 +58,24 @@ async fn convert_uuid_columns(conn: &impl ConnectionTrait) -> Result<(), DbErr> 
         ));
     }
 
+    // Snapshot pre-existing orphans so we only fail on NEW violations introduced
+    // by conversion (QA DBs may already have agent/test orphan FKs).
+    let before_violations = fk_violation_keys(conn).await?;
+
     conn.execute_unprepared("BEGIN IMMEDIATE").await?;
 
     let result = convert_all_tables(conn).await;
     match result {
         Ok(()) => {
-            let violations = conn
-                .query_all_raw(Statement::from_string(
-                    DbBackend::Sqlite,
-                    "PRAGMA foreign_key_check".to_owned(),
-                ))
-                .await?;
-            if !violations.is_empty() {
+            let after_violations = fk_violation_keys(conn).await?;
+            let introduced: Vec<&String> =
+                after_violations.difference(&before_violations).collect();
+            if !introduced.is_empty() {
                 let _ = conn.execute_unprepared("ROLLBACK").await;
                 conn.execute_unprepared("PRAGMA foreign_keys = ON").await?;
                 return Err(DbErr::Custom(format!(
-                    "foreign_key_check failed after UUID blob conversion ({} violation(s))",
-                    violations.len()
+                    "foreign_key_check introduced {} new violation(s) after UUID blob conversion",
+                    introduced.len()
                 )));
             }
             conn.execute_unprepared("COMMIT").await?;
@@ -87,6 +88,39 @@ async fn convert_uuid_columns(conn: &impl ConnectionTrait) -> Result<(), DbErr> 
             Err(err)
         }
     }
+}
+
+async fn fk_violation_keys(
+    conn: &impl ConnectionTrait,
+) -> Result<std::collections::HashSet<String>, DbErr> {
+    let rows = conn
+        .query_all_raw(Statement::from_string(
+            DbBackend::Sqlite,
+            "PRAGMA foreign_key_check".to_owned(),
+        ))
+        .await?;
+    let mut keys = std::collections::HashSet::new();
+    for row in rows {
+        // table, rowid, parent, fkid
+        let table: String = row
+            .try_get_by_index(0)
+            .or_else(|_| row.try_get("", "table"))
+            .unwrap_or_default();
+        let rowid: i64 = row
+            .try_get_by_index(1)
+            .or_else(|_| row.try_get("", "rowid"))
+            .unwrap_or(0);
+        let parent: String = row
+            .try_get_by_index(2)
+            .or_else(|_| row.try_get("", "parent"))
+            .unwrap_or_default();
+        let fkid: i64 = row
+            .try_get_by_index(3)
+            .or_else(|_| row.try_get("", "fkid"))
+            .unwrap_or(0);
+        keys.insert(format!("{table}|{rowid}|{parent}|{fkid}"));
+    }
+    Ok(keys)
 }
 
 async fn convert_all_tables(conn: &impl ConnectionTrait) -> Result<(), DbErr> {
