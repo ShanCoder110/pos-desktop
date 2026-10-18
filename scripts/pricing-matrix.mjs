@@ -2,7 +2,7 @@
 /**
  * Pricing matrix via API (backend must be running). Records expected vs actual per case.
  */
-const API = process.env.API_URL || "http://127.0.0.1:38472/api/v1";
+const API = process.env.API_URL || "http://127.0.0.1:38580/api/v1";
 const DEVICE = "20000000-0000-4000-8000-000000000003";
 
 const results = [];

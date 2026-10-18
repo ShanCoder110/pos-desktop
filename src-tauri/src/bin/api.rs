@@ -3,11 +3,12 @@
 
 use std::process::ExitCode;
 
-use tauri_app_lib::backend::{config::Config, server};
+use tauri_app_lib::backend::{config::Config, logging, server};
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let config = match Config::load() {
+    // Loopback binary always defaults to the Vite port (even for `cargo run --release --bin api`).
+    let config = match Config::load_loopback() {
         Ok(config) => config,
         Err(error) => {
             eprintln!("config error: {error}");
@@ -15,22 +16,24 @@ async fn main() -> ExitCode {
         }
     };
 
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        tracing_subscriber::EnvFilter::new(format!("{},tower_http=info", config.log_level.trim()))
-    });
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(true)
-        .try_init()
-        .ok();
+    let log_dir = logging::loopback_log_dir();
+    let _log_guard = match logging::init(&config.log_level, &log_dir) {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!("logging init failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let db_path = config.database_path.clone();
-    tracing::info!(path = %db_path.display(), "API sqlite");
-    match server::start_at(db_path).await {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            tracing::error!(%error, "backend failed");
-            ExitCode::FAILURE
-        }
-    }
+    tracing::info!(
+        path = %db_path.display(),
+        port = config.api_port,
+        log_dir = %log_dir.display(),
+        "API sqlite (supervised)"
+    );
+
+    // Never exit while the shop needs the API — restart on crash / bind races.
+    server::run_supervised_at(db_path).await;
+    ExitCode::SUCCESS
 }

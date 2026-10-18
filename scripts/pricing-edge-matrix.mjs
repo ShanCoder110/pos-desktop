@@ -9,7 +9,7 @@ function profitMarginPercent(sell, cost) {
   return ((sell - cost) / sell) * 100;
 }
 
-const API = process.env.API_URL || "http://127.0.0.1:38472/api/v1";
+const API = process.env.API_URL || "http://127.0.0.1:38580/api/v1";
 const DEVICE = "20000000-0000-4000-8000-000000000003";
 const FIXTURE_PATH = new URL("./.pricing-fixture.json", import.meta.url);
 const OUT_JSON = "/opt/cursor/artifacts/pricing-edge-matrix.json";

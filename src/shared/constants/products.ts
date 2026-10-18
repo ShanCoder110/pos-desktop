@@ -6,7 +6,6 @@ export const PRODUCT_TAB_ALL = "all";
 export const PRODUCT_SECTION_TABS = [
   { id: PRODUCT_TAB_ALL, label: "All products" },
   { id: "lots", label: "Lots" },
-  { id: "stock-count", label: "Stock count" },
   { id: "units", label: "Units" },
   { id: "categories", label: "Categories" },
   { id: "transfers", label: "Transfers" },
@@ -14,7 +13,7 @@ export const PRODUCT_SECTION_TABS = [
   { id: "low", label: "Low stock" },
 ] as const;
 
-/** Owners/managers only — cashiers must not see the Stock count tab. */
+/** @deprecated Stock count tab removed — adjust Qty left on Edit product / Edit lot. */
 export const STOCK_COUNT_ROLES = new Set(["OWNER", "MANAGER"]);
 
 export const STOCK_COUNT_COPY = {
@@ -35,19 +34,19 @@ export const STOCK_COUNT_COPY = {
   countedNegative: "Counted quantity cannot be negative",
   countedTooLarge: "Counted quantity cannot exceed 1,000,000 base units",
   save: "Save count",
-  saved: "Stock count saved",
-  saveFailed: "Could not save stock count",
+  saved: "Stock adjusted",
+  saveFailed: "Could not adjust stock",
   history: "Adjustment history",
   historyEmpty: "No stock adjustments yet",
   supplierAdjust: "Adjust supplier payable",
   supplierAdjustHint: "Optional — posts a supplier ledger adjustment",
   supplier: "Supplier",
   supplierAmount: "Amount",
-  denied: "Only owners and managers can count stock",
+  denied: "Only owners and managers can adjust stock",
   pickProduct: "Choose a product",
   pickBranch: "Choose a branch",
   pickUnit: "Choose a unit",
-  leftLockedHint: "Use Stock count to change quantity",
+  leftLockedHint: "Received qty is fixed. Change Qty left on the product or lot to adjust stock.",
   loadFailed: "Could not load stock movements",
   retry: "Retry",
 } as const;

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Browser pricing UI cases (Vite :1420, API :38472).
+ * Browser pricing UI cases (Vite :1430, API :38580).
  */
 import { chromium } from "playwright";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-const BASE = process.env.APP_URL || "http://127.0.0.1:1420";
-const API = process.env.API_URL || "http://127.0.0.1:38472/api/v1";
+const BASE = process.env.APP_URL || "http://127.0.0.1:1430";
+const API = process.env.API_URL || "http://127.0.0.1:38580/api/v1";
 const DEVICE = "20000000-0000-4000-8000-000000000003";
 const SHOTS = "/opt/cursor/artifacts/screenshots";
 const rows = [];

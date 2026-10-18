@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { AppUpdateStatus, type AppUpdateViewState } from "@/components/common/AppUpdateStatus";
-import { toaster } from "@/components/common/Toast";
 import { installAvailableDesktopUpdate } from "@/services/appUpdater";
 
 let updateCheckStarted = false;
 
-/** Startup-only updater. Windows exits and restarts through the passive installer after download. */
+/**
+ * Startup-only updater. Silent when already current.
+ * Shows UI only when an update is found, then downloads/installs and relaunches.
+ */
 export function AppUpdateAgent() {
   const [state, setState] = useState<AppUpdateViewState | null>(null);
 
@@ -14,13 +16,12 @@ export function AppUpdateAgent() {
       if (updateCheckStarted) return;
       updateCheckStarted = true;
       void installAvailableDesktopUpdate((progress) => {
+        // Never surface "checking" / "up to date" — those fire on every open.
+        if (progress.phase === "checking" || progress.phase === "current") return;
         setState(progress);
-        if (progress.phase === "current") window.setTimeout(() => setState(null), 2_500);
       }).catch((error) => {
         console.error("Automatic update failed", error);
-        setState({ phase: "error", message: "Dukan will try again the next time it starts." });
-        toaster.warn("Could not check for updates. Dukan will try again next time.");
-        window.setTimeout(() => setState(null), 7_000);
+        // Silent on open — retry next launch; no toast for check failures.
       });
     }, 2_000);
 

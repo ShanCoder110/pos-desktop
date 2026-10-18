@@ -1,5 +1,6 @@
 export const API_BASE_URL = String(
-  import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:38472/api/v1",
+  import.meta.env.VITE_API_BASE_URL ??
+    (import.meta.env.PROD ? "http://127.0.0.1:38581/api/v1" : "http://127.0.0.1:38580/api/v1"),
 ).replace(/\/$/, "");
 
 export const API_ROUTES = {

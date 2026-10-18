@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use axum::{
     http::{HeaderValue, Method, StatusCode},
@@ -12,7 +13,7 @@ use tower_http::{
     cors::{AllowOrigin, Any, CorsLayer},
     trace::TraceLayer,
 };
-use tracing::info;
+use tracing::{error, info, warn};
 
 use super::{
     config::Config,
@@ -53,6 +54,61 @@ pub async fn start(app: AppHandle) -> Result<(), AppError> {
 
 pub async fn start_at(path: PathBuf) -> Result<(), AppError> {
     serve(db::connect_path(path).await?).await
+}
+
+/// Keep the API up: on crash or clean exit, wait and restart (bind / migrate / serve).
+pub async fn run_supervised(app: AppHandle) {
+    let mut attempt: u32 = 0;
+    loop {
+        attempt = attempt.saturating_add(1);
+        match start(app.clone()).await {
+            Ok(()) => {
+                warn!(
+                    target: LOG_TARGET,
+                    attempt,
+                    "backend API stopped; restarting"
+                );
+            }
+            Err(error) => {
+                error!(
+                    target: LOG_TARGET,
+                    %error,
+                    attempt,
+                    "backend API failed; restarting"
+                );
+            }
+        }
+        let delay_secs = u64::from(attempt.min(10));
+        tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+    }
+}
+
+/// Same as [`run_supervised`] for the Vite loopback binary (`./data` SQLite).
+pub async fn run_supervised_at(path: PathBuf) {
+    let mut attempt: u32 = 0;
+    loop {
+        attempt = attempt.saturating_add(1);
+        match start_at(path.clone()).await {
+            Ok(()) => {
+                warn!(
+                    target: LOG_TARGET,
+                    attempt,
+                    "backend API stopped; restarting"
+                );
+            }
+            Err(error) => {
+                error!(
+                    target: LOG_TARGET,
+                    %error,
+                    attempt,
+                    path = %path.display(),
+                    "backend API failed; restarting"
+                );
+            }
+        }
+        let delay_secs = u64::from(attempt.min(10));
+        tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+    }
 }
 
 async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
@@ -326,9 +382,21 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
                 .allow_headers(Any),
         )
         .layer(TraceLayer::new_for_http());
-    let listener = tokio::net::TcpListener::bind((host.as_str(), port))
-        .await
-        .map_err(AppError::internal)?;
+    let listener = match tokio::net::TcpListener::bind((host.as_str(), port)).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            error!(
+                target: LOG_TARGET,
+                host = %host,
+                port,
+                %error,
+                "failed to bind API port — another process may be using it"
+            );
+            return Err(AppError::internal(format!(
+                "bind {host}:{port} failed: {error}"
+            )));
+        }
+    };
     info!(target: LOG_TARGET, host = %host, port, "backend API listening");
     axum::serve(listener, router)
         .await

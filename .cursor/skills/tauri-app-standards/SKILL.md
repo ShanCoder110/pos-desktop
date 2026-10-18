@@ -32,12 +32,12 @@ This app is Tauri 2 + Vite React 19 + Axum REST (not `#[tauri::command]` IPC for
 | `src/lib/utils/` | `src/utils/` |
 | `src/constants/` | `src/shared/constants/` |
 | `src/styles/` | `src/index.css` + `src/shared/constants/theme.ts` |
-| `#[tauri::command]` | Axum `handlers/` at `http://127.0.0.1:38472/api/v1` |
+| `#[tauri::command]` | Axum `handlers/` — Vite/dev `:38580`, packaged Dukan `:38581` |
 | `src-tauri/src/db/models` | `src-tauri/src/backend/entities/` |
 | `src-tauri/src/db/queries` | `src-tauri/src/backend/repositories/` |
 | `src-tauri/src/db/migrations` | `src-tauri/src/backend/migration/` |
 
-Local run: `npm run dev` is Vite only (`http://localhost:1420`). Start the API in another terminal with `npm run backend` (Cargo from `~/.cargo/bin`). `npm run tauri dev` starts the API inside the desktop app (app-data SQLite). **No seed owner** — first launch goes through onboarding (`/setup`); login uses the owner email + password from that flow.
+Local run: `npm run dev` starts Vite (`:1430`) + loopback API (`:38580`, `./data/dukan-pos.sqlite3`). Packaged Dukan uses `:38581` and the OS app-data DB so installing the app does not block `npm run backend`. `npm run tauri dev` runs Vite via `beforeDevCommand` and starts the in-app API (debug still `:38580`). **No seed owner** — first launch goes through onboarding (`/setup`); login uses the owner email + password from that flow.
 
 Do **not** restyle cashier POS (`src/pages/pos/PosPage.tsx`) or the catalog look of `LotForm` / `ProductForm`. Drawers use `src/components/common/Drawer.tsx` with constrained sizes (`sm`/`md`/`lg`/`xl`), not full-width panels.
 
@@ -324,7 +324,7 @@ After implementing any feature, explicitly verify (state this out loud / walk th
 - [ ] Backend: if schema changed, a new migration was added (old ones untouched)
 - [ ] Backend/Frontend: any field removed/renamed on one side is removed/renamed on the other side (entity, query, DTO, TS types, constants)
 - [ ] Endpoint count wasn't needlessly increased — combined calls where reasonable
-- [ ] UI changes verified in the browser (or Vite at `:1420` with API on `:38472`) — not screenshot-only
+- [ ] UI changes verified in the browser (or Vite at `:1430` with API on `:38580`) — not screenshot-only
 - [ ] Did not restyle `PosPage` / `LotForm` / `ProductForm` catalog chrome unless the user asked
 - [ ] Re-grepped the old field/name across the repo; no leftovers
 - [ ] `docs/FLOWS.md` + `docs/STATUS.md` + `docs/CHANGELOG.md` updated; `docs/BACKEND.md` / `docs/FRONTEND.md` if the API or UI map changed; `docs/system-audit-and-data-model.md` + `ENG_AUDIT.md` if stock/FIFO/lots/branches/model rules changed

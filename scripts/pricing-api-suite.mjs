@@ -3,7 +3,7 @@
  * Broader pricing API suite: wholesale, bill discount, profit snapshot, hold roundtrip.
  * Requires backend. Emits markdown table rows.
  */
-const API = process.env.API_URL || "http://127.0.0.1:38472/api/v1";
+const API = process.env.API_URL || "http://127.0.0.1:38580/api/v1";
 const DEVICE = "20000000-0000-4000-8000-000000000003";
 
 const rows = [];

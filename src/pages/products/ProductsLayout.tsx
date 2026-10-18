@@ -31,7 +31,6 @@ import { useQueryTab } from "@/hooks/useQueryTab";
 import {
   PRODUCT_SECTION_TABS,
   PRODUCT_TAB_ALL,
-  STOCK_COUNT_ROLES,
   type ProductHealth,
   type ProductSectionTab,
 } from "@/shared/constants/products";
@@ -53,7 +52,7 @@ import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { Outlet } from "react-router-dom";
 
 export type HubSection =
-  "catalog" | "lots" | "stock-count" | "units" | "categories" | "transfers" | "reorders" | "low";
+  "catalog" | "lots" | "units" | "categories" | "transfers" | "reorders" | "low";
 
 export function matchesHealth(row: Product, kpi: ProductHealth) {
   if (kpi === "healthy") return row.stock >= (row.minimumStock ?? 20);
@@ -65,7 +64,6 @@ export function matchesHealth(row: Product, kpi: ProductHealth) {
 export function hubSection(tab: string): HubSection {
   if (
     tab === "lots" ||
-    tab === "stock-count" ||
     tab === "units" ||
     tab === "categories" ||
     tab === "transfers" ||
@@ -567,7 +565,6 @@ function ProductHubKpis() {
     );
   }
   if (section === "lots") return <LotsKpis />;
-  if (section === "stock-count") return null;
   if (section === "units") return <UnitsKpis />;
   if (section === "categories") return <CategoriesKpis />;
   if (section === "transfers") return <TransfersKpis />;
@@ -577,16 +574,7 @@ function ProductHubKpis() {
 }
 
 export function ProductsLayout() {
-  const [viewerRole, setViewerRole] = useState<string | null>(null);
-  const sectionTabs = useMemo(
-    () =>
-      PRODUCT_SECTION_TABS.filter(
-        (item) =>
-          // Wait until role is known — do not flash Stock count (or its fetches) for cashiers.
-          item.id !== "stock-count" || (viewerRole !== null && STOCK_COUNT_ROLES.has(viewerRole)),
-      ),
-    [viewerRole],
-  );
+  const sectionTabs = PRODUCT_SECTION_TABS;
   const [tab, setTab] = useQueryTab(sectionTabs, PRODUCT_TAB_ALL);
   const section = hubSection(tab);
   const [actions, setActions] = useState<ReactNode>(null);
@@ -636,10 +624,8 @@ export function ProductsLayout() {
       try {
         // Products are required for the catalog. Side queries soft-fail only on
         // 403 (e.g. GET /stock/movements?movementType=ADJUSTMENT for cashiers).
-        const session = await ensureSession(signal);
+        await ensureSession(signal);
         if (guard && !guard.isActive()) return;
-        const role = session?.user.role ?? null;
-        if (role) setViewerRole(role);
 
         const productRows = await listAllProducts(signal);
         if (signal?.aborted || (guard && !guard.isActive())) return;
@@ -761,20 +747,6 @@ export function ProductsLayout() {
     setSectionKpi(null);
     setHealth(null);
   }, [tab]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void ensureSession(controller.signal)
-      .then((session) => setViewerRole(session?.user.role ?? null))
-      .catch(() => setViewerRole(null));
-    return () => controller.abort();
-  }, []);
-
-  useEffect(() => {
-    if (tab === "stock-count" && viewerRole && !STOCK_COUNT_ROLES.has(viewerRole)) {
-      setTab(PRODUCT_TAB_ALL);
-    }
-  }, [tab, viewerRole, setTab]);
 
   useEffect(() => {
     const controller = new AbortController();

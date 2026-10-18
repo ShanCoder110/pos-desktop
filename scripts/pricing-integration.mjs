@@ -3,7 +3,7 @@
  * API integration checks for pricing/stock (requires running backend + seeded shop).
  * Exit 0 only when all checks pass.
  */
-const API = process.env.API_URL || "http://127.0.0.1:38472/api/v1";
+const API = process.env.API_URL || "http://127.0.0.1:38580/api/v1";
 const DEVICE = "20000000-0000-4000-8000-000000000003";
 
 async function json(method, path, body, token) {

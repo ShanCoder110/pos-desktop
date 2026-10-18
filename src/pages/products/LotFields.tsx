@@ -144,13 +144,12 @@ export function LotUnitLines({
   showLeft,
   showQuantity = true,
   showPricing = true,
-  /** After receive/movements: original Qty is display-only (Stock count changes on-hand). */
+  /** After receive/movements: original Qty is display-only (adjust on-hand via Qty left). */
   lockReceived = false,
   onReceived,
   onLeft,
   onDamaged,
   onUnitPrice,
-  onOpenStockCount,
 }: {
   units: ProductSellUnit[];
   stockSymbol: string;
@@ -165,7 +164,6 @@ export function LotUnitLines({
   onLeft?: (qty: number) => void;
   onDamaged?: (qty: number) => void;
   onUnitPrice?: (unitId: string, key: UnitPriceKey, value: number) => void;
-  onOpenStockCount?: () => void;
 }) {
   const ordered = qtyUnits(units);
   const [qtyEdit, setQtyEdit] = useState<{ id: string; field: QtyField } | null>(null);
@@ -189,18 +187,7 @@ export function LotUnitLines({
     else onDamaged?.(stock);
   }
 
-  function stockCountHint() {
-    if (onOpenStockCount) {
-      return (
-        <button
-          type="button"
-          className="text-left text-[11px] font-semibold text-accent-deep underline-offset-2 hover:underline"
-          onClick={onOpenStockCount}
-        >
-          {STOCK_COUNT_COPY.leftLockedHint}
-        </button>
-      );
-    }
+  function receivedLockedHint() {
     return (
       <span className="field-hint text-[11px] text-muted">{STOCK_COUNT_COPY.leftLockedHint}</span>
     );
@@ -254,7 +241,7 @@ export function LotUnitLines({
                   onBlur={() => setQtyEdit(null)}
                   onChange={(event) => setQty("received", unit, event.target.value)}
                 />
-                {lockReceived ? stockCountHint() : null}
+                {lockReceived ? receivedLockedHint() : null}
               </Field>
               {showLeft ? (
                 <Field label="Left">
@@ -266,7 +253,7 @@ export function LotUnitLines({
                     disabled
                     readOnly
                   />
-                  {stockCountHint()}
+                  {receivedLockedHint()}
                 </Field>
               ) : null}
               <Field label="Damaged">

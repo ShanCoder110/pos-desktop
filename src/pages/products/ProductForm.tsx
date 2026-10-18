@@ -44,6 +44,7 @@ import {
 } from "@/pages/products/productUnitValidation";
 import { LinkedUnitBoxes, UnitQtyFields } from "@/pages/products/LotFields";
 import { ensureSession } from "@/services/auth";
+import { updateLot } from "@/services/lots";
 import { listAllBranches } from "@/services/org";
 import {
   applyDerivedPrices,
@@ -288,7 +289,9 @@ export function ProductForm({
 
   const [lotDraft, setLotDraft] = useState(() => lots.filter((l) => l.productId === product.id));
   const [priceLotId, setPriceLotId] = useState("");
-  const [lotOpened, setLotOpened] = useState<Record<string, number>>({});
+  const [lotOpened, setLotOpened] = useState<
+    Record<string, { remaining: number; damaged: number }>
+  >({});
   const sellUnits = qtyUnits(defaultSellUnits(product));
   const unitLayoutKey = sellUnits
     .map((unit) => `${unit.id}:${unit.kind}:${unit.contains}:${unit.isBase ? 1 : 0}`)
@@ -345,12 +348,21 @@ export function ProductForm({
     if (mine.length) {
       setLotDraft(mine);
       setPriceLotId((fifoLot(mine) ?? mine[0]).id);
-      setLotOpened(Object.fromEntries(mine.map((l) => [l.id, l.remainingQuantity])));
+      setLotOpened(
+        Object.fromEntries(
+          mine.map((l) => [l.id, { remaining: l.remainingQuantity, damaged: l.damagedQuantity }]),
+        ),
+      );
     } else if (!isNew && product.stock > 0) {
       const created = openingLot(product, lots);
       setLotDraft([created]);
       setPriceLotId(created.id);
-      setLotOpened({ [created.id]: created.remainingQuantity });
+      setLotOpened({
+        [created.id]: {
+          remaining: created.remainingQuantity,
+          damaged: created.damagedQuantity,
+        },
+      });
     } else {
       setLotDraft([]);
       setPriceLotId("");
@@ -913,6 +925,32 @@ export function ProductForm({
       return;
     }
     if (!isNew) {
+      try {
+        const adjusted = lotDraft.filter((lot) => {
+          const opened = lotOpened[lot.id];
+          if (!opened) return false;
+          return (
+            Math.abs(lot.remainingQuantity - opened.remaining) > 1e-6 ||
+            Math.abs(lot.damagedQuantity - opened.damaged) > 1e-6
+          );
+        });
+        for (const lot of adjusted) {
+          await updateLot(lot.id, {
+            supplierId: lot.supplierId || undefined,
+            remainingQuantity: lot.remainingQuantity,
+            damagedQuantity: lot.damagedQuantity,
+            cost: lot.purchasePrice,
+            min: lot.minimumPrice,
+            wholesale: lot.wholesalePrice,
+            retail: lot.retailPrice,
+            expiryDate: lot.expiryDate ? lot.expiryDate.slice(0, 10) : null,
+          });
+        }
+        if (adjusted.length) await refreshHub();
+      } catch (error) {
+        toaster.error(shortError(error, PRODUCT_COPY.saveFailed));
+        return;
+      }
       setLots((prev) => [...prev.filter((l) => l.productId !== product.id), ...lotDraft]);
     }
     if (keepAdding && isNew) {
@@ -1761,8 +1799,13 @@ export function ProductForm({
               lotDraft
                 .filter((l) => l.remainingQuantity > 0 || l.damagedQuantity > 0)
                 .map((lot) => {
-                  const opened = lotOpened[lot.id] ?? lot.remainingQuantity;
-                  const changed = Math.abs(lot.remainingQuantity - opened) > 1e-6;
+                  const opened = lotOpened[lot.id] ?? {
+                    remaining: lot.remainingQuantity,
+                    damaged: lot.damagedQuantity,
+                  };
+                  const changed =
+                    Math.abs(lot.remainingQuantity - opened.remaining) > 1e-6 ||
+                    Math.abs(lot.damagedQuantity - opened.damaged) > 1e-6;
                   return (
                     <div
                       key={lot.id}
@@ -1803,7 +1846,7 @@ export function ProductForm({
                       />
                       {changed ? (
                         <p className="product-lot-adjusted [margin:0] [font-size:11px] [font-weight:600] [color:var(--teal,_#0f766e)]">
-                          Adjusted {formatMixedQty(product, opened)} →{" "}
+                          Adjusted {formatMixedQty(product, opened.remaining)} →{" "}
                           {formatMixedQty(product, lot.remainingQuantity)}
                         </p>
                       ) : null}

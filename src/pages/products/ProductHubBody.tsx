@@ -5,12 +5,10 @@ import { LotsPage } from "@/pages/lots/LotsPage";
 import { UnitsPage } from "@/pages/units/UnitsPage";
 import { TransfersPage } from "@/pages/transfers/TransfersPage";
 import { ReordersPage } from "@/pages/reorders/ReordersPage";
-import { StockCountPage } from "@/pages/stock/StockCountPage";
 
 export function ProductHubBody() {
   const { section } = useProductsHub();
   if (section === "lots") return <LotsPage />;
-  if (section === "stock-count") return <StockCountPage />;
   if (section === "units") return <UnitsPage />;
   if (section === "categories") return <CategoriesPage />;
   if (section === "transfers") return <TransfersPage />;

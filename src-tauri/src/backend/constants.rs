@@ -1,9 +1,19 @@
 pub const API_HOST: &str = "127.0.0.1";
-pub const API_PORT: u16 = 38_472;
+/// Vite / `npm run backend` loopback API.
+pub const API_PORT: u16 = 38_580;
+pub const API_PORT_STR: &str = "38580";
+/// Packaged desktop app — separate so installing/running Dukan does not block local `npm run backend`.
+pub const API_PORT_DESKTOP: u16 = 38_581;
+pub const API_PORT_DESKTOP_STR: &str = "38581";
+/// Vite UI (`npm run dev` / `dev:ui`).
+pub const VITE_PORT: u16 = 1_430;
+pub const VITE_PORT_STR: &str = "1430";
+/// Keep this many daily `dukan-YYYY-MM-DD.txt` files; older files are deleted on boot.
+pub const LOG_RETENTION_DAYS: i64 = 10;
 pub const API_PREFIX: &str = "/api/v1";
 pub const ALLOWED_API_ORIGINS: [&str; 5] = [
-    "http://localhost:1420",
-    "http://127.0.0.1:1420",
+    "http://localhost:1430",
+    "http://127.0.0.1:1430",
     // Tauri's production WebView2 origin on Windows.
     "http://tauri.localhost",
     "tauri://localhost",

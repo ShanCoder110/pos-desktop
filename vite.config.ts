@@ -5,6 +5,8 @@ import { fileURLToPath, URL } from "node:url";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+const vitePort = Number(process.env.VITE_PORT || 1430);
+const apiPort = Number(process.env.API_PORT || 38580);
 
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
@@ -19,13 +21,13 @@ export default defineConfig(async () => ({
   },
   clearScreen: false,
   server: {
-    port: 1420,
+    port: vitePort,
     strictPort: true,
     host: host || true,
     allowedHosts: [".ngrok-free.app", ".ngrok.app", ".ngrok.io"],
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:38472",
+        target: `http://127.0.0.1:${apiPort}`,
         changeOrigin: true,
       },
     },
@@ -33,7 +35,7 @@ export default defineConfig(async () => ({
       ? {
           protocol: "ws",
           host,
-          port: 1421,
+          port: vitePort + 1,
         }
       : undefined,
     watch: {
@@ -41,13 +43,13 @@ export default defineConfig(async () => ({
     },
   },
   preview: {
-    port: 1420,
+    port: vitePort,
     strictPort: true,
     host: true,
     allowedHosts: [".ngrok-free.app", ".ngrok.app", ".ngrok.io"],
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:38472",
+        target: `http://127.0.0.1:${apiPort}`,
         changeOrigin: true,
       },
     },

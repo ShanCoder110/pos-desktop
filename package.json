@@ -6,10 +6,10 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:ui": "vite",
-    "backend": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin api",
+    "backend": "node scripts/run-api.mjs",
     "backend:watch": "node scripts/run-backend-watch.mjs",
     "backend:watch:setup": "node scripts/run-cargo.mjs install cargo-watch",
-    "api": "node scripts/run-cargo.mjs run --manifest-path src-tauri/Cargo.toml --bin api",
+    "api": "node scripts/run-api.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "node scripts/run-tauri.mjs",

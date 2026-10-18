@@ -8,6 +8,7 @@ pub mod entities;
 pub mod errors;
 pub mod extract;
 pub mod handlers;
+pub mod logging;
 pub mod migration;
 pub mod qty;
 pub mod repositories;

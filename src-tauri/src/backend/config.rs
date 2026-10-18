@@ -42,6 +42,15 @@ impl Config {
     /// Load `.env` overrides when present, otherwise use safe desktop defaults.
     /// Packaged applications do not ship a `.env` file.
     pub fn load() -> Result<&'static Config, String> {
+        Self::load_with_port_default(default_api_port())
+    }
+
+    /// `npm run backend` / Vite loopback — always prefer loopback port unless `API_PORT` is set.
+    pub fn load_loopback() -> Result<&'static Config, String> {
+        Self::load_with_port_default(crate::backend::constants::API_PORT_STR)
+    }
+
+    fn load_with_port_default(port_default: &'static str) -> Result<&'static Config, String> {
         if CONFIG.get().is_some() {
             return Ok(CONFIG.get().expect("config set"));
         }
@@ -49,7 +58,7 @@ impl Config {
         let _ = dotenvy::from_filename(".env");
         let _ = dotenvy::from_filename("../.env");
         let _ = dotenvy::dotenv();
-        let config = Self::from_env()?;
+        let config = Self::from_env(port_default)?;
         CONFIG
             .set(config)
             .map_err(|_| "config already initialized".to_string())?;
@@ -66,7 +75,7 @@ impl Config {
         CONFIG.get()
     }
 
-    fn from_env() -> Result<Self, String> {
+    fn from_env(port_default: &'static str) -> Result<Self, String> {
         let app_env = value_or("APP_ENV", "production");
         let cloud_sync_enabled =
             parse_bool(&optional("CLOUD_SYNC_ENABLED").unwrap_or_else(|| "false".into()))?;
@@ -94,7 +103,8 @@ impl Config {
             app_env,
             log_level: value_or("LOG_LEVEL", "info"),
             api_host: value_or("API_HOST", "127.0.0.1"),
-            api_port: parse_port(&value_or("API_PORT", "38472"))?,
+            // Release desktop defaults to API_PORT_DESKTOP; loopback uses API_PORT.
+            api_port: parse_port(&value_or("API_PORT", port_default))?,
             database_path: PathBuf::from(value_or("DUKAN_DB_PATH", "./data/dukan-pos.sqlite3")),
             access_token_ttl_minutes: parse_duration_minutes(&value_or(
                 "ACCESS_TOKEN_EXPIRY",
@@ -106,6 +116,15 @@ impl Config {
             supabase_anon_key,
             supabase_service_role_key,
         })
+    }
+}
+
+fn default_api_port() -> &'static str {
+    use crate::backend::constants::{API_PORT_DESKTOP_STR, API_PORT_STR};
+    if cfg!(debug_assertions) {
+        API_PORT_STR // Vite + `npm run backend`
+    } else {
+        API_PORT_DESKTOP_STR // packaged Dukan (separate from local loopback)
     }
 }
 
