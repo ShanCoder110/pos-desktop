@@ -10,8 +10,8 @@ use crate::backend::{
     constants::ERROR_INVALID_ID,
     context::RequestContext,
     dto::{
-        CreateProductRequest, DeleteResponse, Paginated, ProductListQuery, ProductResponse,
-        ProductSearchResponse, UpdateProductRequest,
+        CreateProductRequest, DeleteResponse, Paginated, ProductImportCatalog, ProductImportResult,
+        ProductListQuery, ProductResponse, ProductSearchResponse, UpdateProductRequest,
     },
     errors::AppError,
     services::ProductService,
@@ -60,6 +60,16 @@ pub async fn create_product(
 ) -> Result<(StatusCode, Json<ProductResponse>), AppError> {
     let product = ProductService::create(&state.db, &ctx, request).await?;
     Ok((StatusCode::CREATED, Json(product)))
+}
+
+pub async fn import_products(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Json(catalog): Json<ProductImportCatalog>,
+) -> Result<Json<ProductImportResult>, AppError> {
+    Ok(Json(
+        ProductService::import_catalog(&state.db, &ctx, catalog).await?,
+    ))
 }
 
 pub async fn update_product(

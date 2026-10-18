@@ -23,6 +23,7 @@ pub const HEALTH_ROUTE: &str = "/health";
 pub const PRODUCTS_ROUTE: &str = "/products";
 pub const PRODUCT_BY_ID_ROUTE: &str = "/products/{id}";
 pub const PRODUCT_SEARCH_ROUTE: &str = "/products/search";
+pub const PRODUCTS_IMPORT_ROUTE: &str = "/products/import";
 pub const CATEGORIES_ROUTE: &str = "/categories";
 pub const CATEGORY_BY_ID_ROUTE: &str = "/categories/{id}";
 pub const CITIES_ROUTE: &str = "/cities";
@@ -208,6 +209,8 @@ pub const ERROR_SKU_INVALID: &str =
     "SKU must be 1–32 characters: letters, digits, '-', '_', '.', '/'.";
 pub const ERROR_SKU_DUPLICATE: &str = "That SKU is already in use.";
 pub const ERROR_SKU_EDIT_DENIED: &str = "Only owners and managers can change the SKU.";
+pub const ERROR_PRODUCT_NO_INVALID: &str = "Product ID must be a positive whole number.";
+pub const ERROR_PRODUCT_NO_DUPLICATE: &str = "That product ID is already in use.";
 pub const SKU_MAX_LEN: usize = 32;
 pub const ERROR_CATEGORY_NOT_FOUND: &str = "Category not found.";
 pub const ERROR_CITY_NOT_FOUND: &str = "City not found.";

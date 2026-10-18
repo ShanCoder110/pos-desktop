@@ -50,6 +50,8 @@ export function productMatchesQuery(product: Product, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return false;
   if ((product.name ?? "").toLowerCase().includes(q)) return true;
+  const productNo = product.productNo;
+  if (productNo != null && productNo > 0 && String(productNo).includes(q)) return true;
   if ((product.sku ?? "").toLowerCase().includes(q)) return true;
   if ((product.barcode ?? "").toLowerCase().includes(q)) return true;
   if (unitsForProduct(product).some((u) => (u.barcode ?? "").toLowerCase().includes(q))) {
@@ -57,6 +59,7 @@ export function productMatchesQuery(product: Product, query: string): boolean {
   }
   const compact = productSearchCompactKey(query);
   if (!compact) return false;
+  if (productNo != null && productNo > 0 && String(productNo).includes(compact)) return true;
   if (productSearchCompactKey(product.sku ?? "").includes(compact)) return true;
   if (productSearchCompactKey(product.barcode ?? "").includes(compact)) return true;
   return unitsForProduct(product).some((u) =>

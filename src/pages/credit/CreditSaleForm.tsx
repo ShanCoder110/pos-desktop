@@ -346,7 +346,7 @@ export function CreditSaleForm({
             products={activeProducts}
             value={draft.productId}
             onChange={pickProduct}
-            placeholder="Search product, SKU, or barcode"
+            placeholder="Search product ID, name, SKU, or barcode"
             autoFocus
             clearable
             showInventory

@@ -100,6 +100,7 @@ export const PRODUCT_FORM_SECTIONS = [
 export type ProductFormSection = (typeof PRODUCT_FORM_SECTIONS)[number];
 
 export const PRODUCT_TABLE_COLUMNS = [
+  { id: "productNo", label: "ID" },
   { id: "name", label: "Name", locked: true },
   { id: "urduName", label: "Urdu name" },
   { id: "sku", label: "SKU" },
@@ -115,6 +116,7 @@ export const PRODUCT_TABLE_COLUMNS = [
 ];
 
 export const DEFAULT_PRODUCT_COLUMNS = [
+  "productNo",
   "name",
   "category",
   "retail",

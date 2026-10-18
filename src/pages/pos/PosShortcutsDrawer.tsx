@@ -36,7 +36,7 @@ export function PosShortcutsDrawer({
   const actions: PosShortcutAction[] = [
     functionAction("help", "Shortcut help", "Show the keyboard summary", "F1"),
     functionAction("customer", "Choose customer", "Search or select the customer", "F2"),
-    functionAction("search", "Find product", "Search product, SKU or barcode", "F3"),
+    functionAction("search", "Find product", "Search product ID, SKU or barcode", "F3"),
     functionAction("hold", "Hold bill", "Save this bill and continue later", "F4"),
     functionAction("clear", "Clear cart", "Remove all products from this bill", "F5"),
     functionAction("cart", "Focus cart", "Move focus to the first cart item", "F6"),

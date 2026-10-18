@@ -10,6 +10,8 @@ pub struct Model {
     pub base_unit_id: Uuid,
     pub name: String,
     pub urdu_name: Option<String>,
+    /// Shop-facing search ID (1, 2, 3…). Distinct from UUID primary key.
+    pub product_no: Option<i32>,
     pub sku: String,
     pub barcode: String,
     pub product_type: String,

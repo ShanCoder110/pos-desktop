@@ -631,7 +631,7 @@ export function PosWorkspace() {
           productId: product.id,
           productUnitId: unitRow.id,
           name: product.name,
-          sku: product.sku,
+          sku: product.productNo && product.productNo > 0 ? String(product.productNo) : product.sku,
           baseUnit: product.unit,
           sellUnit: sellU,
           packSize: packN || 1,
@@ -664,7 +664,8 @@ export function PosWorkspace() {
 
   useEffect(() => {
     const q = debounced.trim();
-    if (q.length < MIN_PRODUCT_SEARCH_LENGTH) return;
+    const minLen = /^\d+$/.test(q) ? 1 : MIN_PRODUCT_SEARCH_LENGTH;
+    if (q.length < minLen) return;
     const controller = new AbortController();
     searchAllProducts(q, controller.signal)
       .then((hits) => {
@@ -1079,7 +1080,7 @@ export function PosWorkspace() {
         productId: pending.id,
         productUnitId: productUnit.id,
         name: pending.name,
-        sku: pending.sku,
+        sku: pending.productNo && pending.productNo > 0 ? String(pending.productNo) : pending.sku,
         baseUnit: pending.unit,
         sellUnit: sellU,
         packSize: packN || 1,
@@ -1648,6 +1649,7 @@ export function PosWorkspace() {
     }
     const needle = query.trim().toLowerCase();
     const exact = results.find((p) => {
+      if (p.productNo != null && p.productNo > 0 && String(p.productNo) === needle) return true;
       if ((p.sku ?? "").toLowerCase() === needle) return true;
       if ((p.name ?? "").toLowerCase() === needle) return true;
       if ((p.barcode ?? "").toLowerCase() === needle) return true;

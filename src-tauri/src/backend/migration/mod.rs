@@ -25,6 +25,7 @@ mod m20261017_000022_drop_customer_credit_limit;
 mod m20261017_000023_uuid_text_to_blob;
 mod m20261017_000024_products_sku_lower_unique;
 mod m20261018_000025_product_urdu_name;
+mod m20261018_000026_product_no;
 
 pub struct Migrator;
 
@@ -57,6 +58,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261017_000023_uuid_text_to_blob::Migration),
             Box::new(m20261017_000024_products_sku_lower_unique::Migration),
             Box::new(m20261018_000025_product_urdu_name::Migration),
+            Box::new(m20261018_000026_product_no::Migration),
         ]
     }
 }

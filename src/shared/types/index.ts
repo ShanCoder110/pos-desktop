@@ -158,6 +158,8 @@ export interface Product {
   baseUnitId?: string;
   name: string;
   urduName?: string;
+  /** Shop search ID (1, 2, 3…). Prefer this over SKU when looking up products. */
+  productNo?: number;
   sku: string;
   barcode?: string;
   category: string;

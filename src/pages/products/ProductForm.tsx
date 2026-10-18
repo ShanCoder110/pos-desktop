@@ -1164,6 +1164,27 @@ export function ProductForm({
               />
             </Field>
             <Field
+              label="Product ID"
+              hint={
+                isNew
+                  ? "Assigned automatically on save (1, 2, 3…). Search with this ID in POS and credit."
+                  : "Shop search number. Not editable."
+              }
+            >
+              <TextInput
+                data-field="productNo"
+                readOnly
+                disabled
+                value={
+                  isNew
+                    ? "Auto"
+                    : product.productNo && product.productNo > 0
+                      ? String(product.productNo)
+                      : "—"
+                }
+              />
+            </Field>
+            <Field
               label="SKU"
               hint={
                 isNew ? "Optional. Leave blank to auto-assign P-####." : "Owner/manager can edit."

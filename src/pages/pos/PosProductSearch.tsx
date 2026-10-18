@@ -106,7 +106,7 @@ export function PosProductSearch({
             ? `Search in ${selectedCategory.name} — F3`
             : categoryPickerOpen
               ? "Choose a category"
-              : "Search product, SKU or barcode — F3"
+              : "Search ID, name, SKU or barcode — F3"
         }
         value={query}
         onChange={(event) => onQuery(event.target.value)}
@@ -186,7 +186,11 @@ export function PosProductSearch({
                 onSelect(result.product);
               }}
             >
-              <span className="sku">{result.product.sku}</span>
+              <span className="sku">
+                {result.product.productNo && result.product.productNo > 0
+                  ? result.product.productNo
+                  : result.product.sku}
+              </span>
               <span className="name">
                 <span className="name-text">
                   {result.product.name}

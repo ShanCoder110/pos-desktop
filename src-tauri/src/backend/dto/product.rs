@@ -78,6 +78,9 @@ pub struct CreateProductRequest {
     pub base_unit_id: String,
     #[serde(default)]
     pub created_by: Option<String>,
+    /// Optional shop search ID. Blank → next integer (1, 2, 3…).
+    #[serde(default)]
+    pub product_no: Option<i32>,
     /// Optional custom SKU. Blank → auto P-####. Max 32; letters, digits, `-_./`.
     #[validate(length(max = 32))]
     pub sku: Option<String>,
@@ -162,6 +165,8 @@ pub struct ProductResponse {
     pub id: String,
     pub name: String,
     pub urdu_name: String,
+    /// Shop search ID (1, 2, 3…). Used in POS / credit / product search.
+    pub product_no: i32,
     pub sku: String,
     pub barcode: String,
     pub category: String,
@@ -202,6 +207,97 @@ pub struct ProductResponse {
 #[derive(Clone, Debug, Serialize)]
 pub struct ProductSearchResponse {
     pub products: Vec<ProductResponse>,
+}
+
+/// Portable catalog JSON (Settings → Products import). Unit `symbol` resolves to seeded units.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductImportCatalog {
+    #[serde(default)]
+    pub categories: Vec<ProductImportCategory>,
+    pub products: Vec<ProductImportItem>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductImportCategory {
+    pub name: String,
+    #[serde(default)]
+    pub name_urdu: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductImportItem {
+    #[validate(length(min = 1, max = 160))]
+    pub name: String,
+    #[serde(default)]
+    #[validate(length(max = 160))]
+    pub urdu_name: Option<String>,
+    /// Shop search ID. Prefer `productId` in catalog JSON (alias of productNo).
+    #[serde(default, alias = "productId")]
+    pub product_no: Option<i32>,
+    #[serde(default)]
+    #[validate(length(max = 32))]
+    pub sku: Option<String>,
+    #[serde(default)]
+    #[validate(length(max = 128))]
+    pub barcode: Option<String>,
+    #[validate(length(min = 1, max = 120))]
+    pub category: String,
+    #[serde(default)]
+    pub minimum_stock: Option<Decimal>,
+    #[serde(default)]
+    pub warranty_qty: Option<i32>,
+    #[serde(default)]
+    pub warranty_unit: Option<String>,
+    #[validate(length(min = 1))]
+    pub sell_units: Vec<ProductImportUnit>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductImportUnit {
+    #[validate(length(min = 1, max = 32))]
+    pub symbol: String,
+    #[validate(length(min = 1, max = 80))]
+    pub name: String,
+    #[validate(custom(function = "positive_decimal"))]
+    pub contains: Decimal,
+    #[serde(default)]
+    pub factor_direction: Option<String>,
+    #[serde(default)]
+    pub is_base: bool,
+    #[serde(default)]
+    pub is_default: bool,
+    #[validate(custom(function = "non_negative_decimal"))]
+    pub cost: Decimal,
+    #[validate(custom(function = "non_negative_decimal"))]
+    pub min: Decimal,
+    #[validate(custom(function = "non_negative_decimal"))]
+    pub wholesale: Decimal,
+    #[validate(custom(function = "non_negative_decimal"))]
+    pub price: Decimal,
+    #[serde(default)]
+    pub barcode: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductImportResult {
+    pub created: u32,
+    pub skipped: u32,
+    pub categories_created: u32,
+    pub errors: Vec<ProductImportErrorRow>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductImportErrorRow {
+    pub index: usize,
+    pub name: String,
+    pub sku: Option<String>,
+    pub message: String,
 }
 
 const fn default_true() -> bool {
@@ -273,6 +369,7 @@ mod tests {
             category_id: uuid::Uuid::new_v4().to_string(),
             base_unit_id: uuid::Uuid::new_v4().to_string(),
             created_by: Some(uuid::Uuid::new_v4().to_string()),
+            product_no: None,
             sku: None,
             barcode: None,
             is_manufactured: false,

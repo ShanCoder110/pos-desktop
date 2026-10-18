@@ -29,6 +29,9 @@ docs/
 # Local SQLite for `npm run api` / `npm run db:*`
 data/
 
+# Generated / shop-specific import dumps (Settings → Products JSON)
+imports/
+
 # Accidental ts-rs default output — real types live in src/types/generated/
 src-tauri/bindings/
 

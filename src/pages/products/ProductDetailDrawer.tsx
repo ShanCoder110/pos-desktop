@@ -181,7 +181,12 @@ export function ProductDetailDrawer({
   const retail = retailDisplay(product);
   const stockTone =
     stock <= 0 ? "is-danger" : stock < (product.minimumStock ?? 20) ? "is-warn" : "is-ok";
-  const heroMeta = [product.sku, product.category, product.barcode?.trim()]
+  const heroMeta = [
+    product.productNo && product.productNo > 0 ? `#${product.productNo}` : null,
+    product.sku,
+    product.category,
+    product.barcode?.trim(),
+  ]
     .filter(Boolean)
     .join(" · ");
 

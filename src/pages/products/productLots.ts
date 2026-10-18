@@ -7,6 +7,7 @@ export { fifoLot, fifoLots } from "@/pages/products/productFifo";
 export function blankProduct(): Product {
   return {
     id: crypto.randomUUID(),
+    productNo: 0,
     sku: "",
     name: "",
     urduName: "",

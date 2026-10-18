@@ -7,20 +7,24 @@ use crate::backend::{
     constants::{
         DEFAULT_BARCODE_PREFIX, DEFAULT_LOT_PREFIX, DEFAULT_SKU_PREFIX, ERROR_BASE_UNIT_CONVERSION,
         ERROR_INVALID_EXPIRY_DATE, ERROR_INVALID_PRODUCT_UNITS, ERROR_INVALID_RECEIVED_DATE,
-        ERROR_PRODUCT_NOT_FOUND, ERROR_SEARCH_TOO_SHORT, ERROR_SKU_DUPLICATE,
-        ERROR_SKU_EDIT_DENIED, ERROR_SKU_INVALID, LOT_SOURCE_OPENING, MAX_PAGE_SIZE,
-        MIN_SEARCH_LENGTH, PRODUCT_TYPE_MANUFACTURED, PRODUCT_TYPE_STANDARD,
-        REFERENCE_PRODUCT_OPENING, SEQUENCE_KIND_LOT, SEQUENCE_KIND_PRODUCT_BARCODE,
-        SEQUENCE_KIND_PRODUCT_SKU, SKU_MAX_LEN, STOCK_MOVEMENT_ADJUSTMENT,
+        ERROR_PRODUCT_NOT_FOUND, ERROR_PRODUCT_NO_DUPLICATE, ERROR_PRODUCT_NO_INVALID,
+        ERROR_SEARCH_TOO_SHORT, ERROR_SKU_DUPLICATE, ERROR_SKU_EDIT_DENIED, ERROR_SKU_INVALID,
+        LOT_SOURCE_OPENING, MAX_PAGE_SIZE, MIN_SEARCH_LENGTH, PRODUCT_TYPE_MANUFACTURED,
+        PRODUCT_TYPE_STANDARD, REFERENCE_PRODUCT_OPENING, SEQUENCE_KIND_LOT,
+        SEQUENCE_KIND_PRODUCT_BARCODE, SEQUENCE_KIND_PRODUCT_SKU, SKU_MAX_LEN,
+        STOCK_MOVEMENT_ADJUSTMENT,
     },
     context::RequestContext,
     dto::{
-        CreateProductRequest, DeleteResponse, OpeningStockInput, Paginated, PaginationMeta,
-        ProductListQuery, ProductResponse, ProductUnitInput, UpdateProductRequest,
+        CreateProductRequest, DeleteResponse, MasterRequest, OpeningStockInput, PageQuery,
+        Paginated, PaginationMeta, ProductImportCatalog, ProductImportErrorRow,
+        ProductImportResult, ProductListQuery, ProductResponse, ProductUnitInput,
+        UpdateProductRequest,
     },
     entities::{product, product_lot, product_unit},
     errors::AppError,
-    repositories::{ProductRepository, SequenceRepository},
+    repositories::{MasterKind, ProductRepository, SequenceRepository},
+    services::MasterService,
     util::{money_value, parse_date, parse_optional_uuid, parse_uuid, quantity, trimmed},
 };
 
@@ -45,7 +49,13 @@ impl ProductService {
         branch_id: Option<Uuid>,
     ) -> Result<Vec<ProductResponse>, AppError> {
         let query = query.trim();
-        if query.len() < MIN_SEARCH_LENGTH {
+        // Digit-only queries are product IDs (1, 2, …) — allow a single digit.
+        let min_len = if query.chars().all(|c| c.is_ascii_digit()) {
+            1
+        } else {
+            MIN_SEARCH_LENGTH
+        };
+        if query.chars().count() < min_len {
             return Err(AppError::Validation(ERROR_SEARCH_TOO_SHORT.into()));
         }
         let mut list_query = ProductListQuery {
@@ -94,6 +104,7 @@ impl ProductService {
         let transaction = database.begin().await?;
         let now = chrono::Utc::now();
         let product_id = Uuid::new_v4();
+        let product_no = resolve_create_product_no(&transaction, request.product_no).await?;
         let sku = resolve_create_sku(&transaction, request.sku.as_deref()).await?;
         let barcode = if let Some(scanned) = trimmed(&request.barcode) {
             scanned
@@ -113,6 +124,7 @@ impl ProductService {
                 base_unit_id: Set(base_unit_id),
                 name: Set(request.name.trim().to_owned()),
                 urdu_name: Set(trimmed(&request.urdu_name)),
+                product_no: Set(Some(product_no)),
                 sku: Set(sku),
                 barcode: Set(barcode),
                 product_type: Set(if request.is_manufactured {
@@ -162,6 +174,213 @@ impl ProductService {
 
         transaction.commit().await?;
         Self::get(database, product_id, Some(context.branch_id)).await
+    }
+
+    /// Bulk import from Settings catalog JSON (categories by name, units by symbol).
+    pub async fn import_catalog(
+        database: &DatabaseConnection,
+        context: &RequestContext,
+        catalog: ProductImportCatalog,
+    ) -> Result<ProductImportResult, AppError> {
+        let mut unit_by_symbol = load_unit_symbols(database).await?;
+        let mut category_by_name = load_category_names(database).await?;
+        let mut categories_created = 0u32;
+        let mut created = 0u32;
+        let mut skipped = 0u32;
+        let mut errors = Vec::new();
+
+        for cat in &catalog.categories {
+            let name = cat.name.trim();
+            if name.is_empty() {
+                continue;
+            }
+            let key = name.to_ascii_lowercase();
+            if category_by_name.contains_key(&key) {
+                continue;
+            }
+            match MasterService::create(
+                database,
+                MasterKind::Category,
+                category_request(name, cat.name_urdu.as_deref()),
+                Some(context),
+            )
+            .await
+            {
+                Ok(row) => {
+                    category_by_name.insert(key, row.id);
+                    categories_created += 1;
+                }
+                Err(error) => {
+                    errors.push(ProductImportErrorRow {
+                        index: 0,
+                        name: name.to_owned(),
+                        sku: None,
+                        message: format!("category: {}", error_message(&error)),
+                    });
+                }
+            }
+        }
+
+        for (index, item) in catalog.products.iter().enumerate() {
+            if let Err(message) = item.validate() {
+                errors.push(ProductImportErrorRow {
+                    index,
+                    name: item.name.clone(),
+                    sku: item.sku.clone(),
+                    message: format!("validation: {message}"),
+                });
+                continue;
+            }
+
+            let category_name = item.category.trim();
+            let category_key = category_name.to_ascii_lowercase();
+            if !category_by_name.contains_key(&category_key) {
+                match MasterService::create(
+                    database,
+                    MasterKind::Category,
+                    category_request(category_name, None),
+                    Some(context),
+                )
+                .await
+                {
+                    Ok(row) => {
+                        category_by_name.insert(category_key.clone(), row.id);
+                        categories_created += 1;
+                    }
+                    Err(error) => {
+                        errors.push(ProductImportErrorRow {
+                            index,
+                            name: item.name.clone(),
+                            sku: item.sku.clone(),
+                            message: format!(
+                                "category '{category_name}': {}",
+                                error_message(&error)
+                            ),
+                        });
+                        continue;
+                    }
+                }
+            }
+
+            let category_id = category_by_name
+                .get(&category_key)
+                .cloned()
+                .unwrap_or_default();
+
+            if let Some(product_no) = item.product_no.filter(|n| *n > 0) {
+                if ProductRepository::product_no_taken(database, product_no, None).await? {
+                    skipped += 1;
+                    continue;
+                }
+            }
+            if let Some(sku) = trimmed(&item.sku) {
+                if ProductRepository::sku_taken(database, &sku, None).await? {
+                    skipped += 1;
+                    continue;
+                }
+            }
+
+            let mut sell_units = Vec::new();
+            let mut base_unit_id = String::new();
+            let mut unit_ok = true;
+            for unit in &item.sell_units {
+                let symbol = unit.symbol.trim().to_ascii_lowercase();
+                let Some(unit_id) = unit_by_symbol.get(&symbol).cloned() else {
+                    errors.push(ProductImportErrorRow {
+                        index,
+                        name: item.name.clone(),
+                        sku: item.sku.clone(),
+                        message: format!("unknown unit symbol '{symbol}' (seed units first)"),
+                    });
+                    unit_ok = false;
+                    break;
+                };
+                if unit.is_base {
+                    base_unit_id = unit_id.clone();
+                }
+                let (cost, min, wholesale, price) =
+                    normalize_price_ladder(unit.cost, unit.min, unit.wholesale, unit.price);
+                sell_units.push(ProductUnitInput {
+                    id: None,
+                    unit_id,
+                    name: unit.name.trim().to_owned(),
+                    contains: unit.contains,
+                    cost,
+                    min,
+                    wholesale,
+                    price,
+                    barcode: unit.barcode.clone(),
+                    factor_direction: unit.factor_direction.clone(),
+                    is_base: unit.is_base,
+                    is_default: unit.is_default,
+                });
+            }
+            if !unit_ok {
+                continue;
+            }
+            if base_unit_id.is_empty() && !sell_units.is_empty() {
+                let needs_default = !sell_units.iter().any(|unit| unit.is_default);
+                sell_units[0].is_base = true;
+                if needs_default {
+                    sell_units[0].is_default = true;
+                }
+                base_unit_id = sell_units[0].unit_id.clone();
+            }
+
+            let request = CreateProductRequest {
+                name: item.name.trim().to_owned(),
+                urdu_name: item.urdu_name.clone(),
+                category_id,
+                base_unit_id,
+                created_by: None,
+                product_no: item.product_no.filter(|n| *n > 0),
+                sku: item.sku.clone(),
+                barcode: item.barcode.clone(),
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: item.minimum_stock.unwrap_or(Decimal::ZERO),
+                warranty_qty: item.warranty_qty,
+                warranty_unit: item.warranty_unit.as_deref().map(normalize_warranty_unit),
+                warranty_note: None,
+                sell_units,
+                opening_stock: None,
+                opening_stocks: vec![],
+            };
+
+            match Self::create(database, context, request).await {
+                Ok(_) => created += 1,
+                Err(error) => {
+                    let message = error_message(&error);
+                    let lower = message.to_ascii_lowercase();
+                    if lower.contains("sku")
+                        || lower.contains("product id")
+                        || lower.contains("product_no")
+                    {
+                        skipped += 1;
+                    } else {
+                        errors.push(ProductImportErrorRow {
+                            index,
+                            name: item.name.clone(),
+                            sku: item
+                                .product_no
+                                .map(|n| n.to_string())
+                                .or_else(|| item.sku.clone()),
+                            message,
+                        });
+                    }
+                }
+            }
+        }
+
+        let _ = &mut unit_by_symbol;
+
+        Ok(ProductImportResult {
+            created,
+            skipped,
+            categories_created,
+            errors,
+        })
     }
 
     pub async fn update(
@@ -543,6 +762,30 @@ fn normalize_custom_sku(raw: &str) -> Result<String, AppError> {
     Ok(sku.to_owned())
 }
 
+fn normalize_warranty_unit(raw: &str) -> String {
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "DAY" | "DAYS" => "DAYS".to_owned(),
+        "MONTH" | "MONTHS" => "MONTHS".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
+async fn resolve_create_product_no(
+    transaction: &sea_orm::DatabaseTransaction,
+    requested: Option<i32>,
+) -> Result<i32, AppError> {
+    if let Some(product_no) = requested {
+        if product_no < 1 {
+            return Err(AppError::Validation(ERROR_PRODUCT_NO_INVALID.into()));
+        }
+        if ProductRepository::product_no_taken(transaction, product_no, None).await? {
+            return Err(AppError::Validation(ERROR_PRODUCT_NO_DUPLICATE.into()));
+        }
+        return Ok(product_no);
+    }
+    ProductRepository::next_product_no(transaction).await
+}
+
 async fn resolve_create_sku(
     transaction: &sea_orm::DatabaseTransaction,
     requested: Option<&str>,
@@ -586,6 +829,95 @@ fn annotate_matched_units(products: &mut [ProductResponse], query: &str) {
             .find(|unit| !unit.barcode.is_empty() && unit.barcode.to_lowercase() == needle)
             .map(|unit| unit.id.clone());
     }
+}
+
+fn category_request(name: &str, name_urdu: Option<&str>) -> MasterRequest {
+    let urdu = name_urdu
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    MasterRequest {
+        name: name.trim().to_owned(),
+        symbol: None,
+        phone: None,
+        email: None,
+        address: None,
+        // Categories store Urdu label in `description` (mapped as notes on MasterRequest).
+        notes: urdu,
+        is_active: true,
+        precision: None,
+        is_walk_in: false,
+        in_credit_book: None,
+        previous_balance: None,
+        city_id: None,
+    }
+}
+
+fn error_message(error: &AppError) -> String {
+    error.to_string()
+}
+
+fn normalize_price_ladder(
+    cost: Decimal,
+    min: Decimal,
+    wholesale: Decimal,
+    price: Decimal,
+) -> (Decimal, Decimal, Decimal, Decimal) {
+    let cost = money_value(cost.max(Decimal::ZERO));
+    let min = money_value(min.max(cost));
+    let wholesale = money_value(wholesale.max(min));
+    let price = money_value(price.max(wholesale));
+    (cost, min, wholesale, price)
+}
+
+async fn load_all_masters(
+    database: &DatabaseConnection,
+    kind: MasterKind,
+) -> Result<Vec<crate::backend::dto::MasterResponse>, AppError> {
+    let mut page = 1u64;
+    let mut rows = Vec::new();
+    loop {
+        let batch = MasterService::list(
+            database,
+            kind,
+            PageQuery {
+                page,
+                per_page: MAX_PAGE_SIZE,
+                is_active: Some(true),
+                ..Default::default()
+            },
+        )
+        .await?;
+        let done = !batch.meta.has_next_page;
+        rows.extend(batch.data);
+        if done {
+            break;
+        }
+        page += 1;
+    }
+    Ok(rows)
+}
+
+async fn load_unit_symbols(
+    database: &DatabaseConnection,
+) -> Result<std::collections::HashMap<String, String>, AppError> {
+    let mut map = std::collections::HashMap::new();
+    for row in load_all_masters(database, MasterKind::Unit).await? {
+        if let Some(symbol) = row.symbol {
+            map.insert(symbol.trim().to_ascii_lowercase(), row.id);
+        }
+    }
+    Ok(map)
+}
+
+async fn load_category_names(
+    database: &DatabaseConnection,
+) -> Result<std::collections::HashMap<String, String>, AppError> {
+    let mut map = std::collections::HashMap::new();
+    for row in load_all_masters(database, MasterKind::Category).await? {
+        map.insert(row.name.trim().to_ascii_lowercase(), row.id);
+    }
+    Ok(map)
 }
 
 #[cfg(test)]
@@ -632,6 +964,7 @@ mod tests {
             category_id: Uuid::new_v4().to_string(),
             base_unit_id: Uuid::new_v4().to_string(),
             created_by: None,
+            product_no: None,
             sku: None,
             barcode: None,
             is_manufactured: false,
@@ -714,6 +1047,7 @@ mod tests {
             category_id: category.id,
             base_unit_id: unit.id.clone(),
             created_by: None,
+            product_no: None,
             sku: Some("CLIENT-SKU".into()),
             barcode: None,
             is_manufactured: false,
@@ -808,6 +1142,7 @@ mod tests {
             category_id: category.id.clone(),
             base_unit_id: unit.id.clone(),
             created_by: None,
+            product_no: None,
             sku: sku.map(str::to_owned),
             barcode: None,
             is_manufactured: false,
@@ -954,6 +1289,7 @@ mod tests {
             category_id: category.id,
             base_unit_id: unit.id.clone(),
             created_by: None,
+            product_no: None,
             sku: None,
             barcode: None,
             is_manufactured: false,
@@ -1041,6 +1377,7 @@ mod tests {
             category_id: category.id,
             base_unit_id: unit.id.clone(),
             created_by: None,
+            product_no: None,
             sku: None,
             barcode: None,
             is_manufactured: false,
@@ -1125,6 +1462,7 @@ mod tests {
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
                 created_by: None,
+                product_no: None,
                 sku: None,
                 barcode: None,
                 is_manufactured: false,
@@ -1301,6 +1639,7 @@ mod tests {
                 category_id: category.id,
                 base_unit_id: piece_master.id.clone(),
                 created_by: None,
+                product_no: None,
                 sku: None,
                 barcode: Some(PIECE_BARCODE.into()),
                 is_manufactured: false,
@@ -1447,6 +1786,7 @@ mod tests {
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
                 created_by: None,
+                product_no: None,
                 sku: Some("PMX-001".into()),
                 barcode: None,
                 is_manufactured: false,
@@ -1506,6 +1846,176 @@ mod tests {
                     .any(|p| p.id == created.id && p.sku == "PMX-001"),
                 "expected PMX-001 in results for {needle:?}, got {:?}",
                 hits.iter().map(|p| p.sku.as_str()).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn import_catalog_creates_categories_then_products_with_product_id() {
+        let database = connect_memory().await.expect("memory db");
+        seed_test_owner(&database).await;
+        let context = RequestContext {
+            session_id: Uuid::new_v4(),
+            user_id: Uuid::parse_str(SEED_USER_ID).unwrap(),
+            branch_id: Uuid::parse_str(SEED_BRANCH_ID).unwrap(),
+            device_id: Uuid::parse_str(SEED_DEVICE_ID).unwrap(),
+            cash_session_id: None,
+            role: "OWNER".into(),
+            name: "Owner".into(),
+            username: "owner".into(),
+        };
+
+        // Matches imports/products-catalog.json shape (productId alias, categories first).
+        let catalog: ProductImportCatalog = serde_json::from_str(
+            r#"{
+              "categories": [
+                { "name": "Resistor", "nameUrdu": "ریزسٹر" },
+                { "name": "Battery", "nameUrdu": "بیٹری" }
+              ],
+              "products": [
+                {
+                  "productId": 1,
+                  "name": ".22 Ohm 2w",
+                  "urduName": ".22 Ohm 2w",
+                  "category": "Resistor",
+                  "minimumStock": 0,
+                  "sellUnits": [{
+                    "symbol": "pc",
+                    "name": "Piece",
+                    "contains": 1,
+                    "factorDirection": "multiply",
+                    "isBase": true,
+                    "isDefault": true,
+                    "cost": 4.1,
+                    "min": 4.5,
+                    "wholesale": 5,
+                    "price": 10
+                  }]
+                },
+                {
+                  "productId": 2,
+                  "name": "Battery 12v7A Volta",
+                  "urduName": "بیٹری 12v7A Volta",
+                  "category": "Battery",
+                  "minimumStock": 0,
+                  "warrantyQty": 12,
+                  "warrantyUnit": "MONTH",
+                  "sellUnits": [{
+                    "symbol": "pc",
+                    "name": "Piece",
+                    "contains": 1,
+                    "factorDirection": "multiply",
+                    "isBase": true,
+                    "isDefault": true,
+                    "cost": 1000,
+                    "min": 1100,
+                    "wholesale": 1200,
+                    "price": 1500
+                  }]
+                }
+              ]
+            }"#,
+        )
+        .expect("catalog json");
+
+        let result = ProductService::import_catalog(&database, &context, catalog)
+            .await
+            .expect("import");
+        assert_eq!(result.categories_created, 2);
+        assert_eq!(result.created, 2);
+        assert_eq!(result.skipped, 0);
+        assert!(
+            result.errors.is_empty(),
+            "unexpected import errors: {:?}",
+            result.errors
+        );
+
+        let by_id = ProductService::search(&database, "1", Some(context.branch_id))
+            .await
+            .expect("search productId 1");
+        assert!(
+            by_id
+                .iter()
+                .any(|p| p.product_no == 1 && p.category == "Resistor"),
+            "expected productNo=1 under Resistor, got {:?}",
+            by_id
+                .iter()
+                .map(|p| (p.product_no, p.name.as_str(), p.category.as_str()))
+                .collect::<Vec<_>>()
+        );
+
+        let by_name = ProductService::search(&database, "Volta", Some(context.branch_id))
+            .await
+            .expect("search Volta");
+        let volta = by_name
+            .iter()
+            .find(|p| p.product_no == 2)
+            .expect("productNo 2");
+        assert_eq!(volta.category, "Battery");
+        assert_eq!(volta.warranty_unit.to_ascii_lowercase(), "months");
+
+        // Re-import same productIds should skip, not duplicate.
+        let catalog_again: ProductImportCatalog = serde_json::from_str(
+            r#"{
+              "categories": [{ "name": "Resistor", "nameUrdu": "ریزسٹر" }],
+              "products": [{
+                "productId": 1,
+                "name": ".22 Ohm 2w",
+                "category": "Resistor",
+                "sellUnits": [{
+                  "symbol": "pc", "name": "Piece", "contains": 1,
+                  "isBase": true, "isDefault": true,
+                  "cost": 4.1, "min": 4.5, "wholesale": 5, "price": 10
+                }]
+              }]
+            }"#,
+        )
+        .expect("catalog again");
+        let again = ProductService::import_catalog(&database, &context, catalog_again)
+            .await
+            .expect("re-import");
+        assert_eq!(again.created, 0);
+        assert_eq!(again.skipped, 1);
+        assert_eq!(again.categories_created, 0);
+    }
+
+    #[test]
+    fn real_catalog_json_deserializes_product_id_alias() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../imports/products-catalog.json");
+        if !path.exists() {
+            return; // local dump may be gitignored
+        }
+        let raw = std::fs::read_to_string(&path).expect("read catalog");
+        let catalog: ProductImportCatalog =
+            serde_json::from_str(&raw).expect("deserialize products-catalog.json");
+        assert!(
+            !catalog.categories.is_empty(),
+            "catalog must include categories[]"
+        );
+        assert!(
+            !catalog.products.is_empty(),
+            "catalog must include products[]"
+        );
+        assert_eq!(catalog.products[0].product_no, Some(1));
+        assert!(
+            catalog
+                .products
+                .iter()
+                .all(|p| p.product_no.is_some_and(|n| n > 0)),
+            "every product needs productId"
+        );
+        let names: std::collections::HashSet<_> = catalog
+            .categories
+            .iter()
+            .map(|c| c.name.to_ascii_lowercase())
+            .collect();
+        for product in &catalog.products {
+            assert!(
+                names.contains(&product.category.to_ascii_lowercase()),
+                "product {:?} category {:?} missing from categories[]",
+                product.name,
+                product.category
             );
         }
     }

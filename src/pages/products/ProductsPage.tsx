@@ -509,6 +509,13 @@ export function ProductsPage() {
           return false;
         }
         if (
+          chip.field === "productNo" &&
+          selected.length &&
+          !selected.some((value) => String(r.productNo ?? "").includes(value.trim()))
+        ) {
+          return false;
+        }
+        if (
           chip.field === "sku" &&
           selected.length &&
           !selected.some((value) => r.sku.toLowerCase().includes(value.toLowerCase()))
@@ -658,6 +665,7 @@ export function ProductsPage() {
         next.id = created.id;
         next.categoryId = created.categoryId;
         next.category = created.category;
+        next.productNo = created.productNo;
         next.sku = created.sku;
       } else {
         const payload = buildUpdateProductPayload(next, {
@@ -671,6 +679,7 @@ export function ProductsPage() {
         const updated = await updateProduct(next.id, payload);
         next.categoryId = updated.categoryId;
         next.category = updated.category;
+        next.productNo = updated.productNo;
         next.sku = updated.sku;
         setLots((prev) => [...prev.filter((lot) => lot.productId !== next.id)]);
       }
@@ -820,6 +829,7 @@ export function ProductsPage() {
             onRemove={removeChip}
             onClear={clearChips}
             filterFields={[
+              { id: "productNo", label: "ID" },
               { id: "name", label: "Name" },
               { id: "sku", label: "SKU" },
               { id: "category", label: "Category", options: categoryOptions, searchable: true },
@@ -872,7 +882,7 @@ export function ProductsPage() {
               setQ(v);
               setPage(1);
             }}
-            searchPlaceholder="Search by name, SKU, category"
+            searchPlaceholder="Search by ID, name, SKU, category"
             view={view}
             onView={setView}
             insightControls={
@@ -1077,6 +1087,7 @@ export function ProductsPage() {
                 }}
               />
             </Th>
+            {show("productNo") ? <Th>ID</Th> : null}
             <Th>Name</Th>
             {show("urduName") ? <Th>Urdu name</Th> : null}
             {show("sku") ? <Th>SKU</Th> : null}
@@ -1135,6 +1146,9 @@ export function ProductsPage() {
                       />
                     </div>
                   </Td>
+                  {show("productNo") ? (
+                    <Td numeric>{row.productNo && row.productNo > 0 ? row.productNo : "—"}</Td>
+                  ) : null}
                   <Td>
                     <TruncatedTooltip text={row.name} />
                     {isLinearStockUnit(row.unit) ? (

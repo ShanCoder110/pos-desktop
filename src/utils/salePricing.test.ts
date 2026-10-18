@@ -190,6 +190,13 @@ describe("resolveMatchedUnitId / productMatchesQuery", () => {
     expect(productMatchesQuery(pmx, "PMX001")).toBe(true);
     expect(productMatchesQuery(pmx, "xyz")).toBe(false);
   });
+
+  it("matches product search ID", () => {
+    const numbered = { ...product, productNo: 42, sku: "P-ABCD", barcode: "", name: "Widget" };
+    expect(productMatchesQuery(numbered, "42")).toBe(true);
+    expect(productMatchesQuery(numbered, "4")).toBe(true);
+    expect(productMatchesQuery(numbered, "99")).toBe(false);
+  });
 });
 
 describe("edge cases", () => {

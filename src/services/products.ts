@@ -58,6 +58,21 @@ export function createProduct(payload: unknown) {
   });
 }
 
+export type ProductImportResult = {
+  created: number;
+  skipped: number;
+  categoriesCreated: number;
+  errors: { index: number; name: string; sku?: string; message: string }[];
+};
+
+/** Bulk import catalog JSON from Settings → Products (see `imports/products-catalog.json`). */
+export function importProductsCatalog(catalog: unknown) {
+  return apiRequest<ProductImportResult>(API_ROUTES.productsImport, {
+    method: "POST",
+    body: JSON.stringify(catalog),
+  });
+}
+
 export function updateProduct(id: string, payload: unknown) {
   return apiRequest<Product>(API_ROUTES.productById(id), {
     method: "PUT",
