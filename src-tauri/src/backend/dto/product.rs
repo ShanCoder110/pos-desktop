@@ -71,6 +71,9 @@ pub struct OpeningStockInput {
 pub struct CreateProductRequest {
     #[validate(length(min = 1, max = 160))]
     pub name: String,
+    #[serde(default)]
+    #[validate(length(max = 160))]
+    pub urdu_name: Option<String>,
     pub category_id: String,
     pub base_unit_id: String,
     #[serde(default)]
@@ -109,6 +112,9 @@ pub struct CreateProductRequest {
 pub struct UpdateProductRequest {
     #[validate(length(min = 1, max = 160))]
     pub name: Option<String>,
+    #[serde(default)]
+    #[validate(length(max = 160))]
+    pub urdu_name: Option<String>,
     pub category_id: Option<String>,
     /// When present, owner/manager may change SKU (same rules as create). Cashiers get 403.
     /// Omit the field to leave SKU unchanged — other edits must never rewrite it.
@@ -155,6 +161,7 @@ pub struct ProductSellUnitResponse {
 pub struct ProductResponse {
     pub id: String,
     pub name: String,
+    pub urdu_name: String,
     pub sku: String,
     pub barcode: String,
     pub category: String,
@@ -261,6 +268,7 @@ mod tests {
     #[test]
     fn rejects_price_order_that_can_lose_money() {
         let request = CreateProductRequest {
+            urdu_name: None,
             name: "Cable".into(),
             category_id: uuid::Uuid::new_v4().to_string(),
             base_unit_id: uuid::Uuid::new_v4().to_string(),

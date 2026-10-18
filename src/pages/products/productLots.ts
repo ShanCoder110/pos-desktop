@@ -9,6 +9,7 @@ export function blankProduct(): Product {
     id: crypto.randomUUID(),
     sku: "",
     name: "",
+    urduName: "",
     barcode: "",
     category: "",
     unit: "pc",

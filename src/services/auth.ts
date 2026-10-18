@@ -61,6 +61,34 @@ export function authStatus(signal?: AbortSignal) {
   return apiRequest<AuthStatusResponse>(API_ROUTES.authStatus, { signal });
 }
 
+/**
+ * A packaged first launch can spend a few seconds creating and migrating its
+ * local database. Keep onboarding in its loading state until the embedded API
+ * is ready instead of incorrectly falling back to the login screen.
+ */
+export async function authStatusWhenReady(signal?: AbortSignal) {
+  const attempts = 20;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await authStatus(signal);
+    } catch (error) {
+      if (isAbortError(error) || attempt === attempts) throw error;
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = () => {
+          window.clearTimeout(timer);
+          reject(new DOMException("Aborted", "AbortError"));
+        };
+        const timer = window.setTimeout(() => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        }, 500);
+        signal?.addEventListener("abort", onAbort, { once: true });
+      });
+    }
+  }
+  throw new Error("The local backend is unavailable.");
+}
+
 export function setupShop(payload: SetupPayload) {
   return apiRequest<LoginResponse>(API_ROUTES.authSetup, {
     method: "POST",

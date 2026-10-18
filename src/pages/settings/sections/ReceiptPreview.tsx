@@ -9,6 +9,7 @@ const SAMPLE_LINES: InvoiceLine[] = [
     id: "1",
     productId: "p1",
     name: 'LED TV 32" Samsung',
+    urduName: "ایل ای ڈی ٹی وی 32 انچ سام سنگ",
     qty: 1,
     unit: "Piece",
     price: 45000,
@@ -19,6 +20,7 @@ const SAMPLE_LINES: InvoiceLine[] = [
     id: "2",
     productId: "p2",
     name: "Solar Panel 540W",
+    urduName: "سولر پینل 540 واٹ",
     qty: 2,
     unit: "Piece",
     price: 18500,
@@ -29,6 +31,7 @@ const SAMPLE_LINES: InvoiceLine[] = [
     id: "3",
     productId: "p3",
     name: "USB-C Fast Charger",
+    urduName: "یو ایس بی سی فاسٹ چارجر",
     qty: 3,
     unit: "Piece",
     price: 850,
@@ -39,6 +42,7 @@ const SAMPLE_LINES: InvoiceLine[] = [
     id: "4",
     productId: "p4",
     name: "Bluetooth Speaker JBL",
+    urduName: "بلوٹوتھ اسپیکر جے بی ایل",
     qty: 1,
     unit: "Piece",
     price: 3200,
@@ -59,7 +63,8 @@ export function ReceiptPreview({ settings }: { settings: ShopSettings }) {
   const paper = settings.printerPaperWidth ?? settings.paperWidth;
   const thermal = settings.printSize === "thermal";
   const widthPx = thermal ? thermalWidthPx(paper) : 320;
-  const total = SAMPLE_LINES.reduce((sum, line) => sum + line.qty * line.price, 0);
+  const discount = 1700;
+  const total = SAMPLE_LINES.reduce((sum, line) => sum + line.qty * line.price, 0) - discount;
 
   return (
     <div className="receipt-settings-preview">
@@ -71,9 +76,10 @@ export function ReceiptPreview({ settings }: { settings: ShopSettings }) {
           customer={SAMPLE_CUSTOMER}
           lines={SAMPLE_LINES}
           total={total}
-          paid={90000}
+          discount={discount}
+          paid={0}
           balanceBefore={2500}
-          balanceAfter={Math.max(0, 2500 - (90000 - total))}
+          balanceAfter={2500 + total}
           invoiceNumber={`${settings.invoicePrefix || "INV"}-0001`}
         />
       </div>

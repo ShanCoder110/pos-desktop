@@ -69,7 +69,8 @@ export function PrinterSection() {
       />
       {draft.splitLongBill ? (
         <p className="settings-inline-hint">
-          Cut long thermal bills into pages. Products per page below. Ignored for A4.
+          Split long thermal bills into separate print pages. Configure the Windows printer driver
+          to cut after each page; this option is ignored for A4.
         </p>
       ) : null}
       {draft.splitLongBill ? (

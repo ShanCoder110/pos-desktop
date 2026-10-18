@@ -90,6 +90,7 @@ export function buildCreateProductPayload(
 
   const payload: Record<string, unknown> = {
     name: product.name.trim(),
+    urduName: product.urduName?.trim() || "",
     categoryId: options.categoryId,
     baseUnitId: mapped.baseUnitId,
     isManufactured: product.isManufactured,
@@ -151,6 +152,7 @@ export function buildUpdateProductPayload(
 
   const payload: Record<string, unknown> = {
     name: product.name.trim(),
+    urduName: product.urduName?.trim() || "",
     categoryId: options.categoryId,
     minimumStock: product.minimumStock ?? 0,
     warrantyQty: product.warrantyEnabled ? product.warrantyQty : 0,

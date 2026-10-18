@@ -1,9 +1,11 @@
 pub const API_HOST: &str = "127.0.0.1";
 pub const API_PORT: u16 = 38_472;
 pub const API_PREFIX: &str = "/api/v1";
-pub const ALLOWED_API_ORIGINS: [&str; 4] = [
+pub const ALLOWED_API_ORIGINS: [&str; 5] = [
     "http://localhost:1420",
     "http://127.0.0.1:1420",
+    // Tauri's production WebView2 origin on Windows.
+    "http://tauri.localhost",
     "tauri://localhost",
     "https://tauri.localhost",
 ];

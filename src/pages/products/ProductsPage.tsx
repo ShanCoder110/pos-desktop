@@ -1078,6 +1078,7 @@ export function ProductsPage() {
               />
             </Th>
             <Th>Name</Th>
+            {show("urduName") ? <Th>Urdu name</Th> : null}
             {show("sku") ? <Th>SKU</Th> : null}
             {show("category") ? <Th>Category</Th> : null}
             {show("supplier") ? <Th>Last supplier</Th> : null}
@@ -1141,6 +1142,13 @@ export function ProductsPage() {
                     ) : null}
                     {row.isManufactured ? <span className="sub">Production</span> : null}
                   </Td>
+                  {show("urduName") ? (
+                    <Td>
+                      <span dir="rtl" lang="ur" className="receipt-text-urdu">
+                        {row.urduName || "—"}
+                      </span>
+                    </Td>
+                  ) : null}
                   {show("sku") ? <Td>{row.sku || "—"}</Td> : null}
                   {show("category") ? <Td>{row.category}</Td> : null}
                   {show("supplier") ? (

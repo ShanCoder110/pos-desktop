@@ -144,6 +144,27 @@ export const RECEIPT_THERMAL_CSS = `
   color: #000;
 }
 
+.receipt-payment-banner {
+  margin: 2px 0 6px;
+  padding: 2px 8px;
+  border: 1px solid #000;
+  text-align: center;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.receipt-payment-banner--small { font-size: 0.9em; }
+.receipt-payment-banner--medium { font-size: 1.15em; padding-block: 3px; }
+.receipt-payment-banner--large { font-size: 1.45em; padding-block: 4px; border-width: 2px; }
+
+.receipt-payment-banner.is-partial {
+  border-style: dashed;
+}
+
+.receipt-payment-banner.is-paid {
+  font-weight: 700;
+}
+
 .receipt-meta-row {
   display: flex;
   justify-content: space-between;
@@ -227,9 +248,21 @@ export const RECEIPT_THERMAL_CSS = `
   line-height: 1.5;
 }
 
-.receipt-inner--urdu-rtl .receipt-total-row,
-.receipt-inner--urdu-rtl .receipt-grand-total-row {
-  flex-direction: row-reverse;
+.receipt-inner--urdu-rtl,
+.receipt-inner--urdu-rtl * {
+  font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', serif !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+.receipt-inner--urdu-rtl {
+  direction: rtl;
+  line-height: 1.55;
+}
+
+.receipt-meta-value {
+  unicode-bidi: plaintext;
+  text-align: left;
 }
 
 .receipt-items-table .receipt-item-detail {

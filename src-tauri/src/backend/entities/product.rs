@@ -9,6 +9,7 @@ pub struct Model {
     pub category_id: Uuid,
     pub base_unit_id: Uuid,
     pub name: String,
+    pub urdu_name: Option<String>,
     pub sku: String,
     pub barcode: String,
     pub product_type: String,

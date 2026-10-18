@@ -112,6 +112,7 @@ impl ProductService {
                 category_id: Set(category_id),
                 base_unit_id: Set(base_unit_id),
                 name: Set(request.name.trim().to_owned()),
+                urdu_name: Set(trimmed(&request.urdu_name)),
                 sku: Set(sku),
                 barcode: Set(barcode),
                 product_type: Set(if request.is_manufactured {
@@ -230,6 +231,9 @@ impl ProductService {
         active.base_unit_id = Set(base_unit_id);
         if let Some(name) = request.name {
             active.name = Set(name.trim().to_owned());
+        }
+        if let Some(urdu_name) = request.urdu_name {
+            active.urdu_name = Set(trimmed(&Some(urdu_name)));
         }
         if let Some(category_id) = request.category_id {
             active.category_id = Set(parse_uuid(&category_id, "categoryId")?);
@@ -623,6 +627,7 @@ mod tests {
     #[test]
     fn normalizes_money_and_quantity_at_the_service_boundary() {
         let mut request = CreateProductRequest {
+            urdu_name: None,
             name: "Test".into(),
             category_id: Uuid::new_v4().to_string(),
             base_unit_id: Uuid::new_v4().to_string(),
@@ -704,6 +709,7 @@ mod tests {
             .find(|unit| unit.symbol.as_deref() == Some("pc"))
             .expect("seeded Piece unit");
         let request = CreateProductRequest {
+            urdu_name: None,
             name: "Switch".into(),
             category_id: category.id,
             base_unit_id: unit.id.clone(),
@@ -797,6 +803,7 @@ mod tests {
             .expect("piece");
 
         let base = |name: &str, sku: Option<&str>| CreateProductRequest {
+            urdu_name: None,
             name: name.into(),
             category_id: category.id.clone(),
             base_unit_id: unit.id.clone(),
@@ -856,6 +863,7 @@ mod tests {
             &context,
             Uuid::parse_str(&created.id).unwrap(),
             UpdateProductRequest {
+                urdu_name: None,
                 name: Some("Matrix Renamed".into()),
                 category_id: None,
                 sku: None,
@@ -881,6 +889,7 @@ mod tests {
             &cashier,
             Uuid::parse_str(&created.id).unwrap(),
             UpdateProductRequest {
+                urdu_name: None,
                 name: None,
                 category_id: None,
                 sku: Some("PMX-009".into()),
@@ -940,6 +949,7 @@ mod tests {
             .find(|unit| unit.symbol.as_deref() == Some("pc"))
             .expect("seeded Piece unit");
         let request = CreateProductRequest {
+            urdu_name: None,
             name: "ZeroContainsBranch".into(),
             category_id: category.id,
             base_unit_id: unit.id.clone(),
@@ -1026,6 +1036,7 @@ mod tests {
             .find(|unit| unit.symbol.as_deref() == Some("pc"))
             .expect("seeded Piece unit");
         let request = CreateProductRequest {
+            urdu_name: None,
             name: "ZeroStockProduct".into(),
             category_id: category.id,
             base_unit_id: unit.id.clone(),
@@ -1109,6 +1120,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Cable".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -1157,6 +1169,7 @@ mod tests {
             &context,
             product_id,
             UpdateProductRequest {
+                urdu_name: None,
                 name: Some("Cable updated".into()),
                 category_id: None,
                 sku: None,
@@ -1194,6 +1207,7 @@ mod tests {
             &context,
             product_id,
             UpdateProductRequest {
+                urdu_name: None,
                 name: Some("Cable updated again".into()),
                 category_id: None,
                 sku: None,
@@ -1282,6 +1296,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "QA Barcode Widget".into(),
                 category_id: category.id,
                 base_unit_id: piece_master.id.clone(),
@@ -1427,6 +1442,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Pricing Matrix Multi-Unit".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),

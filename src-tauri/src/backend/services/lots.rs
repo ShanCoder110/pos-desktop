@@ -242,6 +242,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Lot Remaining Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -524,6 +525,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Expiry Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -758,6 +760,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Shrink Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),

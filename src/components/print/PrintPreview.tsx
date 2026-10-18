@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { MessageCircle, Printer, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { InvoiceThermalReceipt } from "@/components/print/InvoiceThermalReceipt";
@@ -21,18 +21,21 @@ export function PrintPreview({
   customer,
   lines,
   total,
+  discount = 0,
   paid,
   balanceBefore,
   balanceAfter,
   duplicate,
   invoiceNumber,
   splitOverride,
+  printRequestId = 0,
 }: {
   open: boolean;
   onClose: () => void;
   customer: Customer;
   lines: InvoiceLine[];
   total: number;
+  discount?: number;
   paid: number;
   balanceBefore: number;
   balanceAfter: number;
@@ -40,12 +43,17 @@ export function PrintPreview({
   invoiceNumber?: string;
   /** POS F10 session toggle; falls back to settings.splitLongBill */
   splitOverride?: boolean;
+  /** Increment to open the native print dialog as soon as this preview is ready. */
+  printRequestId?: number;
 }) {
   const { settings } = useSettings();
   const slipRef = useRef<HTMLDivElement>(null);
+  const handledPrintRequestRef = useRef(0);
   const paper = settings.printerPaperWidth ?? settings.paperWidth;
   const thermal = settings.printSize === "thermal";
   const widthPx = thermal ? thermalWidthPx(paper) : 560;
+  const printWidth = thermal ? (paper === "MM_58" ? "54mm" : "72mm") : "210mm";
+  const printPageSize = thermal ? `${printWidth} auto` : "A4";
   const splitOn = shouldSplitThermalBill(splitOverride ?? settings.splitLongBill, paper);
   const pages = useMemo(
     () =>
@@ -79,19 +87,16 @@ export function PrintPreview({
         customer,
         lines,
         total,
+        discount,
         paid,
         balanceBefore,
         balanceAfter,
         invoiceNumber,
       }),
-    [settings, customer, lines, total, paid, balanceBefore, balanceAfter, invoiceNumber],
+    [settings, customer, lines, total, discount, paid, balanceBefore, balanceAfter, invoiceNumber],
   );
 
-  if (!open) return null;
-
-  const hasPhone = Boolean(customer.phone);
-
-  function handlePrint() {
+  const handlePrint = useCallback(() => {
     const node = slipRef.current;
     if (!node) {
       window.print();
@@ -99,16 +104,29 @@ export function PrintPreview({
     }
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>Receipt</title><style>
       ${jameelNooriFontFaceCss()}
-      @page { size: 72mm auto; margin: 0; }
-      html, body { width: 72mm; max-width: 72mm; margin: 0; padding: 0; background: #fff; }
-      .slip-page { break-after: page; width: 100%; }
+      @page { size: ${printPageSize}; margin: 0; }
+      html, body { width: ${printWidth}; max-width: ${printWidth}; margin: 0; padding: 0; background: #fff; }
+      .slip-page { break-after: page; page-break-after: always; width: 100%; }
       .slip-page:last-child { break-after: auto; }
       .thermal-receipt-preview { width: 100%; max-width: 100%; }
       .receipt-inner { width: 100%; max-width: 100%; box-sizing: border-box; }
       ${RECEIPT_THERMAL_CSS}
     </style></head><body>${node.innerHTML}</body></html>`;
     printReceiptHtml(html);
-  }
+  }, [printPageSize, printWidth]);
+
+  useEffect(() => {
+    if (!open || printRequestId <= 0 || handledPrintRequestRef.current === printRequestId) return;
+    handledPrintRequestRef.current = printRequestId;
+    const frame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(handlePrint);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [handlePrint, open, printRequestId]);
+
+  if (!open) return null;
+
+  const hasPhone = Boolean(customer.phone);
 
   function handleWhatsApp() {
     if (!customer.phone) return;
@@ -130,6 +148,7 @@ export function PrintPreview({
                 customer={customer}
                 lines={lines}
                 total={total}
+                discount={discount}
                 paid={paid}
                 balanceBefore={balanceBefore}
                 balanceAfter={balanceAfter}

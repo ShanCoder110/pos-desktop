@@ -1,6 +1,6 @@
 import type { Customer, InvoiceLine } from "@/shared/types";
 import type { ShopSettings } from "@/shared/types";
-import { money } from "@/utils/format";
+import { receiptMoney } from "@/utils/format";
 import { isTauri } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -17,36 +17,79 @@ export function thermalLabel(paper: ShopSettings["paperWidth"] | undefined) {
   return "Thermal 80mm";
 }
 
+function receiptTextUnit(unit: string, urdu: boolean) {
+  const normalized = unit.trim().toLowerCase();
+  if (["piece", "pieces", "pc", "pcs"].includes(normalized)) return urdu ? "عدد" : "pcs";
+  if (["foot", "feet", "ft"].includes(normalized)) return urdu ? "فٹ" : "Foot";
+  return unit;
+}
+
 export function buildReceiptText(opts: {
   settings: ShopSettings;
   customer: Customer;
   lines: InvoiceLine[];
   total: number;
+  discount?: number;
   paid: number;
   balanceBefore?: number;
   balanceAfter?: number;
   invoiceNumber?: string;
 }) {
-  const { settings, customer, lines, total, paid, balanceBefore, balanceAfter, invoiceNumber } =
-    opts;
+  const {
+    settings,
+    customer,
+    lines,
+    total,
+    discount = 0,
+    paid,
+    balanceBefore,
+    balanceAfter,
+    invoiceNumber,
+  } = opts;
   const shop = settings.receiptShopName || settings.shopName;
+  const urdu = settings.receiptLanguage === "UR";
+  const status =
+    paid <= 0.009
+      ? urdu
+        ? "غیر ادا شدہ"
+        : "Unpaid"
+      : paid + 0.009 < total
+        ? urdu
+          ? "جزوی ادا شدہ"
+          : "Partially paid"
+        : urdu
+          ? "ادا شدہ"
+          : "Paid";
+  const subtotal = total + Math.max(0, discount);
+  const newBalance = customer.isWalking ? Math.max(0, total - paid) : (balanceAfter ?? 0);
   const bits = [
     `*${shop}*`,
-    invoiceNumber ? `Invoice: ${invoiceNumber}` : undefined,
-    `Customer: ${customer.name}`,
-    customer.phone ? `Phone: ${customer.phone}` : undefined,
+    paid + 0.009 < total ? `*${status.toUpperCase()}*` : undefined,
+    invoiceNumber ? `${urdu ? "انوائس" : "Invoice"}: ${invoiceNumber}` : undefined,
+    `${urdu ? "گاہک" : "Customer"}: ${customer.name}`,
+    customer.phone ? `${urdu ? "فون" : "Phone"}: ${customer.phone}` : undefined,
     "",
     ...lines.map(
-      (line) => `${line.qty} ${line.unit} ${line.name} — ${money(line.qty * line.price)}`,
+      (line) =>
+        `${line.qty} ${receiptTextUnit(line.unit, urdu)} ${urdu ? line.urduName?.trim() || line.name : line.name} — ${receiptMoney(line.qty * line.price)}`,
     ),
     "",
-    `Total: ${money(total)}`,
-    `Paid: ${money(paid)}`,
+    `${urdu ? "ذیلی کل" : "Subtotal"}: ${receiptMoney(subtotal)}`,
+    `${urdu ? "رعایت" : "Discount"}: ${discount > 0 ? "-" : ""}${receiptMoney(discount)}`,
   ];
-  if (settings.showBalanceOnSlip && balanceBefore != null && balanceAfter != null) {
-    bits.push(`Previous balance: ${money(balanceBefore)}`);
-    bits.push(`Balance after: ${money(balanceAfter)}`);
+  if (
+    settings.showBalanceOnSlip &&
+    !customer.isWalking &&
+    balanceBefore != null &&
+    Math.abs(balanceBefore) > 0.009
+  ) {
+    bits.push(`${urdu ? "سابقہ بیلنس" : "Sabka Balance"}: ${receiptMoney(balanceBefore)}`);
   }
+  bits.push(
+    `*${urdu ? "کل بل" : "Total Bill"} (${lines.length} ${urdu ? "اشیاء" : `item${lines.length === 1 ? "" : "s"}`}): ${receiptMoney(total)}*`,
+    `*${urdu ? "ادا شدہ رقم" : "Amount paid"}: ${receiptMoney(paid)}*`,
+    `*${urdu ? "نیا بیلنس" : "New Balance"}: ${receiptMoney(newBalance)}*`,
+  );
   if (settings.footer) bits.push("", settings.footer);
   return bits.filter((line) => line !== undefined).join("\n");
 }

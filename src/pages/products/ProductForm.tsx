@@ -1114,6 +1114,17 @@ export function ProductForm({
                 onChange={(e) => patch({ name: e.target.value })}
               />
             </Field>
+            <Field label="Urdu name" hint="Optional. Used when invoice language is Urdu.">
+              <TextInput
+                data-field="urduName"
+                dir="rtl"
+                lang="ur"
+                maxLength={FIELD_LIMITS.productName}
+                placeholder="مثلاً 1.5 ایم ایم تانبے کی تار"
+                value={product.urduName ?? ""}
+                onChange={(e) => patch({ urduName: e.target.value })}
+              />
+            </Field>
             <Field
               label="SKU"
               hint={

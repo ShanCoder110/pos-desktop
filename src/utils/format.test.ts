@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { formatDetailDate, formatTableDate, formatTableDateTime } from "@/utils/format";
+import {
+  formatDetailDate,
+  formatTableDate,
+  formatTableDateTime,
+  receiptMoneyNum,
+} from "@/utils/format";
+
+describe("receiptMoneyNum", () => {
+  it("omits zero decimals and keeps real fractional values", () => {
+    expect(receiptMoneyNum(45_000)).toBe("45,000");
+    expect(receiptMoneyNum(45_000.5)).toBe("45,000.5");
+    expect(receiptMoneyNum(45_000.25)).toBe("45,000.25");
+  });
+});
 
 describe("formatTableDate", () => {
   it("formats date-only as day mon year", () => {

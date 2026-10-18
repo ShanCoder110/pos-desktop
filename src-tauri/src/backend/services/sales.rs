@@ -325,6 +325,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Ledger Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -657,6 +658,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Mix Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -995,6 +997,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Return Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -1371,6 +1374,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Profit Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -1677,6 +1681,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Return Edit Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -1868,6 +1873,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Void Return Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -2052,6 +2058,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Noop Revise Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -2313,6 +2320,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Split Noop Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -2549,6 +2557,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Alloc Revise Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -2841,6 +2850,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Alloc Low Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -3056,6 +3066,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Walk Revise Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -3206,6 +3217,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Oversell Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -3351,6 +3363,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Void Credit Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -3508,6 +3521,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Bill Disc Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),

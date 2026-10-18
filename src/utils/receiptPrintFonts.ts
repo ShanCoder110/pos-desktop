@@ -21,6 +21,5 @@ export function jameelNooriFontFaceCss(origin?: string): string {
   font-weight: normal;
   font-style: normal;
   font-display: block;
-  unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }`;
 }

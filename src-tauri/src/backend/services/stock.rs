@@ -302,6 +302,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Count Down Widget".into(),
                 category_id,
                 base_unit_id: pc.clone(),
@@ -385,6 +386,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Count Box Widget".into(),
                 category_id,
                 base_unit_id: pc.clone(),
@@ -484,6 +486,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Count Up Widget".into(),
                 category_id,
                 base_unit_id: pc.clone(),
@@ -599,6 +602,7 @@ mod tests {
             &database,
             &owner,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Cashier Count Widget".into(),
                 category_id,
                 base_unit_id: pc.clone(),
@@ -672,6 +676,7 @@ mod tests {
             &database,
             &owner,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Max Count Widget".into(),
                 category_id,
                 base_unit_id: pc.clone(),
@@ -769,6 +774,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Reconcile Widget".into(),
                 category_id,
                 base_unit_id: pc.clone(),
@@ -862,6 +868,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Blob Uuid Widget".into(),
                 category_id,
                 base_unit_id: pc.clone(),

@@ -264,6 +264,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Supp Widget".into(),
                 category_id: category.id,
                 base_unit_id: unit.id.clone(),
@@ -488,6 +489,7 @@ mod tests {
             &database,
             &context,
             CreateProductRequest {
+                urdu_name: None,
                 name: "Pack Widget".into(),
                 category_id: category.id,
                 base_unit_id: pc.id.clone(),

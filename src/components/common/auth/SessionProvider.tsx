@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { AUTH_ENABLED, SessionContext, type AuthPhase } from "@/shared/auth/session";
 import { AUTH_COPY } from "@/shared/constants/auth";
 import {
-  authStatus,
+  authStatusWhenReady,
   loginWithDevice,
   logout as apiLogout,
   me,
@@ -25,7 +25,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const status = await authStatus();
+      const status = await authStatusWhenReady();
       setShopName(status.shopName ?? null);
       if (status.needsSetup) {
         clearTokens();

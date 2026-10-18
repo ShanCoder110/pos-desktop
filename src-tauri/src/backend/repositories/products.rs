@@ -20,6 +20,7 @@ struct ProductProjection {
     category_id: Uuid,
     base_unit_id: Uuid,
     name: String,
+    urdu_name: Option<String>,
     sku: String,
     barcode: String,
     product_type: String,
@@ -435,7 +436,7 @@ fn projection_sql(branch_id: Option<Uuid>) -> (String, Vec<sea_orm::Value>) {
         )
     };
     let sql = format!(
-        "SELECT p.id, p.category_id, p.base_unit_id, p.name, p.sku, p.barcode, p.product_type, p.minimum_stock, p.warranty_duration, p.warranty_unit, p.warranty_note, p.is_active, p.created_at, p.updated_at, c.name AS category, u.symbol AS unit_symbol, {stock_expr} AS stock, {damaged_expr} AS damaged, CAST(COALESCE((SELECT pl.purchase_price_per_base FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND pl.remaining_base_quantity > 0 ORDER BY pl.received_date ASC, pl.created_at ASC LIMIT 1), (SELECT pl.purchase_price_per_base FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL ORDER BY pl.received_date DESC, pl.created_at DESC LIMIT 1), 0) AS REAL) AS current_cost, (SELECT pl.supplier_id FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND pl.remaining_base_quantity > 0 ORDER BY pl.received_date ASC, pl.created_at ASC LIMIT 1) AS supplier_id, COALESCE((SELECT COUNT(*) FROM warranty_claim_items wci WHERE wci.product_id = p.id), 0) AS claims FROM products p JOIN product_categories c ON c.id = p.category_id JOIN units u ON u.id = p.base_unit_id"
+        "SELECT p.id, p.category_id, p.base_unit_id, p.name, p.urdu_name, p.sku, p.barcode, p.product_type, p.minimum_stock, p.warranty_duration, p.warranty_unit, p.warranty_note, p.is_active, p.created_at, p.updated_at, c.name AS category, u.symbol AS unit_symbol, {stock_expr} AS stock, {damaged_expr} AS damaged, CAST(COALESCE((SELECT pl.purchase_price_per_base FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND pl.remaining_base_quantity > 0 ORDER BY pl.received_date ASC, pl.created_at ASC LIMIT 1), (SELECT pl.purchase_price_per_base FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL ORDER BY pl.received_date DESC, pl.created_at DESC LIMIT 1), 0) AS REAL) AS current_cost, (SELECT pl.supplier_id FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND pl.remaining_base_quantity > 0 ORDER BY pl.received_date ASC, pl.created_at ASC LIMIT 1) AS supplier_id, COALESCE((SELECT COUNT(*) FROM warranty_claim_items wci WHERE wci.product_id = p.id), 0) AS claims FROM products p JOIN product_categories c ON c.id = p.category_id JOIN units u ON u.id = p.base_unit_id"
     );
     let _ = &mut values;
     (sql, values)
@@ -460,7 +461,7 @@ fn build_conditions(
         // Case-insensitive partial match on name/sku/barcode/category/unit barcodes.
         // Also match hyphen/space-stripped SKU/barcode so "pmx001" hits "PMX-001".
         parts.push(
-            "(lower(p.name) LIKE ? OR lower(p.sku) LIKE ? OR lower(p.barcode) LIKE ? OR lower(c.name) LIKE ? OR EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.deleted_at IS NULL AND lower(COALESCE(pu.barcode, '')) LIKE ?) OR replace(replace(lower(p.sku), '-', ''), ' ', '') LIKE ? OR replace(replace(lower(COALESCE(p.barcode, '')), '-', ''), ' ', '') LIKE ? OR EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.deleted_at IS NULL AND replace(replace(lower(COALESCE(pu.barcode, '')), '-', ''), ' ', '') LIKE ?))"
+            "(lower(p.name) LIKE ? OR lower(COALESCE(p.urdu_name, '')) LIKE ? OR lower(p.sku) LIKE ? OR lower(p.barcode) LIKE ? OR lower(c.name) LIKE ? OR EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.deleted_at IS NULL AND lower(COALESCE(pu.barcode, '')) LIKE ?) OR replace(replace(lower(p.sku), '-', ''), ' ', '') LIKE ? OR replace(replace(lower(COALESCE(p.barcode, '')), '-', ''), ' ', '') LIKE ? OR EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.deleted_at IS NULL AND replace(replace(lower(COALESCE(pu.barcode, '')), '-', ''), ' ', '') LIKE ?))"
                 .to_owned(),
         );
         let needle = format!("%{}%", search.to_lowercase());
@@ -473,6 +474,7 @@ fn build_conditions(
                 .collect::<String>()
         );
         values.extend([
+            needle.clone().into(),
             needle.clone().into(),
             needle.clone().into(),
             needle.clone().into(),
@@ -673,6 +675,7 @@ async fn hydrate(
             ProductResponse {
                 id: row.id.to_string(),
                 name: row.name,
+                urdu_name: row.urdu_name.unwrap_or_default(),
                 sku: row.sku,
                 barcode: row.barcode,
                 category: row.category,

@@ -5,6 +5,10 @@ export type PrintSize = "thermal" | "a4";
 export type PaperWidth = "MM_58" | "MM_80" | "A4";
 export type { ReceiptFontFamily };
 export type AppLanguage = "EN" | "UR";
+export type ReceiptLanguage = "EN" | "UR";
+export type ReceiptTextSize = "small" | "medium" | "large";
+export type ReceiptTextAlign = "left" | "center" | "right";
+export type ReceiptHeaderLayout = "text" | "logo" | "logo_text";
 export type BranchKind = "retail" | "repair";
 export type Unit = "pc" | "m";
 export type InvoiceStatus = "paid" | "partial" | "credit" | "held";
@@ -41,8 +45,24 @@ export interface ShopSettings {
   receiptShopName: string;
   paperWidth: PaperWidth;
   showLogo: boolean;
+  /** Locally stored data URL used only by this installation for invoice printing. */
+  receiptLogoDataUrl: string;
+  receiptLogoScale: number;
+  receiptHeaderLayout: ReceiptHeaderLayout;
+  receiptTextSize: ReceiptTextSize;
+  receiptPaymentStatusSize: ReceiptTextSize;
+  receiptShopNameSize: ReceiptTextSize;
+  receiptShopNameBold: boolean;
+  receiptTaglineAlign: ReceiptTextAlign;
+  receiptContactAlign: ReceiptTextAlign;
+  receiptFooterSize: ReceiptTextSize;
+  receiptFooterBold: boolean;
+  receiptPromoAlign: ReceiptTextAlign;
+  receiptPromoSize: ReceiptTextSize;
+  receiptPromoBold: boolean;
   showCashierName: boolean;
   showItemDiscount: boolean;
+  receiptLanguage: ReceiptLanguage;
   tagline: string;
   contactLine: string;
   promoUrdu: string;
@@ -137,6 +157,7 @@ export interface Product {
   categoryId?: string;
   baseUnitId?: string;
   name: string;
+  urduName?: string;
   sku: string;
   barcode?: string;
   category: string;
@@ -188,11 +209,13 @@ export interface InvoiceLine {
   id: string;
   productId: string;
   name: string;
+  urduName?: string;
   qty: number;
   unit: string;
   price: number;
   minFloor: number;
   lotsNote: string;
+  discount?: number;
 }
 
 export interface Invoice {

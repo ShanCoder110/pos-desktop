@@ -367,10 +367,12 @@ export function PosWorkspace() {
   const [holdsOpen, setHoldsOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
+  const [printRequestId, setPrintRequestId] = useState(0);
   const [receiptInvoiceNo, setReceiptInvoiceNo] = useState("");
   const [receiptSnap, setReceiptSnap] = useState<{
     lines: InvoiceLine[];
     total: number;
+    discount: number;
     paid: number;
     balanceBefore: number;
     balanceAfter: number;
@@ -1481,19 +1483,22 @@ export function PosWorkspace() {
     if (roundAmt > 0) showToast(`${money(roundAmt)} added to bill discount`);
   }
 
-  function openReceipt(invoiceNumber = receiptInvoiceNo) {
+  function openReceipt(invoiceNumber = receiptInvoiceNo, printNow = false) {
     setReceiptSnap({
       lines: cart.map((item) => ({
         id: item.id,
         productId: item.productId,
         name: item.name,
+        urduName: products.find((product) => product.id === item.productId)?.urduName,
         qty: item.qty,
         unit: item.sellUnit,
-        price: item.unitPrice,
+        price: item.listPrice,
         minFloor: item.minPrice,
         lotsNote: item.lotsNote,
+        discount: item.lineDisc,
       })),
       total: t.total,
+      discount: t.lineDisc + t.billDiscount,
       paid: amountPaid,
       balanceBefore: previousBalance,
       balanceAfter,
@@ -1502,6 +1507,7 @@ export function PosWorkspace() {
     });
     if (invoiceNumber) setReceiptInvoiceNo(invoiceNumber);
     setPrintOpen(true);
+    if (printNow) setPrintRequestId((request) => request + 1);
   }
 
   async function completeSale() {
@@ -1616,6 +1622,7 @@ export function PosWorkspace() {
           ? `Invoice ${invoice.invoiceNumber} updated`
           : `Sale ${invoice.invoiceNumber} complete`,
       );
+      if (settings.autoPrint) openReceipt(invoice.invoiceNumber, true);
       newBill(true);
     } catch (error) {
       const message = errorToastMessage(error, "Could not complete sale");
@@ -1674,7 +1681,7 @@ export function PosWorkspace() {
       F7: () => applyExact(),
       F8: () => document.getElementById("billDiscount")?.focus(),
       F9: () => {
-        if (cart.length) openReceipt();
+        if (cart.length) openReceipt(receiptInvoiceNo, true);
         else showToast("Nothing to print");
       },
       F10: () => {
@@ -1733,11 +1740,13 @@ export function PosWorkspace() {
     id: c.id,
     productId: c.productId,
     name: c.name,
+    urduName: products.find((product) => product.id === c.productId)?.urduName,
     qty: c.qty,
     unit: c.sellUnit,
-    price: c.unitPrice,
+    price: c.listPrice,
     minFloor: c.minPrice,
     lotsNote: c.lotsNote,
+    discount: c.lineDisc,
   }));
 
   const cartAllMode = !cart.length
@@ -2847,7 +2856,7 @@ export function PosWorkspace() {
                 type="button"
                 className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print-ur"
                 onClick={() => {
-                  if (cart.length) openReceipt();
+                  if (cart.length) openReceipt(receiptInvoiceNo, true);
                   else showToast("Nothing to print");
                 }}
               >
@@ -2857,7 +2866,7 @@ export function PosWorkspace() {
                 type="button"
                 className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print"
                 onClick={() => {
-                  if (cart.length) openReceipt();
+                  if (cart.length) openReceipt(receiptInvoiceNo, true);
                   else showToast("Nothing to print");
                 }}
               >
@@ -3166,12 +3175,14 @@ export function PosWorkspace() {
         customer={receiptSnap?.customer ?? displayCustomer}
         lines={receiptSnap?.lines ?? invoiceLines}
         total={receiptSnap?.total ?? t.total}
+        discount={receiptSnap?.discount ?? t.lineDisc + t.billDiscount}
         paid={receiptSnap?.paid ?? amountPaid}
         balanceBefore={receiptSnap?.balanceBefore ?? customer.balance}
         balanceAfter={receiptSnap?.balanceAfter ?? balanceAfter}
         duplicate={false}
         invoiceNumber={receiptSnap?.invoiceNumber ?? (receiptInvoiceNo || undefined)}
         splitOverride={splitPrint}
+        printRequestId={printRequestId}
       />
     </>
   );

@@ -14,6 +14,18 @@ export function moneyNum(n: number) {
   });
 }
 
+/** Receipt amount: omit .00, but retain up to two digits when a real fraction exists. */
+export function receiptMoneyNum(n: number) {
+  return Math.abs(n).toLocaleString("en-PK", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
+
+export function receiptMoney(n: number) {
+  return `Rs ${receiptMoneyNum(n)}`;
+}
+
 /** Amount with Rs for lists and messages */
 export function money(n: number) {
   return `Rs ${moneyNum(n)}`;
