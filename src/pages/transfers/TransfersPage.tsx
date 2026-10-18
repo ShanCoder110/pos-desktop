@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Eye, Plus } from "lucide-react";
 import {
@@ -199,9 +199,9 @@ export function TransfersPage() {
     }
   }, [prefilledProductId, prefilledLotId]);
 
-  function openCreate() {
+  const openCreate = useCallback(() => {
     setCreateOpen(true);
-  }
+  }, []);
 
   function closeCreate() {
     setCreateOpen(false);

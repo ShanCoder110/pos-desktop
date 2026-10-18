@@ -150,9 +150,10 @@ export function ProductDetailDrawer({
   onReorder: (productId: string) => void;
 }) {
   const [hereBranchId, setHereBranchId] = useState("");
+  const productId = product?.id;
 
   useEffect(() => {
-    if (!product) return;
+    if (!productId) return;
     const controller = new AbortController();
     void ensureSession(controller.signal)
       .then((session) => {
@@ -160,7 +161,7 @@ export function ProductDetailDrawer({
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [product?.id]);
+  }, [productId]);
 
   if (!product) return null;
 

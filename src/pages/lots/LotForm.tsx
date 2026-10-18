@@ -51,12 +51,12 @@ function focusableElements(root: HTMLElement) {
 
 function latestLot(
   lots: ProductLotRow[],
-  lot: ProductLotRow,
+  excludeLotId: string,
   match: (candidate: ProductLotRow) => boolean,
 ) {
   return (
     lots
-      .filter((candidate) => candidate.id !== lot.id && match(candidate))
+      .filter((candidate) => candidate.id !== excludeLotId && match(candidate))
       .slice()
       .sort(
         (a, b) =>
@@ -69,13 +69,13 @@ function previousSupplierLot(lots: ProductLotRow[], lot: ProductLotRow) {
   if (!lot.productId || !lot.supplierId) return null;
   return latestLot(
     lots,
-    lot,
+    lot.id,
     (candidate) => candidate.productId === lot.productId && candidate.supplierId === lot.supplierId,
   );
 }
 
-function lastProductLot(lots: ProductLotRow[], lot: ProductLotRow, productId: string) {
-  return latestLot(lots, lot, (candidate) => candidate.productId === productId);
+function lastProductLot(lots: ProductLotRow[], excludeLotId: string, productId: string) {
+  return latestLot(lots, excludeLotId, (candidate) => candidate.productId === productId);
 }
 
 function productPrices(product: Product | undefined) {
@@ -304,6 +304,8 @@ export function LotForm({
       })
       .catch(() => undefined);
     return () => controller.abort();
+    // Reset branch UI when editing a different lot, not on every lot field edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync on lot.id only
   }, [isNew, lot.id]);
 
   useEffect(() => {
@@ -311,7 +313,7 @@ export function LotForm({
       setSupplierFromLotId(null);
       return;
     }
-    const lastLot = lastProductLot(lots, lot, lot.productId);
+    const lastLot = lastProductLot(lots, lot.id, lot.productId);
     if (lastLot?.supplierId && lot.supplierId === lastLot.supplierId) {
       setSupplierFromLotId(lastLot.id);
     }
@@ -340,6 +342,7 @@ export function LotForm({
           : { ...unit };
       });
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- catalogSig tracks sell-unit catalog for product.id
   }, [product?.id, catalogSig]);
 
   useEffect(() => {
@@ -358,7 +361,7 @@ export function LotForm({
       patch({ productId: "" });
       return;
     }
-    const lastLot = lastProductLot(lots, lot, nextProduct.id);
+    const lastLot = lastProductLot(lots, lot.id, nextProduct.id);
     const supplierId = lot.supplierId || lastLot?.supplierId || nextProduct.supplierId || "";
     setSupplierFromLotId(lastLot?.supplierId ? lastLot.id : null);
     const candidate = { ...lot, productId: nextProduct.id, supplierId };
@@ -448,6 +451,7 @@ export function LotForm({
     }
   }
 
+  const saveRef = useRef<() => void>(() => undefined);
   function save() {
     if (!lot.productId) {
       setError("product");
@@ -526,6 +530,7 @@ export function LotForm({
       units,
     );
   }
+  saveRef.current = save;
 
   useEffect(() => {
     if (suspendShortcuts) return;
@@ -544,7 +549,7 @@ export function LotForm({
       if (event.key === "F12" || (event.key === "Enter" && (event.ctrlKey || event.metaKey))) {
         event.preventDefault();
         event.stopPropagation();
-        save();
+        saveRef.current();
         return;
       }
       if (event.key !== "Enter" || event.altKey || event.ctrlKey || event.metaKey || openPicker)
@@ -566,7 +571,7 @@ export function LotForm({
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [suspendShortcuts]);
+  }, [suspendShortcuts, onClose]);
 
   const supplierOptions = suppliers
     .filter((supplier) => supplier.isActive)

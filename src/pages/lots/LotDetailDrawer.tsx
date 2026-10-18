@@ -46,9 +46,10 @@ export function LotDetailDrawer({
 }) {
   const [branches, setBranches] = useState<BranchResponse[]>([]);
   const [sessionBranchId, setSessionBranchId] = useState("");
+  const lotId = lot?.id;
 
   useEffect(() => {
-    if (!lot) return;
+    if (!lotId) return;
     const controller = new AbortController();
     void Promise.all([listAllBranches(controller.signal), ensureSession(controller.signal)])
       .then(([branchRows, session]) => {
@@ -60,7 +61,7 @@ export function LotDetailDrawer({
         setSessionBranchId("");
       });
     return () => controller.abort();
-  }, [lot?.id]);
+  }, [lotId]);
 
   if (!lot) return null;
 

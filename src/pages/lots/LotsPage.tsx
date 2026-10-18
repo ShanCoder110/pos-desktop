@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Pencil, Plus, ShoppingCart, TrendingUp, Trash2, X } from "lucide-react";
 import { QuickReorderPopover } from "@/components/reorders/QuickReorderPopover";
 import { REORDER_COPY } from "@/shared/constants/reorders";
@@ -164,21 +164,25 @@ export function LotsPage() {
     setChartLotId("");
   }, [chartProductId]);
 
-  function productOf(id: string) {
-    return products.find((p) => p.id === id);
-  }
+  const productOf = useCallback(
+    (id: string) => products.find((p) => p.id === id),
+    [products],
+  );
 
-  function productLabel(id: string) {
-    return productOf(id)?.name ?? id;
-  }
+  const productLabel = useCallback(
+    (id: string) => productOf(id)?.name ?? id,
+    [productOf],
+  );
 
-  function supplierLabel(id: string) {
-    return hubSupplierLabel(id, suppliers, supplierRows);
-  }
+  const supplierLabel = useCallback(
+    (id: string) => hubSupplierLabel(id, suppliers, supplierRows),
+    [suppliers, supplierRows],
+  );
 
-  function cityLabel(id: string) {
-    return supplierCityName(id, suppliers, supplierRows);
-  }
+  const cityLabel = useCallback(
+    (id: string) => supplierCityName(id, suppliers, supplierRows),
+    [suppliers, supplierRows],
+  );
 
   const apiFilters = useMemo(
     () => lotApiFilters(chips, q, dateRange, sectionKpi, products, suppliers),
@@ -350,7 +354,7 @@ export function LotsPage() {
       </>,
     );
     return () => setActions(null);
-  }, [filteredRows, openCreate, setActions]);
+  }, [cityLabel, filteredRows, openCreate, productLabel, productOf, setActions, supplierLabel]);
 
   const chartHistory = useMemo(() => {
     const lots = filteredRows
@@ -384,7 +388,7 @@ export function LotsPage() {
           },
         ],
       })),
-    [chartHistory, supplierRows],
+    [chartHistory, supplierLabel],
   );
 
   const chartIncreases = chartHistory.filter((row) => row.change > 0);

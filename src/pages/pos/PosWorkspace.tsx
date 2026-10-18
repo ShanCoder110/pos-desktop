@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -868,12 +869,12 @@ export function PosWorkspace() {
     });
   }
 
-  function focusPendingUnitButton() {
+  const focusPendingUnitButton = useCallback(() => {
     if (!pending) return;
     const id = pendingProductUnitId || resolveSellUnit(pending, pendingProductUnitId)?.id || "";
     if (!id) return;
     unitBtnRefs.current[id]?.focus();
-  }
+  }, [pending, pendingProductUnitId]);
 
   function focusUnitBar() {
     if (!pending || unitsForProduct(pending).length <= 1) {
@@ -998,12 +999,12 @@ export function PosWorkspace() {
         focusQty();
       }
     });
-  }, [pending]);
+  }, [focusPendingUnitButton, pending]);
 
   useEffect(() => {
     if (!unitFocused || !pending) return;
     window.requestAnimationFrame(() => focusPendingUnitButton());
-  }, [pendingProductUnitId, unitFocused, pending]);
+  }, [focusPendingUnitButton, pendingProductUnitId, unitFocused, pending]);
 
   function addPendingToCart(supplierId?: string) {
     if (!pending) {

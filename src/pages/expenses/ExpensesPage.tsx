@@ -228,7 +228,7 @@ export function ExpensesPage() {
     return rows.filter((r) => {
       if (
         q &&
-        !`${r.description} ${categoryName(r.categoryId)}`.toLowerCase().includes(q.toLowerCase())
+        !`${r.description} ${expenseCategories.find((c) => c.id === r.categoryId)?.name ?? r.categoryId}`.toLowerCase().includes(q.toLowerCase())
       )
         return false;
       if (tab !== "all") return r.categoryId === tab;

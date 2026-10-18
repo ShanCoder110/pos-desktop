@@ -334,7 +334,7 @@ export function UnitPriceFields({
 
   useEffect(() => {
     setPrices(pricesFromStockPrice(units, stockSymbol, value));
-  }, [sourceKey, unitKey]);
+  }, [sourceKey, unitKey, value, stockSymbol, units]);
 
   return (
     <div className="unit-qty [display:grid] [gap:8px]">

@@ -34,7 +34,7 @@ export function ReturnsPage() {
 
   const rows = useMemo(() => {
     return returns.filter((r) => {
-      const text = `${invoiceLabel(r.invoiceId)} ${r.customerId ?? ""} ${r.reason}`.toLowerCase();
+      const text = `${invoices.find((row) => row.id === r.invoiceId)?.invoiceNumber ?? r.invoiceId} ${r.customerId ?? ""} ${r.reason}`.toLowerCase();
       if (q && !text.includes(q.toLowerCase())) return false;
       if (sectionKpi === "refund") return r.type === "REFUND";
       if (sectionKpi === "replace") return r.type === "REPLACEMENT";

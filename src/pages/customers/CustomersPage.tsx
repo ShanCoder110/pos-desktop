@@ -794,13 +794,15 @@ export function CustomersPage() {
     tab,
   ]);
 
+  const detailId = detail?.id;
+
   useEffect(() => {
-    if (!detail) {
+    if (!detailId) {
       setDetailStats(null);
       return;
     }
     const controller = new AbortController();
-    getCustomerLedger(detail.id, controller.signal)
+    getCustomerLedger(detailId, controller.signal)
       .then((ledger) => {
         const sales = ledger.entries.filter((entry) => entry.entryType === "SALE");
         setDetailStats({
@@ -810,7 +812,7 @@ export function CustomersPage() {
       })
       .catch(() => setDetailStats(null));
     return () => controller.abort();
-  }, [detail?.id]);
+  }, [detailId]);
 
   const isNew = Boolean(
     edit && !rows.some((row) => row.id === edit.id) && !chartRows.some((row) => row.id === edit.id),

@@ -262,6 +262,7 @@ export function ProductForm({
       })
       .catch(() => undefined);
     return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed branch stock when new product id is set
   }, [isNew, product.id]);
 
   useEffect(() => {
@@ -305,7 +306,7 @@ export function ProductForm({
     ];
     return ids.map((id) => ({
       id,
-      name: supplierName(id) || "Supplier",
+      name: suppliers.find((s) => s.id === id)?.name || "Supplier",
       lots: lotDraft
         .filter((l) => l.supplierId === id && l.remainingQuantity > 0)
         .map((l) => l.lotNumber),
@@ -402,6 +403,7 @@ export function ProductForm({
         });
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset form state when product.id changes
   }, [product.id]);
 
   useEffect(() => {
@@ -443,6 +445,7 @@ export function ProductForm({
     });
     unitPositions.current = nextPositions;
     changedUnitId.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- unitLayoutKey tracks sellUnits layout
   }, [section, unitLayoutKey]);
 
   useLayoutEffect(() => {

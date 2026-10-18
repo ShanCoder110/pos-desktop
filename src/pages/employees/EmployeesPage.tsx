@@ -444,20 +444,22 @@ export function EmployeesPage() {
     tab,
   ]);
 
+  const detailId = detail?.id;
+
   useEffect(() => {
-    if (!detail) {
+    if (!detailId) {
       setDetailPaidThisMonth(0);
       return;
     }
     const controller = new AbortController();
-    getStaffLedger(detail.id, controller.signal)
+    getStaffLedger(detailId, controller.signal)
       .then((ledger) => setDetailPaidThisMonth(ledger.paidThisMonth))
       .catch((error) => {
         if (isAbortError(error)) return;
         setDetailPaidThisMonth(0);
       });
     return () => controller.abort();
-  }, [detail?.id]);
+  }, [detailId]);
 
   const branchName = (id: string) => branches.find((branch) => branch.id === id)?.name ?? "—";
   const isNew = Boolean(

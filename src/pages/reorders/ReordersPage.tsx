@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Ban, PackagePlus, ShoppingCart } from "lucide-react";
 import {
   Badge,
@@ -172,6 +172,22 @@ export function ReordersPage() {
     [products],
   );
 
+  const receive = useCallback(
+    (row: PurchaseOrder) => {
+      const item = row.items[0];
+      if (!item) return;
+      openCreate(item.productId, {
+        productId: item.productId,
+        supplierId: row.supplierId,
+        quantity:
+          Math.max(0, item.orderedBaseQuantity - item.receivedBaseQuantity) || item.orderedQuantity,
+        cost: item.expectedUnitCost,
+        purchaseOrderId: row.id,
+      });
+    },
+    [openCreate],
+  );
+
   const shown = rows;
   const listPages = pageSize === PAGE_SIZE_ALL ? 1 : pages;
   const listTotal = pageSize === PAGE_SIZE_ALL ? rows.length : total;
@@ -227,7 +243,7 @@ export function ReordersPage() {
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [cancelRow, focusedId, shown]);
+  }, [cancelRow, focusedId, receive, shown]);
 
   const [exportRows, setExportRows] = useState<
     {
@@ -253,7 +269,9 @@ export function ReordersPage() {
             const item = row.items[0];
             return {
               orderNumber: row.orderNumber,
-              product: item ? productName(item.productId) : "—",
+              product: item
+                ? products.find((row) => row.id === item.productId)?.name ?? item.productId
+                : "—",
               supplier: supplierLabel(row.supplierId, suppliers),
               city: supplierCityName(row.supplierId, suppliers) || "—",
               ordered: item?.orderedBaseQuantity ?? 0,
@@ -320,19 +338,6 @@ export function ReordersPage() {
     void getPurchaseOrder(row.id, controller.signal)
       .then((fresh) => setViewRow(fresh))
       .catch(() => undefined);
-  }
-
-  function receive(row: PurchaseOrder) {
-    const item = row.items[0];
-    if (!item) return;
-    openCreate(item.productId, {
-      productId: item.productId,
-      supplierId: row.supplierId,
-      quantity:
-        Math.max(0, item.orderedBaseQuantity - item.receivedBaseQuantity) || item.orderedQuantity,
-      cost: item.expectedUnitCost,
-      purchaseOrderId: row.id,
-    });
   }
 
   return (

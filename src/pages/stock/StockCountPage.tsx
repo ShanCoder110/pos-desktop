@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ClipboardList } from "lucide-react";
 import {
   Button,
@@ -167,7 +167,7 @@ export function StockCountPage() {
     return () => controller.abort();
   }, [productId, branchId, allowed, products]);
 
-  function reloadHistory(signal?: AbortSignal) {
+  const reloadHistory = useCallback((signal?: AbortSignal) => {
     setLoading((current) => ({ ...current, history: true }));
     setHistoryError(null);
     return listStockMovements(
@@ -198,14 +198,14 @@ export function StockCountPage() {
         toaster.error(outcome.message);
       })
       .finally(() => setLoading((current) => ({ ...current, history: false })));
-  }
+  }, [branchId]);
 
   useEffect(() => {
     if (!allowed) return;
     const controller = new AbortController();
     void reloadHistory(controller.signal);
     return () => controller.abort();
-  }, [allowed, branchId, historyReloadToken]);
+  }, [allowed, branchId, historyReloadToken, reloadHistory]);
 
   async function save() {
     if (!productId) {
