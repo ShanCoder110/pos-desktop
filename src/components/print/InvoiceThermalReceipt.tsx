@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { RECEIPT_BRANDING, receiptFontFamilyCss } from "@/shared/constants/receiptBranding";
 import type { Customer, InvoiceLine, ShopSettings } from "@/shared/types";
 import { receiptMoneyNum } from "@/utils/format";
+import { isReceiptUrdu } from "@/utils/receiptLanguage";
 import { JAMEEL_NOORI_FONT_FAMILY } from "@/utils/receiptPrintFonts";
 import type { SplitBillPageKind } from "@/utils/splitBillPages";
 
@@ -65,48 +66,78 @@ const RECEIPT_LABELS = {
     date: "Date:",
     items: "Total items:",
     customer: "Customer:",
+    address: "Address:",
     item: "Item",
     qty: "Qty",
     price: "Price",
     lineTotal: "Total",
     subtotal: "Subtotal",
     discount: "Discount",
-    total: "Total Bill",
-    previous: "Sabka Balance",
-    paid: "Amount paid",
-    balance: "New Balance",
+    previous: "Previous Balance",
+    currentBill: "Current Bill",
+    cashReceived: "Cash Received",
+    remaining: "Remaining Amount",
+    change: "Change",
     paidStatus: "Paid",
     partialStatus: "Partially paid",
     unpaidStatus: "Unpaid",
-    owes: "Owes",
-    advance: "Advance",
     page: "Page",
     continued: "Continued",
+    itemsWord: "items",
+    itemWord: "item",
+    of: "of",
+    pageTotal: "Page total",
   },
   UR: {
     invoice: "انوائس نمبر:",
     date: "تاریخ:",
     items: "کل اشیاء:",
     customer: "گاہک:",
-    item: "آئٹم",
-    qty: "مقدار",
+    address: "پتہ:",
+    item: "مال",
+    qty: "تعداد",
     price: "قیمت",
-    lineTotal: "کل",
-    subtotal: "ذیلی کل",
+    lineTotal: "رقم",
+    subtotal: "کل رقم",
     discount: "رعایت",
-    total: "کل بل",
     previous: "سابقہ بیلنس",
-    paid: "ادا شدہ رقم",
-    balance: "نیا بیلنس",
+    currentBill: "موجودہ بل",
+    cashReceived: "نقد وصول",
+    remaining: "باقی رقم",
+    change: "واپسی",
     paidStatus: "ادا شدہ",
     partialStatus: "جزوی ادا شدہ",
     unpaidStatus: "غیر ادا شدہ",
-    owes: "واجب الادا",
-    advance: "ایڈوانس",
     page: "صفحہ",
     continued: "جاری ہے",
+    itemsWord: "اشیاء",
+    itemWord: "شے",
+    of: "از",
+    pageTotal: "صفحہ کی کل رقم",
   },
 } as const;
+
+/** Prefer Urdu product name on Urdu bills; fall back to English name. */
+function lineDisplayName(line: InvoiceLine, urdu: boolean) {
+  if (!urdu) return line.name;
+  return line.urduName?.trim() || line.name;
+}
+
+/** N = customer owes (positive), P = advance (negative). Empty when settled. */
+function balanceSideMark(amount: number): "N" | "P" | "" {
+  if (amount > 0.009) return "N";
+  if (amount < -0.009) return "P";
+  return "";
+}
+
+function ReceiptLabelWithMark({ label, mark }: { label: string; mark: "N" | "P" | "" }) {
+  return (
+    <span>
+      {label}
+      {mark ? <sup className="receipt-balance-mark">{mark}</sup> : null}
+    </span>
+  );
+}
 
 export type ThermalReceiptPage = {
   items: InvoiceLine[];
@@ -148,7 +179,7 @@ export function InvoiceThermalReceipt({
   const promo = settings.promoUrdu.trim() || RECEIPT_BRANDING.promoUrdu;
   const footer = settings.footer.trim() || RECEIPT_BRANDING.notValidForCourt;
   const bordered = settings.itemsTableBordered;
-  const isUrdu = settings.receiptLanguage === "UR";
+  const isUrdu = isReceiptUrdu(settings.receiptLanguage);
   const labels = RECEIPT_LABELS[isUrdu ? "UR" : "EN"];
   const hasLogo = settings.showLogo && Boolean(settings.receiptLogoDataUrl);
   const showHeaderLogo = hasLogo && settings.receiptHeaderLayout !== "text";
@@ -196,11 +227,13 @@ export function InvoiceThermalReceipt({
         ? labels.partialStatus
         : labels.paidStatus;
   const subtotal = total + Math.max(0, discount);
+  const itemsWord = (n: number) => (n === 1 && !isUrdu ? labels.itemWord : labels.itemsWord);
 
   return (
     <div className={className ?? "thermal-receipt-preview"}>
       <div
         className={`receipt-inner receipt-size--${settings.receiptTextSize} ${isUrdu ? "receipt-inner--urdu-rtl" : ""}`}
+        data-receipt-lang={isUrdu ? "UR" : "EN"}
         dir={isUrdu ? "rtl" : "ltr"}
         style={
           {
@@ -208,6 +241,7 @@ export function InvoiceThermalReceipt({
               ? JAMEEL_NOORI_FONT_FAMILY
               : receiptFontFamilyCss(settings.receiptFontFamily),
             "--receipt-logo-scale": settings.receiptLogoScale / 100,
+            "--receipt-latin-font": receiptFontFamilyCss(settings.receiptFontFamily),
           } as CSSProperties
         }
       >
@@ -307,10 +341,8 @@ export function InvoiceThermalReceipt({
             <span>{labels.items}</span>
             <span className="receipt-bold receipt-meta-value" dir="ltr">
               {isSplit
-                ? `${itemFrom}–${itemTo} of ${totalItems}`
-                : isUrdu
-                  ? `${totalItems}`
-                  : `${totalItems} item${totalItems === 1 ? "" : "s"}`}
+                ? `${itemFrom}–${itemTo} ${labels.of} ${totalItems}`
+                : `${totalItems} ${itemsWord(totalItems)}`}
             </span>
           </div>
           <div className="receipt-meta-row">
@@ -325,6 +357,19 @@ export function InvoiceThermalReceipt({
               {customer.phone ? ` · ${customer.phone}` : ""}
             </span>
           </div>
+          {customer.address?.trim() ? (
+            <div className="receipt-meta-row">
+              <span>{labels.address}</span>
+              <span
+                className={["receipt-meta-value", receiptUrduClass(customer.address)]
+                  .filter(Boolean)
+                  .join(" ")}
+                dir={textContainsUrdu(customer.address) ? "rtl" : "ltr"}
+              >
+                {customer.address.trim()}
+              </span>
+            </div>
+          ) : null}
         </div>
 
         <div className="receipt-divider" />
@@ -346,12 +391,16 @@ export function InvoiceThermalReceipt({
           </thead>
           <tbody>
             {pageLines.map((line) => {
-              const displayName = isUrdu ? line.urduName?.trim() || line.name : line.name;
+              const displayName = lineDisplayName(line, isUrdu);
               const nameUrdu = textContainsUrdu(displayName);
               return (
                 <tr key={line.id}>
                   <td className="receipt-col-item receipt-item-name">
-                    <div className={nameUrdu ? "receipt-item-name-urdu" : undefined}>
+                    <div
+                      className={nameUrdu ? "receipt-item-name-urdu" : undefined}
+                      dir={nameUrdu ? "rtl" : "ltr"}
+                      lang={nameUrdu ? "ur" : undefined}
+                    >
                       {displayName}
                     </div>
                   </td>
@@ -366,14 +415,27 @@ export function InvoiceThermalReceipt({
           </tbody>
         </table>
 
-        <div className="receipt-divider" />
+        {showTotalsFooter ? (
+          <div className="receipt-totals">
+            <div className="receipt-total-row">
+              <span>{labels.subtotal}</span>
+              <span>Rs. {formatRs(subtotal)}</span>
+            </div>
+            <div className="receipt-total-row">
+              <span>{labels.discount}</span>
+              <span>
+                {discount > 0.009 ? "- " : ""}Rs. {formatRs(discount)}
+              </span>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="receipt-divider-solid" />
 
         {isSplit ? (
           <div className="receipt-grand-total-row">
             <span>
-              {isUrdu
-                ? `${labels.page} کی کل رقم (${pageItemCount} اشیاء)`
-                : `Page total (${pageItemCount} item${pageItemCount === 1 ? "" : "s"})`}
+              {labels.pageTotal} ({pageItemCount} {itemsWord(pageItemCount)})
             </span>
             <span>Rs. {formatRs(pageItemsTotal)}</span>
           </div>
@@ -382,58 +444,46 @@ export function InvoiceThermalReceipt({
         {showTotalsFooter ? (
           <>
             <div className="receipt-totals">
-              <div className="receipt-total-row">
-                <span>{labels.subtotal}</span>
-                <span>Rs. {formatRs(subtotal)}</span>
-              </div>
-              {settings.showItemDiscount ? (
-                <div className="receipt-total-row">
-                  <span>{labels.discount}</span>
-                  <span>
-                    {discount > 0.009 ? "- " : ""}Rs. {formatRs(discount)}
-                  </span>
-                </div>
-              ) : null}
               {showPreviousBalance ? (
                 <div className="receipt-total-row receipt-bold">
-                  <span>{labels.previous}</span>
-                  <span>
-                    Rs. {formatRs(Math.abs(balanceBefore))}{" "}
-                    {balanceBefore > 0 ? labels.owes : labels.advance}
-                  </span>
+                  <ReceiptLabelWithMark
+                    label={labels.previous}
+                    mark={balanceSideMark(balanceBefore)}
+                  />
+                  <span>Rs. {formatRs(Math.abs(balanceBefore))}</span>
                 </div>
               ) : null}
               <div className="receipt-grand-total-row">
                 <span>
-                  {labels.total} ({totalItems}{" "}
-                  {isUrdu ? "اشیاء" : `item${totalItems === 1 ? "" : "s"}`})
+                  {labels.currentBill} ({totalItems} {itemsWord(totalItems)})
                 </span>
                 <span>Rs. {formatRs(total)}</span>
               </div>
               <div className="receipt-total-row receipt-bold">
-                <span>{labels.paid}</span>
+                <span>{labels.cashReceived}</span>
                 <span>Rs. {formatRs(paid)}</span>
               </div>
+            </div>
+
+            <div className="receipt-divider" />
+
+            <div className="receipt-totals">
               <div className="receipt-grand-total-row">
-                <span>{labels.balance}</span>
-                <span>
-                  Rs. {formatRs(Math.abs(newBalance))}{" "}
-                  {!customer.isWalking && newBalance > 0
-                    ? labels.owes
-                    : !customer.isWalking && newBalance < 0
-                      ? labels.advance
-                      : ""}
-                </span>
+                <ReceiptLabelWithMark
+                  label={labels.remaining}
+                  mark={customer.isWalking ? "" : balanceSideMark(newBalance)}
+                />
+                <span>Rs. {formatRs(Math.abs(customer.isWalking ? due : newBalance))}</span>
               </div>
               {customer.isWalking && change > 0.009 ? (
                 <div className="receipt-total-row receipt-bold">
-                  <span>{isUrdu ? "واپسی" : "Change"}</span>
+                  <span>{labels.change}</span>
                   <span>Rs. {formatRs(change)}</span>
                 </div>
               ) : null}
             </div>
 
-            <div className="receipt-divider-thick" />
+            <div className="receipt-divider" />
 
             <div className="receipt-footer">
               {promo ? (
@@ -465,7 +515,16 @@ export function InvoiceThermalReceipt({
             </div>
             <div className="receipt-cut-gap" aria-hidden="true" />
             <p className="receipt-footer-credit">
-              {isUrdu ? "سافٹ ویئر: شان عباس · 0300-1753807" : RECEIPT_BRANDING.softwareCredit}
+              {isUrdu ? (
+                <>
+                  سافٹ ویئر: شان عباس ·{" "}
+                  <span className="receipt-ltr-num" dir="ltr">
+                    0300-1753807
+                  </span>
+                </>
+              ) : (
+                RECEIPT_BRANDING.softwareCredit
+              )}
             </p>
           </>
         ) : isSplit ? (
@@ -473,9 +532,7 @@ export function InvoiceThermalReceipt({
             <div className="receipt-total-row">
               <span>{labels.continued}…</span>
               <span>
-                {isUrdu
-                  ? `${labels.page} ${page?.pageIndex} از ${page?.pageCount}`
-                  : `Page ${page?.pageIndex} of ${page?.pageCount}`}
+                {labels.page} {page?.pageIndex} {labels.of} {page?.pageCount}
               </span>
             </div>
           </div>

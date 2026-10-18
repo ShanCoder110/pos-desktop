@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-cut-thermal-paper"
+description = "Allows sending ESC/POS feed + cut to the selected thermal printer after a receipt."
+commands.allow = ["cut_thermal_paper"]

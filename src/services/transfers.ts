@@ -127,3 +127,8 @@ export function receiveTransfer(id: string, payload?: Record<string, unknown>) {
     body: JSON.stringify(payload ?? {}),
   }).then(mapTransfer);
 }
+
+/** Permanently delete a transfer and restore stock to the source branch. */
+export function deleteTransfer(id: string) {
+  return apiRequest<void>(API_ROUTES.transferById(id), { method: "DELETE" });
+}

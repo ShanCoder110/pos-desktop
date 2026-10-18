@@ -3,6 +3,7 @@ import { Badge, Drawer } from "@/components/common";
 import { DetailQtyDisplay } from "@/pages/products/DetailQtyDisplay";
 import { formatStockQty, unitLabel } from "@/pages/products/productQty";
 import { branchLotSnapshots, transferTotalMoved } from "@/pages/transfers/transferDetail";
+import { decodeRepairTransfer } from "@/pages/repair/repairShopTransfer";
 import type { ProductLotRow, StockTransferRow, TransferStatus } from "@/shared/domain/types";
 import type { Product } from "@/shared/types";
 import type { BranchResponse } from "@/services/org";
@@ -257,7 +258,11 @@ export function TransferDetailDrawer({
             <header className="product-detail-card-head">
               <h4>{TRANSFER_COPY.notesLabel}</h4>
             </header>
-            <p className="m-0 text-[13px] leading-relaxed text-ink">{transfer.notes}</p>
+            <p className="m-0 text-[13px] leading-relaxed text-ink">
+              {decodeRepairTransfer(transfer.notes)
+                ? "Stock moved to a repair shop with held-value tracking."
+                : transfer.notes}
+            </p>
           </section>
         ) : null}
 

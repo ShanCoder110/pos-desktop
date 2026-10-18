@@ -14,6 +14,8 @@ import {
   hasCompleteSellUnit,
   stockPerUnit,
   toBaseQty,
+  compareNameSearch,
+  compareProductSearch,
   productMatchesQuery,
   resolveMatchedUnitId,
   resolveSellUnit,
@@ -40,7 +42,15 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { useSettings } from "@/shared/settings";
 import { routes } from "@/shared/constants/routes";
 import { MIN_PRODUCT_SEARCH_LENGTH } from "@/shared/constants/api";
-import type { Customer, HeldBill, InvoiceLine, Product, ProductSellUnit } from "@/shared/types";
+import { FIELD_LIMITS } from "@/shared/constants/fields";
+import type {
+  Customer,
+  HeldBill,
+  InvoiceLine,
+  Product,
+  ProductSellUnit,
+  ReceiptLanguage,
+} from "@/shared/types";
 import { moneyNum } from "@/utils/format";
 import { errorToastMessage } from "@/utils/toastErrors";
 import { canOpenInvoicePosEdit, invoicePosEditBlockReason } from "@/utils/invoicePosEdit";
@@ -82,6 +92,7 @@ type CartLine = {
   productId: string;
   productUnitId: string;
   name: string;
+  urduName?: string;
   sku: string;
   baseUnit: string;
   sellUnit: string;
@@ -252,9 +263,11 @@ function availableInUnit(unit: ProductSellUnit | undefined, baseAvailable: numbe
   return basePerUnit > 1 ? Math.floor(available + 1e-9) : +available.toFixed(4);
 }
 
+/** Low-stock warn only when a minimum is set. No limit → alert only at 0 (handled as out). */
 function lowStock(product: Product, baseAvailable: number) {
-  const threshold = product.minimumStock ?? 0;
-  return baseAvailable <= 0 || (threshold > 0 && baseAvailable <= threshold);
+  const threshold = Number(product.minimumStock) || 0;
+  if (threshold <= 0 || baseAvailable <= 0) return false;
+  return baseAvailable <= threshold;
 }
 
 function clockNow() {
@@ -363,10 +376,12 @@ export function PosWorkspace() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
-  const [newCustomer, setNewCustomer] = useState({ name: "", phone: "" });
+  const [newCustomer, setNewCustomer] = useState({ name: "", phone: "", address: "" });
   const [holdsOpen, setHoldsOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
+  const [printDirect, setPrintDirect] = useState(false);
+  const [printLanguage, setPrintLanguage] = useState<ReceiptLanguage | undefined>();
   const [printRequestId, setPrintRequestId] = useState(0);
   const [receiptInvoiceNo, setReceiptInvoiceNo] = useState("");
   const [receiptSnap, setReceiptSnap] = useState<{
@@ -378,6 +393,7 @@ export function PosWorkspace() {
     balanceAfter: number;
     customer: Customer;
     invoiceNumber?: string;
+    language?: ReceiptLanguage;
   } | null>(null);
   const [splitPrint, setSplitPrint] = useState(() => settings.splitLongBill);
 
@@ -474,6 +490,7 @@ export function PosWorkspace() {
               id: record.id,
               name: record.name,
               phone: record.phone,
+              address: record.address ?? "",
               balance: -record.currentBalance,
               isWalking: Boolean(record.isWalkIn),
             })),
@@ -631,6 +648,7 @@ export function PosWorkspace() {
           productId: product.id,
           productUnitId: unitRow.id,
           name: product.name,
+          urduName: product.urduName?.trim() || undefined,
           sku: product.productNo && product.productNo > 0 ? String(product.productNo) : product.sku,
           baseUnit: product.unit,
           sellUnit: sellU,
@@ -705,16 +723,20 @@ export function PosWorkspace() {
         product.categoryId === selectedCategory.id || product.category === selectedCategory.name,
     );
   }, [products, selectedCategory]);
-  const categoryChoices = useMemo(
-    () =>
-      categories.map((category) => ({
-        ...category,
-        count: products.filter(
-          (product) => product.categoryId === category.id || product.category === category.name,
-        ).length,
-      })),
-    [categories, products],
-  );
+  const categoryChoices = useMemo(() => {
+    const withCounts = categories.map((category) => ({
+      ...category,
+      count: products.filter(
+        (product) => product.categoryId === category.id || product.category === category.name,
+      ).length,
+    }));
+    if (!categoryPickerOpen) return withCounts;
+    const needle = query.trim().toLowerCase();
+    if (!needle) return withCounts;
+    return withCounts
+      .filter((category) => category.name.toLowerCase().includes(needle))
+      .sort((a, b) => compareNameSearch(a.name, b.name, needle));
+  }, [categories, products, categoryPickerOpen, query]);
   const searchBrowse = !query.trim() && !selectedCategory;
   const results = useMemo(() => {
     const rawQuery = query.trim();
@@ -737,11 +759,15 @@ export function PosWorkspace() {
     if (!q) return [];
     return categoryProducts
       .filter((p) => productMatchesQuery(p, q))
+      .sort((a, b) => compareProductSearch(a, b, q))
       .slice(0, selectedCategory ? categoryProducts.length : 40);
   }, [query, debounced, products, categoryProducts, recentProductIds, selectedCategory]);
 
   const searchPanelHeight = categoryPickerOpen
-    ? Math.min(POS_SEARCH_MAX_PX, POS_SEARCH_HEAD_PX + categoryChoices.length * POS_CATEGORY_ROW_PX)
+    ? Math.min(
+        POS_SEARCH_MAX_PX,
+        POS_SEARCH_HEAD_PX + (categoryChoices.length + 1) * POS_CATEGORY_ROW_PX,
+      )
     : Math.min(
         POS_SEARCH_MAX_PX,
         (searchBrowse || selectedCategory ? POS_SEARCH_HEAD_PX : 0) +
@@ -1080,6 +1106,7 @@ export function PosWorkspace() {
         productId: pending.id,
         productUnitId: productUnit.id,
         name: pending.name,
+        urduName: pending.urduName?.trim() || undefined,
         sku: pending.productNo && pending.productNo > 0 ? String(pending.productNo) : pending.sku,
         baseUnit: pending.unit,
         sellUnit: sellU,
@@ -1134,6 +1161,7 @@ export function PosWorkspace() {
       const created = await createMasterRecord("customers", {
         name,
         phone: newCustomer.phone.trim() || undefined,
+        address: newCustomer.address.trim() || undefined,
         isActive: true,
         isWalkIn: false,
       });
@@ -1141,13 +1169,14 @@ export function PosWorkspace() {
         id: created.id,
         name: created.name,
         phone: created.phone ?? "",
+        address: created.address ?? newCustomer.address.trim(),
         balance: 0,
         isWalking: false,
       };
       setCustomers((current) => [...current, customer]);
       setCustomerId(customer.id);
       setCustQ(customer.name);
-      setNewCustomer({ name: "", phone: "" });
+      setNewCustomer({ name: "", phone: "", address: "" });
       setAddCustomerOpen(false);
       showToast("Customer selected");
     } catch (error) {
@@ -1484,13 +1513,19 @@ export function PosWorkspace() {
     if (roundAmt > 0) showToast(`${money(roundAmt)} added to bill discount`);
   }
 
-  function openReceipt(invoiceNumber = receiptInvoiceNo, printNow = false) {
+  function openReceipt(
+    invoiceNumber = receiptInvoiceNo,
+    printNow = false,
+    language?: ReceiptLanguage,
+  ) {
     setReceiptSnap({
       lines: cart.map((item) => ({
         id: item.id,
         productId: item.productId,
         name: item.name,
-        urduName: products.find((product) => product.id === item.productId)?.urduName,
+        urduName:
+          item.urduName?.trim() ||
+          products.find((product) => product.id === item.productId)?.urduName,
         qty: item.qty,
         unit: item.sellUnit,
         price: item.listPrice,
@@ -1505,8 +1540,11 @@ export function PosWorkspace() {
       balanceAfter,
       customer: displayCustomer,
       invoiceNumber: invoiceNumber || undefined,
+      language,
     });
     if (invoiceNumber) setReceiptInvoiceNo(invoiceNumber);
+    setPrintLanguage(language);
+    setPrintDirect(printNow);
     setPrintOpen(true);
     if (printNow) setPrintRequestId((request) => request + 1);
   }
@@ -1623,7 +1661,9 @@ export function PosWorkspace() {
           ? `Invoice ${invoice.invoiceNumber} updated`
           : `Sale ${invoice.invoiceNumber} complete`,
       );
-      if (settings.autoPrint) openReceipt(invoice.invoiceNumber, true);
+      if (settings.autoPrint) {
+        openReceipt(invoice.invoiceNumber, true, settings.receiptLanguage);
+      }
       newBill(true);
     } catch (error) {
       const message = errorToastMessage(error, "Could not complete sale");
@@ -1683,7 +1723,7 @@ export function PosWorkspace() {
       F7: () => applyExact(),
       F8: () => document.getElementById("billDiscount")?.focus(),
       F9: () => {
-        if (cart.length) openReceipt(receiptInvoiceNo, true);
+        if (cart.length) openReceipt(receiptInvoiceNo, true, "EN");
         else showToast("Nothing to print");
       },
       F10: () => {
@@ -1742,7 +1782,8 @@ export function PosWorkspace() {
     id: c.id,
     productId: c.productId,
     name: c.name,
-    urduName: products.find((product) => product.id === c.productId)?.urduName,
+    urduName:
+      c.urduName?.trim() || products.find((product) => product.id === c.productId)?.urduName,
     qty: c.qty,
     unit: c.sellUnit,
     price: c.listPrice,
@@ -1855,6 +1896,7 @@ export function PosWorkspace() {
               open={menuOpen}
               browse={searchBrowse}
               categories={categoryChoices}
+              productTotalCount={products.length}
               categoryPickerOpen={categoryPickerOpen}
               selectedCategory={selectedCategory}
               results={searchResultRows}
@@ -1871,7 +1913,7 @@ export function PosWorkspace() {
               onQuery={(value) => {
                 setQuery(value);
                 setPending(null);
-                setCategoryPickerOpen(false);
+                setHit(0);
                 setMenuOpen(true);
               }}
               onFocus={() => {
@@ -2063,6 +2105,7 @@ export function PosWorkspace() {
                       lineUnits.find((u) => u.id === item.productUnitId) ??
                       (product ? resolveSellUnit(product, item.productUnitId) : undefined);
                     const isPack = item.sellUnit !== item.baseUnit && item.packSize > 1;
+                    const stockWarn = left <= 0 || (product ? lowStock(product, left) : false);
                     return (
                       <tr
                         key={item.id}
@@ -2163,9 +2206,9 @@ export function PosWorkspace() {
                         </td>
                         <td className="c-stock [width:148px] [text-align:left]">
                           <span
-                            className={`stock-val [font-family:var(--mono)] [font-size:12px] [color:var(--sub)] [white-space:nowrap] [display:inline-flex] [align-items:center] [justify-content:flex-start] [gap:4px] ${left < 10 ? "is-low" : ""}`}
+                            className={`stock-val [font-family:var(--mono)] [font-size:12px] [color:var(--sub)] [white-space:nowrap] [display:inline-flex] [align-items:center] [justify-content:flex-start] [gap:4px] ${stockWarn ? (left <= 0 ? "is-over" : "is-low") : ""}`}
                           >
-                            {left < 10 ? WARN_ICO : null}
+                            {stockWarn ? WARN_ICO : null}
                             <span
                               className="stock-num [font-size:11px]"
                               title="This branch · shop total"
@@ -2858,7 +2901,8 @@ export function PosWorkspace() {
                 type="button"
                 className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print-ur"
                 onClick={() => {
-                  if (cart.length) openReceipt(receiptInvoiceNo, true);
+                  // Force UR labels (product name stays English only when urduName is empty).
+                  if (cart.length) openReceipt(receiptInvoiceNo, true, "UR");
                   else showToast("Nothing to print");
                 }}
               >
@@ -2868,7 +2912,7 @@ export function PosWorkspace() {
                 type="button"
                 className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print"
                 onClick={() => {
-                  if (cart.length) openReceipt(receiptInvoiceNo, true);
+                  if (cart.length) openReceipt(receiptInvoiceNo, true, "EN");
                   else showToast("Nothing to print");
                 }}
               >
@@ -3136,6 +3180,21 @@ export function PosWorkspace() {
                     placeholder="03xx xxxxxxx"
                   />
                 </label>
+                <label className="grid gap-1 text-[12px] font-bold text-sub">
+                  Address
+                  <input
+                    className="h-10 rounded-lg border border-line bg-paper px-3 text-[14px] text-ink outline-none focus:border-accent"
+                    value={newCustomer.address}
+                    onChange={(event) =>
+                      setNewCustomer((current) => ({ ...current, address: event.target.value }))
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void addQuickCustomer();
+                    }}
+                    placeholder="Optional address"
+                    maxLength={FIELD_LIMITS.address}
+                  />
+                </label>
                 <div className="mt-1 flex justify-end gap-2">
                   <button
                     type="button"
@@ -3169,9 +3228,12 @@ export function PosWorkspace() {
       />
 
       <PrintPreview
+        key={`print-${printRequestId}-${printLanguage ?? receiptSnap?.language ?? "S"}`}
         open={printOpen}
         onClose={() => {
           setPrintOpen(false);
+          setPrintDirect(false);
+          setPrintLanguage(undefined);
           setReceiptSnap(null);
         }}
         customer={receiptSnap?.customer ?? displayCustomer}
@@ -3185,6 +3247,8 @@ export function PosWorkspace() {
         invoiceNumber={receiptSnap?.invoiceNumber ?? (receiptInvoiceNo || undefined)}
         splitOverride={splitPrint}
         printRequestId={printRequestId}
+        directPrint={printDirect}
+        languageOverride={printLanguage ?? receiptSnap?.language}
       />
     </>
   );

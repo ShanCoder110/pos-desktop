@@ -25,7 +25,10 @@ use crate::backend::{
     errors::AppError,
     repositories::{MasterKind, ProductRepository, SequenceRepository},
     services::MasterService,
-    util::{money_value, parse_date, parse_optional_uuid, parse_uuid, quantity, trimmed},
+    util::{
+        capitalize_name, money_value, parse_date, parse_optional_uuid, parse_uuid, quantity,
+        trimmed,
+    },
 };
 
 pub struct ProductService;
@@ -122,7 +125,7 @@ impl ProductService {
                 id: Set(product_id),
                 category_id: Set(category_id),
                 base_unit_id: Set(base_unit_id),
-                name: Set(request.name.trim().to_owned()),
+                name: Set(capitalize_name(&request.name)),
                 urdu_name: Set(trimmed(&request.urdu_name)),
                 product_no: Set(Some(product_no)),
                 sku: Set(sku),
@@ -328,7 +331,7 @@ impl ProductService {
             }
 
             let request = CreateProductRequest {
-                name: item.name.trim().to_owned(),
+                name: capitalize_name(&item.name),
                 urdu_name: item.urdu_name.clone(),
                 category_id,
                 base_unit_id,
@@ -449,7 +452,7 @@ impl ProductService {
         let mut active: product::ActiveModel = model.into();
         active.base_unit_id = Set(base_unit_id);
         if let Some(name) = request.name {
-            active.name = Set(name.trim().to_owned());
+            active.name = Set(capitalize_name(&name));
         }
         if let Some(urdu_name) = request.urdu_name {
             active.urdu_name = Set(trimmed(&Some(urdu_name)));

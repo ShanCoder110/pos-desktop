@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-list-system-printers"
+description = "Allows listing OS printers for Settings → Printer."
+commands.allow = ["list_system_printers"]

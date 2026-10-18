@@ -5,12 +5,17 @@ import {
   convertLineToUnit,
   balanceAfterSale,
   displayToBaseQty,
+  availableDisplayQty,
+  availableWholeQty,
   hasCompleteSellUnit,
+  wholeQty,
   toBaseQty,
   lineProfit,
   lineTotal,
   posTierPrice,
   priceModeForCustomerSwitch,
+  compareNameSearch,
+  compareProductSearch,
   productMatchesQuery,
   resolveMatchedUnitId,
   resolveSellUnit,
@@ -108,6 +113,19 @@ describe("conversions", () => {
     expect(hasCompleteSellUnit(pack, 12)).toBe(true);
     expect(hasCompleteSellUnit(piece, 1)).toBe(true);
   });
+
+  it("floors complete packs and keeps fractional stock units", () => {
+    expect(availableDisplayQty(pack, 40)).toBe(3);
+    expect(availableDisplayQty(pack, 11)).toBe(0);
+    expect(availableDisplayQty(piece, 40.5)).toBe(40.5);
+  });
+
+  it("credit/repair whole qty never keeps a fraction", () => {
+    expect(availableWholeQty(piece, 40.5)).toBe(40);
+    expect(availableWholeQty(pack, 40)).toBe(3);
+    expect(wholeQty(6.8889)).toBe(6);
+    expect(wholeQty(0.8889)).toBe(0);
+  });
 });
 
 describe("balanceAfterSale", () => {
@@ -196,6 +214,17 @@ describe("resolveMatchedUnitId / productMatchesQuery", () => {
     expect(productMatchesQuery(numbered, "42")).toBe(true);
     expect(productMatchesQuery(numbered, "4")).toBe(true);
     expect(productMatchesQuery(numbered, "99")).toBe(false);
+  });
+
+  it("ranks earlier word prefixes before later words and substrings", () => {
+    const rice = { ...product, id: "a", name: "Rice 5kg" };
+    const blueResin = { ...product, id: "b", name: "Blue resin" };
+    const sugarBar = { ...product, id: "c", name: "Sugar bar" };
+    expect(compareProductSearch(rice, blueResin, "r")).toBeLessThan(0);
+    expect(compareProductSearch(blueResin, sugarBar, "r")).toBeLessThan(0);
+    expect(compareNameSearch("Red lentils", "Alpha red", "r")).toBeLessThan(0);
+    expect(compareNameSearch("Alpha red", "Tape roll", "r")).toBeLessThan(0);
+    expect(compareNameSearch("Wire copper", "Copper wire", "w")).toBeLessThan(0);
   });
 });
 

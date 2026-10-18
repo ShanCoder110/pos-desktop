@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { cn } from "@/utils/format";
@@ -22,8 +23,9 @@ export function Modal({
   size?: "default" | "work";
   onClose: () => void;
 }) {
-  if (!open) return null;
-  return (
+  if (!open || typeof document === "undefined") return null;
+
+  return createPortal(
     <>
       <div
         className="ui-modal-back [position:fixed] [inset:0] [z-index:50] [background:color-mix(in_srgb,var(--ink)_40%,transparent)]"
@@ -63,6 +65,7 @@ export function Modal({
           </div>
         ) : null}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

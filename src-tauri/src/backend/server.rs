@@ -315,7 +315,10 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
             TRANSFERS_ROUTE,
             get(handlers::list_transfers).post(handlers::create_transfer),
         )
-        .route(TRANSFER_BY_ID_ROUTE, get(handlers::get_transfer))
+        .route(
+            TRANSFER_BY_ID_ROUTE,
+            get(handlers::get_transfer).delete(handlers::delete_transfer),
+        )
         .route(TRANSFER_SEND_ROUTE, post(handlers::send_transfer))
         .route(TRANSFER_RECEIVE_ROUTE, post(handlers::receive_transfer))
         // Production / repair

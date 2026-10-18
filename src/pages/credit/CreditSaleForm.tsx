@@ -1,11 +1,5 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
-import { AlertTriangle, MessageSquarePlus, PackagePlus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { MessageSquarePlus, PackagePlus, Trash2 } from "lucide-react";
 import {
   Button,
   Field,
@@ -19,13 +13,20 @@ import {
   UnitSegmentedControl,
 } from "@/components/common";
 import { CREDIT_COPY } from "@/shared/constants/customers";
-import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { useSettings } from "@/shared/settings";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { stockToDisplayedQuantity } from "@/utils/unitConversion";
-import { cn, creditState, limitMoneyDraft, money } from "@/utils/format";
+import { creditState, limitMoneyDraft, money } from "@/utils/format";
 import { productSellUnits, resolveProductSellUnit } from "@/pages/credit/creditSaleUtils";
-import { creditTierPrice, stockPerUnit, toBaseQty, type SalePriceTier } from "@/utils/salePricing";
+import {
+  availableWholeQty,
+  creditTierPrice,
+  hasCompleteSellUnit,
+  parseWholeQtyDraft,
+  toBaseQty,
+  wholeQty,
+  type SalePriceTier,
+} from "@/utils/salePricing";
 import { formatStockQty } from "@/pages/products/productQty";
 
 type CreditPriceMode = "MINIMUM" | "WHOLESALE" | "RETAIL";
@@ -44,28 +45,6 @@ export type CreditSaleLine = {
   unitPriceDraft?: string;
 };
 
-type DraftLine = {
-  productId: string;
-  productUnitId: string;
-  quantity: string;
-  unitPrice: string;
-  priceMode: CreditPriceMode;
-};
-
-const blankDraft = (priceMode: "WHOLESALE" | "RETAIL"): DraftLine => ({
-  productId: "",
-  productUnitId: "",
-  quantity: "1",
-  unitPrice: "",
-  priceMode,
-});
-
-const PRICE_MODES: { id: CreditPriceMode; label: string }[] = [
-  { id: "MINIMUM", label: "Minimum" },
-  { id: "WHOLESALE", label: "Wholesale" },
-  { id: "RETAIL", label: "Retail" },
-];
-
 export const CREDIT_SALE_FORM_ID = "credit-sale-form";
 
 function priceFor(unit: ProductSellUnit | undefined, mode: CreditPriceMode) {
@@ -75,9 +54,7 @@ function priceFor(unit: ProductSellUnit | undefined, mode: CreditPriceMode) {
 }
 
 function availableInUnit(product: Product, unit: ProductSellUnit, usedBase: number) {
-  const per = stockPerUnit(unit);
-  if (per <= 0) return 0;
-  return Math.max(0, (Math.max(0, product.stock) - usedBase) / per);
+  return availableWholeQty(unit, Math.max(0, product.stock) - usedBase);
 }
 
 export function CreditSaleForm({
@@ -96,139 +73,36 @@ export function CreditSaleForm({
   const { settings } = useSettings();
   const defaultPriceMode = settings.creditPriceMode;
   const [lines, setLines] = useState<CreditSaleLine[]>([]);
-  const [draft, setDraft] = useState<DraftLine>(() => blankDraft(defaultPriceMode));
   const [searchKey, setSearchKey] = useState(0);
   const [notes, setNotes] = useState("");
   const [showNotes, setShowNotes] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const quantityRef = useRef<HTMLInputElement>(null);
-  const unitRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const nextFocus = useRef<"unit" | "quantity" | null>(null);
 
   const activeProducts = useMemo(
     () => products.filter((product) => product.isActive !== false),
     [products],
   );
-  const selectedProduct = activeProducts.find((product) => product.id === draft.productId);
-  const unitOptions = selectedProduct ? productSellUnits(selectedProduct) : [];
-  const selectedUnit = selectedProduct
-    ? resolveProductSellUnit(selectedProduct, draft.productUnitId)
-    : undefined;
-  const usedBase = selectedProduct
-    ? lines
-        .filter((line) => line.productId === selectedProduct.id)
-        .reduce((sum, line) => sum + line.baseQuantity, 0)
-    : 0;
-  const available =
-    selectedProduct && selectedUnit ? availableInUnit(selectedProduct, selectedUnit, usedBase) : 0;
-  const requested = Number(draft.quantity);
-  const insufficient = Boolean(
-    selectedProduct && selectedUnit && Number.isFinite(requested) && requested > available + 1e-6,
-  );
-  const lowStock = Boolean(
-    selectedProduct &&
-    selectedProduct.stock > 0 &&
-    selectedProduct.stock < (selectedProduct.minimumStock ?? 20),
-  );
-
   useEffect(() => {
-    onDirtyChange?.(lines.length > 0 || Boolean(draft.productId) || Boolean(notes.trim()));
-  }, [draft.productId, lines.length, notes, onDirtyChange]);
-
-  useEffect(() => {
-    if (!selectedUnit || !nextFocus.current) return;
-    const target = nextFocus.current;
-    nextFocus.current = null;
-    requestAnimationFrame(() => {
-      if (target === "unit") unitRefs.current[selectedUnit.id]?.focus();
-      else {
-        quantityRef.current?.focus();
-        quantityRef.current?.select();
-      }
-    });
-  }, [selectedUnit]);
+    onDirtyChange?.(lines.length > 0 || Boolean(notes.trim()));
+  }, [lines.length, notes, onDirtyChange]);
 
   function pickProduct(product: Product | null) {
-    if (!product) {
-      setDraft(blankDraft(defaultPriceMode));
+    if (!product) return;
+    const units = productSellUnits(product);
+    const usedBase = lines
+      .filter((line) => line.productId === product.id)
+      .reduce((sum, line) => sum + line.baseQuantity, 0);
+    const preferred = resolveProductSellUnit(product);
+    const unit =
+      preferred && availableInUnit(product, preferred, usedBase) >= 1
+        ? preferred
+        : units.find((candidate) => availableInUnit(product, candidate, usedBase) >= 1);
+    if (!unit?.id) {
+      setError(`${product.name} is out of stock.`);
       return;
     }
-    const unit = resolveProductSellUnit(product);
-    nextFocus.current = productSellUnits(product).length > 1 ? "unit" : "quantity";
-    setError("");
-    setDraft({
-      productId: product.id,
-      productUnitId: unit?.id ?? "",
-      quantity: "1",
-      unitPrice: String(priceFor(unit, defaultPriceMode)),
-      priceMode: defaultPriceMode,
-    });
-  }
-
-  function pickUnit(productUnitId: string, moveToQuantity = true) {
-    if (!selectedProduct) return;
-    const unit = unitOptions.find((row) => row.id === productUnitId);
-    if (!unit) return;
-    setDraft((prev) => ({
-      ...prev,
-      productUnitId,
-      unitPrice: String(priceFor(unit, prev.priceMode)),
-    }));
-    if (moveToQuantity) {
-      requestAnimationFrame(() => {
-        quantityRef.current?.focus();
-        quantityRef.current?.select();
-      });
-    }
-  }
-
-  function onUnitKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
-    if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
-      event.preventDefault();
-      quantityRef.current?.focus();
-      quantityRef.current?.select();
-      return;
-    }
-    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
-    event.preventDefault();
-    const backwards = event.key === "ArrowLeft" || event.key === "ArrowUp";
-    const next =
-      unitOptions[(index + (backwards ? -1 : 1) + unitOptions.length) % unitOptions.length];
-    pickUnit(next.id, false);
-    requestAnimationFrame(() => unitRefs.current[next.id]?.focus());
-  }
-
-  function pickPriceMode(priceMode: CreditPriceMode) {
-    setDraft((prev) => ({
-      ...prev,
-      priceMode,
-      unitPrice: String(priceFor(selectedUnit, priceMode)),
-    }));
-  }
-
-  function addLine() {
-    const product = activeProducts.find((row) => row.id === draft.productId);
-    const unit = product ? resolveProductSellUnit(product, draft.productUnitId) : undefined;
-    const quantity = Number(draft.quantity);
-    const unitPrice = Number(draft.unitPrice);
-    if (!product || !unit?.id) {
-      setError(CREDIT_COPY.productRequired);
-      return;
-    }
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      setError("Enter a valid quantity.");
-      return;
-    }
-    if (quantity > available + 1e-6) {
-      setError(`Only ${formatStockQty(available)} ${unit.name || product.unit} available.`);
-      return;
-    }
-    if (!Number.isFinite(unitPrice) || unitPrice < unit.min) {
-      setError(`Price cannot be below ${money(unit.min)}.`);
-      return;
-    }
-    const baseQuantity = toBaseQty(product, unit.id, quantity);
+    const unitPrice = Math.max(priceFor(unit, defaultPriceMode), unit.min);
     setError("");
     setLines((prev) => [
       ...prev,
@@ -238,15 +112,14 @@ export function CreditSaleForm({
         productUnitId: unit.id,
         name: product.name,
         unitName: unit.name || product.unit,
-        quantity,
-        baseQuantity,
+        quantity: 1,
+        baseQuantity: toBaseQty(product, unit.id, 1),
         unitPrice,
-        priceMode: draft.priceMode,
-        quantityDraft: String(quantity),
+        priceMode: defaultPriceMode,
+        quantityDraft: "1",
         unitPriceDraft: String(unitPrice),
       },
     ]);
-    setDraft(blankDraft(defaultPriceMode));
     setSearchKey((key) => key + 1);
   }
 
@@ -268,7 +141,6 @@ export function CreditSaleForm({
       setLines([]);
       setNotes("");
       setShowNotes(false);
-      setDraft(blankDraft(defaultPriceMode));
       setSearchKey((key) => key + 1);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : CREDIT_COPY.saleFailed);
@@ -278,8 +150,20 @@ export function CreditSaleForm({
   }
 
   const total = lines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
-  const totalQuantity = lines.reduce((sum, line) => sum + line.quantity, 0);
+  const totalQuantity = lines.reduce((sum, line) => sum + wholeQty(line.quantity), 0);
   const newBalance = previousBalance + total;
+
+  function usedBaseExcept(productId: string, lineId: string) {
+    return lines
+      .filter((row) => row.productId === productId && row.id !== lineId)
+      .reduce((sum, row) => sum + row.baseQuantity, 0);
+  }
+
+  function remainingBaseFor(line: CreditSaleLine) {
+    const product = activeProducts.find((row) => row.id === line.productId);
+    if (!product) return 0;
+    return Math.max(0, product.stock) - usedBaseExcept(line.productId, line.id);
+  }
 
   function updateLine(id: string, changes: Partial<CreditSaleLine>) {
     setError("");
@@ -301,16 +185,66 @@ export function CreditSaleForm({
   function changeLineUnit(line: CreditSaleLine, productUnitId: string) {
     const product = activeProducts.find((row) => row.id === line.productId);
     const unit = product ? resolveProductSellUnit(product, productUnitId) : undefined;
-    if (!unit) return;
-    const nextPrice = priceFor(unit, line.priceMode);
-    const quantity = stockToDisplayedQuantity(unit, line.baseQuantity);
+    if (!product || !unit) return;
+    const left = remainingBaseFor(line);
+    if (!hasCompleteSellUnit(unit, left)) {
+      setError(
+        `${unit.name || product.unit} needs more than ${formatStockQty(left)} ${product.unit} available.`,
+      );
+      return;
+    }
+    const nextPrice = Math.max(priceFor(unit, line.priceMode), unit.min);
+    const maxQty = availableWholeQty(unit, left);
+    let quantity = wholeQty(stockToDisplayedQuantity(unit, line.baseQuantity));
+    if (quantity > maxQty) quantity = maxQty;
+    if (quantity <= 0) quantity = Math.min(1, maxQty);
     updateLine(line.id, {
       productUnitId,
-      unitName: unit.name || product?.unit || line.unitName,
+      unitName: unit.name || product.unit || line.unitName,
       quantity,
       quantityDraft: String(quantity),
       unitPrice: nextPrice,
       unitPriceDraft: String(nextPrice),
+    });
+  }
+
+  function commitLineQuantity(line: CreditSaleLine) {
+    const product = activeProducts.find((row) => row.id === line.productId);
+    const unit = product ? resolveProductSellUnit(product, line.productUnitId) : undefined;
+    if (!product || !unit) return;
+    const maxQty = availableWholeQty(unit, remainingBaseFor(line));
+    let quantity = wholeQty(Number(line.quantityDraft ?? line.quantity)) || 1;
+    if (quantity > maxQty) {
+      quantity = maxQty;
+      setError(
+        maxQty > 0
+          ? `Only ${maxQty} ${unit.name || product.unit} of ${line.name} left.`
+          : `${line.name} is out of stock.`,
+      );
+    }
+    if (quantity <= 0) {
+      setError(`${line.name} is out of stock.`);
+      quantity = maxQty > 0 ? Math.min(1, maxQty) : 0;
+    }
+    updateLine(line.id, {
+      quantity: quantity > 0 ? quantity : 1,
+      quantityDraft: String(quantity > 0 ? quantity : 1),
+    });
+  }
+
+  function commitLinePrice(line: CreditSaleLine) {
+    const product = activeProducts.find((row) => row.id === line.productId);
+    const unit = product ? resolveProductSellUnit(product, line.productUnitId) : undefined;
+    if (!unit) return;
+    const raw = Number(line.unitPriceDraft ?? line.unitPrice);
+    let unitPrice = Number.isFinite(raw) && raw >= 0 ? raw : unit.min;
+    if (unitPrice < unit.min) {
+      unitPrice = unit.min;
+      setError(`${line.name} price cannot be below ${money(unit.min)}.`);
+    }
+    updateLine(line.id, {
+      unitPrice,
+      unitPriceDraft: String(unitPrice),
     });
   }
 
@@ -320,10 +254,10 @@ export function CreditSaleForm({
       const product = activeProducts.find((row) => row.id === line.productId);
       const unit = product ? resolveProductSellUnit(product, line.productUnitId) : undefined;
       if (!product || !unit) return `${line.name} is no longer available.`;
-      const quantity = Number(line.quantityDraft ?? line.quantity);
+      const quantity = wholeQty(Number(line.quantityDraft ?? line.quantity));
       const unitPrice = Number(line.unitPriceDraft ?? line.unitPrice);
-      if (!Number.isFinite(quantity) || quantity <= 0) {
-        return `Enter a valid quantity for ${line.name}.`;
+      if (quantity <= 0 || quantity !== Number(line.quantityDraft ?? line.quantity)) {
+        return `Enter a whole-number quantity for ${line.name}.`;
       }
       if (!Number.isFinite(unitPrice) || unitPrice < unit.min) {
         return `${line.name} price cannot be below ${money(unit.min)}.`;
@@ -339,12 +273,12 @@ export function CreditSaleForm({
 
   return (
     <form id={CREDIT_SALE_FORM_ID} className="ui-stack grid gap-2.5" onSubmit={handleSubmit}>
-      <div className="grid gap-2.5 rounded-xl border border-line bg-paper p-2.5">
+      <div className="grid gap-2 rounded-xl border border-line bg-paper p-2.5">
         <Field label="Add product">
           <ProductSearch
             key={searchKey}
             products={activeProducts}
-            value={draft.productId}
+            value=""
             onChange={pickProduct}
             placeholder="Search product ID, name, SKU, or barcode"
             autoFocus
@@ -352,114 +286,12 @@ export function CreditSaleForm({
             showInventory
             showPrice
             blockOutOfStock
-            invalid={Boolean(error && !selectedProduct)}
+            invalid={Boolean(error && !lines.length)}
           />
         </Field>
-
-        {selectedProduct && selectedUnit ? (
-          <div className="grid gap-2.5 rounded-lg bg-bg/70 p-2.5">
-            {unitOptions.length > 1 ? (
-              <div className="grid gap-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-muted">
-                  Unit
-                </span>
-                <UnitSegmentedControl
-                  units={unitOptions.map((unit) => ({ id: unit.id, label: unit.name || "Unit" }))}
-                  value={selectedUnit.id}
-                  onChange={pickUnit}
-                  onButtonRef={(unitId, element) => {
-                    unitRefs.current[unitId] = element;
-                  }}
-                  onKeyDown={onUnitKeyDown}
-                />
-              </div>
-            ) : null}
-
-            <Field label="Price tier (for selected unit)">
-              <div className="grid grid-cols-3 gap-1 rounded-lg border border-line bg-paper p-1">
-                {PRICE_MODES.map((mode) => (
-                  <button
-                    key={mode.id}
-                    type="button"
-                    className={cn(
-                      "flex min-h-[44px] flex-col items-center justify-center rounded-md border-0 px-2 text-[10px] font-bold",
-                      draft.priceMode === mode.id
-                        ? "bg-accent-bg text-accent-deep"
-                        : "bg-transparent text-muted hover:bg-bg",
-                    )}
-                    onClick={() => pickPriceMode(mode.id)}
-                  >
-                    <span>{mode.label}</span>
-                    <span className="text-[11px] tabular-nums">
-                      {money(priceFor(selectedUnit, mode.id))}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </Field>
-
-            <div className="grid grid-cols-[110px_minmax(0,1fr)] items-end gap-2">
-              <Field label="Quantity">
-                <TextInput
-                  inputRef={quantityRef}
-                  inputMode="decimal"
-                  maxLength={FIELD_LIMITS.qty}
-                  value={draft.quantity}
-                  className={insufficient ? "!border-danger" : undefined}
-                  onChange={(event) =>
-                    setDraft((prev) => ({ ...prev, quantity: event.target.value }))
-                  }
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter") return;
-                    event.preventDefault();
-                    addLine();
-                  }}
-                />
-              </Field>
-              <Field label="Unit price">
-                <TextInput
-                  inputMode="decimal"
-                  maxLength={FIELD_LIMITS.moneyChars}
-                  value={draft.unitPrice}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      unitPrice: limitMoneyDraft(event.target.value),
-                    }))
-                  }
-                />
-              </Field>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 font-bold",
-                  insufficient ? "text-danger" : lowStock ? "text-amber-700" : "text-accent-deep",
-                )}
-              >
-                {insufficient || lowStock ? <AlertTriangle size={12} /> : null}
-                {formatStockQty(available)} {selectedUnit.name || selectedProduct.unit} available
-              </span>
-              <span className="text-muted">
-                Cost {money(selectedUnit.cost)} · Minimum {money(selectedUnit.min)}
-              </span>
-            </div>
-
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                icon={<PackagePlus size={14} />}
-                disabled={insufficient || available <= 0}
-                onClick={addLine}
-              >
-                Add product
-              </Button>
-            </div>
-          </div>
-        ) : null}
+        <p className="m-0 text-[10px] text-muted">
+          Select a result to add it immediately, then adjust unit, quantity, and price in the table.
+        </p>
       </div>
 
       {lines.length ? (
@@ -475,19 +307,34 @@ export function CreditSaleForm({
             </tr>
           </THead>
           <tbody>
-            {lines.map((line) => (
-              <tr key={line.id}>
-                <Td>
-                  <strong className="block text-[12px] text-ink">{line.name}</strong>
-                  <small className="text-[10px] text-muted">{line.priceMode.toLowerCase()}</small>
-                </Td>
-                <Td>
-                  {(() => {
-                    const product = activeProducts.find((row) => row.id === line.productId);
-                    const units = product ? productSellUnits(product) : [];
-                    return units.length > 1 ? (
+            {lines.map((line) => {
+              const product = activeProducts.find((row) => row.id === line.productId);
+              const units = product ? productSellUnits(product) : [];
+              const unit = product
+                ? resolveProductSellUnit(product, line.productUnitId)
+                : undefined;
+              const left = remainingBaseFor(line);
+              const maxQty = unit ? availableWholeQty(unit, left) : 0;
+              const minPrice = unit?.min ?? 0;
+              return (
+                <tr key={line.id}>
+                  <Td>
+                    <strong className="block text-[12px] text-ink">{line.name}</strong>
+                    <small className="text-[10px] text-muted">
+                      {line.priceMode.toLowerCase()}
+                      {maxQty > 0
+                        ? ` · ${maxQty} ${unit?.name || product?.unit || ""} left`
+                        : " · out of stock"}
+                    </small>
+                  </Td>
+                  <Td>
+                    {units.length > 1 ? (
                       <UnitSegmentedControl
-                        units={units.map((unit) => ({ id: unit.id, label: unit.name }))}
+                        units={units.map((row) => ({
+                          id: row.id,
+                          label: row.name,
+                          disabled: !hasCompleteSellUnit(row, left),
+                        }))}
                         value={line.productUnitId}
                         onChange={(unitId) => changeLineUnit(line, unitId)}
                         ariaLabel={`Unit for ${line.name}`}
@@ -496,53 +343,69 @@ export function CreditSaleForm({
                       />
                     ) : (
                       <span className="text-[11px] font-medium text-sub">{line.unitName}</span>
-                    );
-                  })()}
-                </Td>
-                <Td>
-                  <TextInput
-                    inputMode="decimal"
-                    aria-label={`Quantity for ${line.name}`}
-                    value={line.quantityDraft ?? String(line.quantity)}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      const quantity = Number(value);
-                      updateLine(line.id, {
-                        quantityDraft: value,
-                        ...(Number.isFinite(quantity) && quantity > 0 ? { quantity } : {}),
-                      });
-                    }}
-                  />
-                </Td>
-                <Td>
-                  <TextInput
-                    inputMode="decimal"
-                    aria-label={`Price for ${line.name}`}
-                    value={line.unitPriceDraft ?? String(line.unitPrice)}
-                    onChange={(event) => {
-                      const value = limitMoneyDraft(event.target.value);
-                      const unitPrice = Number(value);
-                      updateLine(line.id, {
-                        unitPriceDraft: value,
-                        ...(Number.isFinite(unitPrice) && unitPrice >= 0 ? { unitPrice } : {}),
-                      });
-                    }}
-                  />
-                </Td>
-                <Td numeric>{money(line.quantity * line.unitPrice)}</Td>
-                <Td>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    aria-label={`Remove ${line.name}`}
-                    onClick={() => setLines((prev) => prev.filter((row) => row.id !== line.id))}
-                  >
-                    <Trash2 size={14} />
-                  </Button>
-                </Td>
-              </tr>
-            ))}
+                    )}
+                  </Td>
+                  <Td>
+                    <TextInput
+                      inputMode="numeric"
+                      aria-label={`Quantity for ${line.name}`}
+                      value={line.quantityDraft ?? String(line.quantity)}
+                      onChange={(event) => {
+                        const value = parseWholeQtyDraft(event.target.value);
+                        const quantity = wholeQty(Number(value));
+                        if (!value) {
+                          updateLine(line.id, { quantityDraft: "" });
+                          return;
+                        }
+                        const capped = Math.min(quantity, maxQty);
+                        if (quantity > maxQty) {
+                          setError(
+                            maxQty > 0
+                              ? `Only ${maxQty} ${unit?.name || product?.unit || ""} of ${line.name} left.`
+                              : `${line.name} is out of stock.`,
+                          );
+                        }
+                        updateLine(line.id, {
+                          quantityDraft: String(capped > 0 ? capped : quantity),
+                          quantity: capped > 0 ? capped : quantity,
+                        });
+                      }}
+                      onBlur={() => commitLineQuantity(line)}
+                    />
+                  </Td>
+                  <Td>
+                    <TextInput
+                      inputMode="decimal"
+                      aria-label={`Price for ${line.name}`}
+                      value={line.unitPriceDraft ?? String(line.unitPrice)}
+                      onChange={(event) => {
+                        const value = limitMoneyDraft(event.target.value);
+                        const unitPrice = Number(value);
+                        updateLine(line.id, {
+                          unitPriceDraft: value,
+                          ...(Number.isFinite(unitPrice) && unitPrice >= minPrice
+                            ? { unitPrice }
+                            : {}),
+                        });
+                      }}
+                      onBlur={() => commitLinePrice(line)}
+                    />
+                  </Td>
+                  <Td numeric>{money(line.quantity * line.unitPrice)}</Td>
+                  <Td>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`Remove ${line.name}`}
+                      onClick={() => setLines((prev) => prev.filter((row) => row.id !== line.id))}
+                    >
+                      <Trash2 size={14} />
+                    </Button>
+                  </Td>
+                </tr>
+              );
+            })}
           </tbody>
         </Table>
       ) : (

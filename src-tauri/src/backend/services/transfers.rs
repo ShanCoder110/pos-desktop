@@ -77,4 +77,11 @@ impl TransferService {
         transaction.commit().await?;
         Self::get(database, id).await
     }
+
+    pub async fn delete_permanent(database: &DatabaseConnection, id: Uuid) -> Result<(), AppError> {
+        let transaction = database.begin().await?;
+        TransferRepository::delete_permanent(&transaction, id).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
 }

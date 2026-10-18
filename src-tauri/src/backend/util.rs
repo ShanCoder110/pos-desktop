@@ -37,6 +37,16 @@ pub fn trimmed(value: &Option<String>) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Trim and capitalize the first character of a display name (`ali traders` → `Ali traders`).
+pub fn capitalize_name(value: &str) -> String {
+    let trimmed = value.trim();
+    let mut chars = trimmed.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
 pub fn money_value(value: Decimal) -> Decimal {
     value.round_dp_with_strategy(MONEY_DECIMAL_PLACES, RoundingStrategy::MidpointAwayFromZero)
 }
@@ -190,5 +200,19 @@ pub fn optional_pk_mobile(raw: Option<&str>) -> Result<Option<String>, AppError>
         None => Ok(None),
         Some(digits) if digits.len() == 11 && digits.starts_with("03") => Ok(Some(digits)),
         Some(_) => Err(AppError::Validation(ERROR_INVALID_PHONE.into())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::capitalize_name;
+
+    #[test]
+    fn capitalize_name_first_letter_only() {
+        assert_eq!(capitalize_name("ali traders"), "Ali traders");
+        assert_eq!(capitalize_name("  battery 12v "), "Battery 12v");
+        assert_eq!(capitalize_name("Already Cap"), "Already Cap");
+        assert_eq!(capitalize_name(".22 ohm"), ".22 ohm");
+        assert_eq!(capitalize_name(""), "");
     }
 }

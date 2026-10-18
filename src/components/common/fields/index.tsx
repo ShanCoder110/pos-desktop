@@ -53,12 +53,15 @@ export function Field({
   label,
   hint,
   error,
+  required,
   children,
   className,
 }: {
   label: string;
   hint?: string;
   error?: string;
+  /** Shows a red asterisk next to the label for required inputs. */
+  required?: boolean;
   children: ReactNode;
   className?: string;
 }) {
@@ -72,6 +75,11 @@ export function Field({
     >
       <span className="field-label [font-size:12px] [font-weight:600] [color:var(--sub)]">
         {label}
+        {required ? (
+          <span className="field-required ms-0.5 text-danger" aria-hidden="true">
+            *
+          </span>
+        ) : null}
       </span>
       {children}
       {error ? (

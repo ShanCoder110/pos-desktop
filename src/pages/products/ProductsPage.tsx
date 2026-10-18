@@ -98,7 +98,7 @@ import {
 } from "@/pages/products/productPayload";
 import { listAllInvoices } from "@/services/sales";
 import { createMasterRecord } from "@/services/masters";
-import { productMatchesQuery } from "@/utils/salePricing";
+import { compareProductSearch, productMatchesQuery } from "@/utils/salePricing";
 import {
   buildProductSalesStats,
   formatInsightMetricValue,
@@ -577,7 +577,9 @@ export function ProductsPage() {
       }
       return true;
     });
-    return list;
+    const needle = q.trim();
+    if (!needle) return list;
+    return [...list].sort((a, b) => compareProductSearch(a, b, needle));
   }, [searchRows, q, tab, chips, sectionKpi, salesStats, lots, rows]);
 
   const pageCount = pageSize === PAGE_SIZE_ALL ? Math.max(filtered.length, 1) : pageSize;

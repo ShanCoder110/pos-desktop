@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Package, Plus } from "lucide-react";
+import { AlertTriangle, Package, Plus } from "lucide-react";
 import {
   Button,
   Field,
@@ -35,9 +35,10 @@ import { LOT_COPY } from "@/shared/constants/products";
 import type { ProductLotRow, SupplierRow } from "@/shared/domain/types";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { cn } from "@/utils/format";
+import { resolveStockBranchId } from "@/utils/stockBranch";
 
 type ErrorField = "product" | "supplier" | "quantity" | null;
-type LotTab = "lot" | "branches";
+type LotTab = "lot" | "warning" | "branches";
 
 function focusableElements(root: HTMLElement) {
   return [
@@ -166,6 +167,9 @@ export function LotForm({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const draftUnitRef = useRef<HTMLDivElement>(null);
+  /** Latest lot — branch load is async and must not reset qty entered while it was in flight. */
+  const lotRef = useRef(lot);
+  lotRef.current = lot;
   const [tab, setTab] = useState<LotTab>("lot");
   const [error, setError] = useState<ErrorField>(null);
   const [sessionBranchId, setSessionBranchId] = useState(lot.branchId ?? "");
@@ -213,25 +217,31 @@ export function LotForm({
     });
   }
 
-  function applyReceivedQuantity(quantity: number) {
+  function assignQuantityToPrimaryBranch(quantity: number) {
+    const nextQty = Math.max(0, quantity);
     const withQty = branchRows.filter((row) => row.quantity > 0);
-    let nextRows = branchRows;
-    if (withQty.length === 1) {
-      nextRows = branchRows.map((row) =>
-        row.branchId === withQty[0].branchId ? { ...row, quantity } : row,
-      );
-    }
+    const targetId =
+      withQty.length === 1 ? withQty[0].branchId : sessionBranchId || branchRows[0]?.branchId || "";
+    const nextRows = targetId
+      ? branchRows.map((row) =>
+          row.branchId === targetId ? { ...row, quantity: nextQty } : { ...row, quantity: 0 },
+        )
+      : branchRows;
     setBranchRows(nextRows);
     const active = nextRows.filter((row) => row.quantity > 0);
-    const primary =
-      nextRows.find((row) => row.quantity > 0 && row.branchId === sessionBranchId)?.branchId ||
-      nextRows.find((row) => row.quantity > 0)?.branchId ||
-      "";
+    return {
+      nextRows,
+      active,
+      primary: active[0]?.branchId || targetId || "",
+      nextQty,
+    };
+  }
+
+  function applyReceivedQuantity(quantity: number) {
+    const { active, primary, nextQty } = assignQuantityToPrimaryBranch(quantity);
     patch({
-      originalQuantity: quantity,
-      remainingQuantity: isNew
-        ? Math.max(0, quantity - lot.damagedQuantity)
-        : lot.remainingQuantity,
+      originalQuantity: nextQty,
+      remainingQuantity: isNew ? Math.max(0, nextQty - lot.damagedQuantity) : lot.remainingQuantity,
       branchId: primary,
       branchAllocations: active.map((row) => ({
         branchId: row.branchId,
@@ -240,22 +250,9 @@ export function LotForm({
     });
   }
 
-  /** Keep the single active branch allocation aligned with Left so Save stays usable. */
+  /** Keep stock on the current (or single active) branch so Save works without the Branches tab. */
   function applyRemainingQuantity(quantity: number) {
-    const nextQty = Math.max(0, quantity);
-    const withQty = branchRows.filter((row) => row.quantity > 0);
-    let nextRows = branchRows;
-    if (withQty.length === 1) {
-      nextRows = branchRows.map((row) =>
-        row.branchId === withQty[0].branchId ? { ...row, quantity: nextQty } : row,
-      );
-    }
-    setBranchRows(nextRows);
-    const active = nextRows.filter((row) => row.quantity > 0);
-    const primary =
-      nextRows.find((row) => row.quantity > 0 && row.branchId === sessionBranchId)?.branchId ||
-      nextRows.find((row) => row.quantity > 0)?.branchId ||
-      "";
+    const { active, primary, nextQty } = assignQuantityToPrimaryBranch(quantity);
     patch({
       remainingQuantity: nextQty,
       branchId: primary,
@@ -270,18 +267,27 @@ export function LotForm({
     const controller = new AbortController();
     void Promise.all([listAllBranches(controller.signal), ensureSession()])
       .then(([branchList, session]) => {
+        if (controller.signal.aborted) return;
         const active = branchList
           .filter((row) => row.isActive)
-          .map((row) => ({ id: row.id, name: row.name }));
-        const focusId = lot.branchId || session?.branchId || active[0]?.id || "";
-        const existing = lot.branchAllocations ?? [];
-        const total = isNew ? lot.originalQuantity : lot.remainingQuantity;
+          .map((row) => ({ id: row.id, name: row.name, isMain: row.isMain }));
+        const current = lotRef.current;
+        const currentId =
+          session?.branchId && active.some((branch) => branch.id === session.branchId)
+            ? session.branchId
+            : "";
+        const focusId = resolveStockBranchId(active, session?.branchId, current.branchId);
+        const existing = current.branchAllocations ?? [];
+        const existingTotal = existing.reduce((sum, row) => sum + row.quantity, 0);
+        const total = isNew ? current.originalQuantity : current.remainingQuantity;
         const baseline: Record<string, number> = {};
-        setSessionBranchId(focusId);
+        // Always track the POS/session branch for "Current" + default allocate.
+        setSessionBranchId(currentId || focusId);
         setBranchRows(
           active.map((branch) => {
             const row = existing.find((entry) => entry.branchId === branch.id);
-            const quantity = row?.quantity ?? (isNew && branch.id === focusId ? total : 0);
+            const quantity =
+              row?.quantity ?? (isNew && branch.id === focusId && existingTotal <= 0 ? total : 0);
             baseline[branch.id] = quantity;
             return {
               branchId: branch.id,
@@ -292,10 +298,12 @@ export function LotForm({
           }),
         );
         setBranchBaseline(baseline);
-        if (isNew && !lot.branchId && focusId) {
-          patch({
+        if (isNew && focusId) {
+          const quantity = existingTotal > 0 ? existingTotal : total;
+          onChange({
+            ...lotRef.current,
             branchId: focusId,
-            branchAllocations: [{ branchId: focusId, quantity: lot.originalQuantity }],
+            branchAllocations: [{ branchId: focusId, quantity }],
           });
         }
       })
@@ -471,11 +479,26 @@ export function LotForm({
     let nextLot = lot;
     const branchTotal = isNew ? lot.originalQuantity : lot.remainingQuantity;
     if (branchTotal > 0 && branchRows.length) {
-      const rows = branchRows;
+      let rows = branchRows;
+      // Qty typed before branches finished loading can leave rows at 0 — put it on current branch.
       if (!rows.some((row) => row.quantity > 0)) {
-        setTab("branches");
-        toaster.error(LOT_COPY.branchNeedQty);
-        return;
+        const targetId =
+          (sessionBranchId && rows.some((row) => row.branchId === sessionBranchId)
+            ? sessionBranchId
+            : null) ||
+          rows[0]?.branchId ||
+          "";
+        if (!targetId) {
+          setTab("branches");
+          toaster.error(LOT_COPY.branchNeedQty);
+          return;
+        }
+        rows = rows.map((row) => ({
+          ...row,
+          selected: row.branchId === targetId,
+          quantity: row.branchId === targetId ? branchTotal : 0,
+        }));
+        setBranchRows(rows);
       }
       const nextAllocated = rows.reduce((sum, row) => sum + row.quantity, 0);
       const leftover = roundStockQty(branchTotal - nextAllocated);
@@ -500,6 +523,12 @@ export function LotForm({
           branchId: row.branchId,
           quantity: row.quantity,
         })),
+      };
+    } else if (branchTotal > 0 && !branchRows.length && sessionBranchId) {
+      nextLot = {
+        ...lot,
+        branchId: sessionBranchId,
+        branchAllocations: [{ branchId: sessionBranchId, quantity: branchTotal }],
       };
     }
     const expiryRaw = (nextLot.expiryDate ?? "").trim();
@@ -591,12 +620,18 @@ export function LotForm({
           items={[
             { id: "lot", label: "Lot" },
             {
+              id: "warning",
+              label: lot.expiryDate ? "Warning · expiry" : "Warning",
+            },
+            {
               id: "branches",
-              label: `Branches${
-                (isNew ? lot.originalQuantity : lot.remainingQuantity)
-                  ? ` · ${formatStockQty(allocated)}/${formatStockQty(isNew ? lot.originalQuantity : lot.remainingQuantity)}`
-                  : ""
-              }`,
+              label: isNew
+                ? "Branches (optional)"
+                : `Branches${
+                    lot.remainingQuantity
+                      ? ` · ${formatStockQty(allocated)}/${formatStockQty(lot.remainingQuantity)}`
+                      : ""
+                  }`,
             },
           ]}
         />
@@ -628,8 +663,22 @@ export function LotForm({
                 </>
               }
             >
+              {isNew ? (
+                <p className="m-0 -mt-1 mb-2 text-[11px] text-muted">
+                  Stock is saved to{" "}
+                  <strong className="text-ink">
+                    {branchRows.find((row) => row.branchId === sessionBranchId)?.branchName ||
+                      "your current branch"}
+                  </strong>
+                  . Open Branches only if you need to split.
+                </p>
+              ) : null}
               <div className="lot-receive-grid">
-                <Field label="Product" error={error === "product" ? "Select a product" : undefined}>
+                <Field
+                  label="Product"
+                  required
+                  error={error === "product" ? "Select a product" : undefined}
+                >
                   <ProductSearch
                     products={products}
                     value={lot.productId}
@@ -640,6 +689,7 @@ export function LotForm({
                 </Field>
                 <Field
                   label="Supplier"
+                  required
                   error={error === "supplier" ? "Select a supplier" : undefined}
                   hint={supplierSourceLot ? `From lot ${supplierSourceLot.lotNumber}` : undefined}
                 >
@@ -666,15 +716,6 @@ export function LotForm({
                     <TextInput value={lot.lotNumber} disabled />
                   </Field>
                 )}
-                <Field label={LOT_COPY.expiryLabel} hint={LOT_COPY.expiryHint}>
-                  <TextInput
-                    type="date"
-                    value={(lot.expiryDate ?? "").slice(0, 10)}
-                    onChange={(event) =>
-                      patch({ expiryDate: event.target.value ? event.target.value : null })
-                    }
-                  />
-                </Field>
               </div>
             </FormSection>
 
@@ -696,7 +737,7 @@ export function LotForm({
                     showQuantity
                     showPricing
                     onReceived={isNew ? applyReceivedQuantity : undefined}
-                    onLeft={applyRemainingQuantity}
+                    onLeft={isNew ? undefined : applyRemainingQuantity}
                     onDamaged={(quantity) =>
                       patch({
                         damagedQuantity: quantity,
@@ -821,8 +862,35 @@ export function LotForm({
               </p>
             )}
           </>
+        ) : tab === "warning" ? (
+          <FormSection title="Expiry" icon={<AlertTriangle size={14} />}>
+            <p className="m-0 text-[11px] text-muted">
+              Optional. Set when this lot expires so stock can be watched before it goes bad.
+            </p>
+            <div className="lot-receive-grid max-w-md">
+              <Field label={LOT_COPY.expiryLabel} hint={LOT_COPY.expiryHint}>
+                <TextInput
+                  type="date"
+                  value={(lot.expiryDate ?? "").slice(0, 10)}
+                  onChange={(event) =>
+                    patch({ expiryDate: event.target.value ? event.target.value : null })
+                  }
+                />
+              </Field>
+            </div>
+          </FormSection>
         ) : (
           <>
+            {isNew ? (
+              <p className="m-0 text-[12px] text-muted">
+                New lots go to{" "}
+                <strong className="text-ink">
+                  {branchRows.find((row) => row.branchId === sessionBranchId)?.branchName ||
+                    "your current branch"}
+                </strong>{" "}
+                automatically. Split below only if you need another branch.
+              </p>
+            ) : null}
             {branchRows.length && (isNew ? lot.originalQuantity > 0 : lot.remainingQuantity > 0) ? (
               <LotBranchFields
                 rows={branchRows}
@@ -837,7 +905,7 @@ export function LotForm({
             ) : (
               <p className="m-0 text-[11px] text-muted">
                 {isNew
-                  ? "Enter a quantity on the Lot tab first."
+                  ? "Enter a quantity on the Lot tab — stock is assigned to your current branch."
                   : "No remaining stock to split between branches."}
               </p>
             )}

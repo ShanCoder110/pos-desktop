@@ -55,6 +55,7 @@ const SAMPLE_CUSTOMER: Customer = {
   id: "preview",
   name: "Ahmed Khan",
   phone: "0300-1234567",
+  address: "Hall Road, Lahore",
   balance: 2500,
   isWalking: false,
 };

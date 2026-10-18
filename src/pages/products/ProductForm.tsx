@@ -36,6 +36,7 @@ import {
 } from "@/pages/products/productLots";
 import { ProductBranchAllocation } from "@/pages/products/BranchStockFields";
 import { mergeBranchStock } from "@/pages/products/branchStockUtils";
+import { resolveStockBranchId } from "@/utils/stockBranch";
 import { ProductUnitMargin } from "@/pages/products/ProductUnitMargin";
 import {
   firstMissingUnitPrice,
@@ -246,8 +247,8 @@ export function ProductForm({
       .then(([branchRows, session]) => {
         const active = branchRows
           .filter((row) => row.isActive)
-          .map((row) => ({ id: row.id, name: row.name }));
-        const focusId = session?.branchId ?? active[0]?.id ?? "";
+          .map((row) => ({ id: row.id, name: row.name, isMain: row.isMain }));
+        const focusId = resolveStockBranchId(active, session?.branchId);
         setBranches(active);
         setSessionBranchId(focusId);
         if (!product.branchStock?.length) {

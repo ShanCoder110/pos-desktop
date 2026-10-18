@@ -7,11 +7,13 @@ import {
   LayoutDashboard,
   Package,
   Receipt,
+  Trash2,
   Truck,
   Users,
   Wallet,
   UserCog,
   UserRound,
+  Wrench,
 } from "lucide-react";
 
 export type NavItem = {
@@ -47,6 +49,7 @@ export const managementNav: { label: string; items: NavItem[] }[] = [
   {
     label: "OPERATIONS",
     items: [
+      { to: routes.repair, label: "Repair shop", icon: Wrench },
       { to: routes.expenses, label: "Expenses", icon: Wallet },
       { to: routes.transactions, label: "Transactions", icon: ArrowLeftRight },
     ],
@@ -57,7 +60,10 @@ export const managementNav: { label: string; items: NavItem[] }[] = [
   },
   {
     label: "MANAGEMENT",
-    items: [{ to: routes.users, label: "Users", icon: UserRound }],
+    items: [
+      { to: routes.users, label: "Users", icon: UserRound },
+      { to: routes.trash, label: "Trash", icon: Trash2 },
+    ],
   },
 ];
 
@@ -91,8 +97,8 @@ export const pageMeta: Record<string, { title: string; subtitle?: string }> = {
   },
   [routes.users]: { title: "Users", subtitle: "Sign-in accounts and roles" },
   [routes.trash]: { title: "Trash", subtitle: "Restore or permanently delete removed records" },
-  [routes.production]: { title: "Production", subtitle: "BOM jobs, damage, and commission" },
-  [routes.repair]: { title: "Production", subtitle: "BOM jobs, damage, and commission" },
+  [routes.production]: { title: "Repair shop", subtitle: "Jobs, parts, damage, and commission" },
+  [routes.repair]: { title: "Repair shop", subtitle: "Jobs, parts, damage, and commission" },
   [routes.expenses]: { title: "Expenses", subtitle: "Money leaving the shop" },
   [routes.transactions]: { title: "Transactions", subtitle: "Cash in and cash out" },
   [routes.shops]: { title: "Branches", subtitle: "Store, warehouse, repair, production" },

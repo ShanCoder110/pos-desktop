@@ -19,7 +19,10 @@ export function TopBar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useSession();
-  const meta = pageMeta[pathname] ?? { title: "POS" };
+  const meta = pageMeta[pathname] ??
+    Object.entries(pageMeta)
+      .filter(([path]) => path !== "/" && pathname.startsWith(`${path}/`))
+      .sort(([left], [right]) => right.length - left.length)[0]?.[1] ?? { title: "POS" };
   const ownerName = user?.name?.trim() || "Staff";
   const [notesOpen, setNotesOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);

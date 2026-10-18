@@ -46,7 +46,7 @@ export const STOCK_COUNT_COPY = {
   pickProduct: "Choose a product",
   pickBranch: "Choose a branch",
   pickUnit: "Choose a unit",
-  leftLockedHint: "Received qty is fixed. Change Qty left on the product or lot to adjust stock.",
+  leftLockedHint: "Received qty is fixed. Change Left to adjust on-hand stock.",
   loadFailed: "Could not load stock movements",
   retry: "Retry",
 } as const;

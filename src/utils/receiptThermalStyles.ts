@@ -1,3 +1,5 @@
+import { jameelNooriFontFaceCss } from "@/utils/receiptPrintFonts";
+
 /** Shared thermal receipt CSS for in-app preview, invoice print dialog, and browser print windows. */
 export const RECEIPT_THERMAL_CSS = `
 .receipt-inner {
@@ -122,7 +124,13 @@ export const RECEIPT_THERMAL_CSS = `
 
 .receipt-divider {
   border: none;
-  border-top: 1px dashed #000;
+  border-top: 1px dotted #000;
+  margin: 4px 0;
+}
+
+.receipt-divider-solid {
+  border: none;
+  border-top: 1px solid #000;
   margin: 4px 0;
 }
 
@@ -239,25 +247,105 @@ export const RECEIPT_THERMAL_CSS = `
 }
 
 .receipt-item-name-urdu {
-  font-size: 1.15em;
+  font-size: 1.12em;
+  font-weight: 700;
   line-height: 1.55;
   text-align: right;
 }
 
 .receipt-text-urdu {
-  line-height: 1.5;
+  font-size: 1.1em;
+  line-height: 1.55;
 }
 
-.receipt-inner--urdu-rtl,
-.receipt-inner--urdu-rtl * {
-  font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', serif !important;
-  letter-spacing: 0 !important;
-  text-transform: none !important;
+.receipt-ltr-num {
+  unicode-bidi: isolate;
+  direction: ltr;
+  display: inline-block;
 }
 
 .receipt-inner--urdu-rtl {
   direction: rtl;
-  line-height: 1.55;
+  line-height: 1.6;
+  font-size: 15px;
+  font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', serif;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.receipt-inner--urdu-rtl.receipt-size--small { font-size: 14px; }
+.receipt-inner--urdu-rtl.receipt-size--medium { font-size: 16px; }
+.receipt-inner--urdu-rtl.receipt-size--large { font-size: 18px; }
+
+.receipt-inner--urdu-rtl .receipt-meta,
+.receipt-inner--urdu-rtl .receipt-items-table th,
+.receipt-inner--urdu-rtl .receipt-items-table td,
+.receipt-inner--urdu-rtl .receipt-item-name,
+.receipt-inner--urdu-rtl .receipt-item-name-urdu,
+.receipt-inner--urdu-rtl .receipt-text-urdu,
+.receipt-inner--urdu-rtl .receipt-footer-note,
+.receipt-inner--urdu-rtl .receipt-footer-credit {
+  font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', serif;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Labels bold / bigger like English slip */
+.receipt-inner--urdu-rtl .receipt-meta-row > span:first-child {
+  font-weight: 700;
+  font-size: 1.1em;
+}
+
+.receipt-inner--urdu-rtl .receipt-items-table th {
+  font-weight: 700;
+  font-size: 1.1em;
+}
+
+.receipt-inner--urdu-rtl .receipt-total-row {
+  font-size: 1.1em;
+  font-weight: 700;
+}
+
+.receipt-inner--urdu-rtl .receipt-grand-total-row {
+  font-weight: 800;
+  font-size: 1.28em;
+}
+
+.receipt-inner--urdu-rtl .receipt-payment-banner {
+  font-weight: 800;
+  font-size: 1.25em;
+}
+
+.receipt-inner--urdu-rtl .receipt-col-qty {
+  font-size: 1.1em;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.receipt-inner--urdu-rtl .receipt-item-name:not(.receipt-item-name-urdu),
+.receipt-inner--urdu-rtl .receipt-col-item {
+  font-size: 1.08em;
+}
+
+/* Numbers / English: Settings receipt font (same as English invoice) */
+.receipt-inner--urdu-rtl .receipt-meta-value,
+.receipt-inner--urdu-rtl .receipt-col-price,
+.receipt-inner--urdu-rtl .receipt-col-total,
+.receipt-inner--urdu-rtl .receipt-total-row > span:last-child,
+.receipt-inner--urdu-rtl .receipt-grand-total-row > span:last-child,
+.receipt-inner--urdu-rtl .receipt-ltr-num,
+.receipt-inner--urdu-rtl [dir="ltr"] {
+  font-family: var(--receipt-latin-font, 'Courier New', Courier, monospace) !important;
+  font-size: 1em !important;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+
+.receipt-inner--urdu-rtl .receipt-shop-name:not(.receipt-text-urdu),
+.receipt-inner--urdu-rtl .receipt-tagline:not(.receipt-text-urdu),
+.receipt-inner--urdu-rtl .receipt-contact-line:not(.receipt-text-urdu),
+.receipt-inner--urdu-rtl .receipt-shop-info:not(.receipt-text-urdu) {
+  font-family: var(--receipt-latin-font, 'Courier New', Courier, monospace) !important;
 }
 
 .receipt-meta-value {
@@ -281,6 +369,14 @@ export const RECEIPT_THERMAL_CSS = `
 .receipt-items-table--plain th,
 .receipt-items-table--plain td {
   border: none;
+}
+
+.receipt-balance-mark {
+  font-size: 0.65em;
+  font-weight: 700;
+  margin-inline-start: 1px;
+  line-height: 0;
+  vertical-align: super;
 }
 
 .receipt-total-row,
@@ -378,7 +474,7 @@ export const RECEIPT_THERMAL_CSS = `
 }
 
 .receipt-cut-gap {
-  height: 3mm;
+  height: 12mm;
 }
 
 .receipt-footer-credit {
@@ -391,3 +487,47 @@ export const RECEIPT_THERMAL_CSS = `
   text-align: center;
 }
 `;
+
+/** Same CSS + fonts as on-screen preview — used for POS / Settings print HTML. */
+export function buildReceiptPrintHtml(opts: {
+  bodyHtml: string;
+  urdu: boolean;
+  printWidth: string;
+  printPageSize: string;
+  /** Settings receipt font CSS stack for English/numbers on Urdu slips. */
+  latinFontCss: string;
+}): string {
+  const lang = opts.urdu ? "ur" : "en";
+  const dir = opts.urdu ? "rtl" : "ltr";
+  // Join — avoid `</…>` inside one TSX template literal.
+  return [
+    `<!DOCTYPE html><html lang="${lang}" dir="${dir}"><head><meta charset="utf-8" /><title>Receipt</title><style>`,
+    jameelNooriFontFaceCss(),
+    `:root { --receipt-latin-font: ${opts.latinFontCss}; }`,
+    `@page { size: ${opts.printPageSize}; margin: 0; }`,
+    `html, body { width: ${opts.printWidth}; max-width: ${opts.printWidth}; margin: 0; padding: 0; background: #fff; color: #000; }`,
+    ".slip-page { break-after: page; page-break-after: always; width: 100%; }",
+    ".slip-page:last-child { break-after: auto; }",
+    ".thermal-receipt-preview { width: 100%; max-width: 100%; }",
+    RECEIPT_THERMAL_CSS,
+    /* Keep Urdu sizing identical to preview when the printer stylesheet compresses type. */
+    opts.urdu
+      ? `
+.receipt-inner--urdu-rtl.receipt-size--small { font-size: 14px !important; }
+.receipt-inner--urdu-rtl.receipt-size--medium { font-size: 16px !important; }
+.receipt-inner--urdu-rtl.receipt-size--large { font-size: 18px !important; }
+.receipt-inner--urdu-rtl .receipt-meta-row > span:first-child,
+.receipt-inner--urdu-rtl .receipt-items-table th { font-weight: 700 !important; }
+.receipt-inner--urdu-rtl .receipt-grand-total-row { font-weight: 800 !important; font-size: 1.28em !important; }
+.receipt-inner--urdu-rtl .receipt-payment-banner { font-weight: 800 !important; }
+.receipt-divider { border-top: 1px dotted #000 !important; }
+.receipt-divider-solid { border-top: 1px solid #000 !important; }
+`
+      : "",
+    /* Extra feed so the blade cuts below the credit line, not through it. */
+    ".receipt-cut-gap { height: 14mm !important; }",
+    "</style></head><body>",
+    opts.bodyHtml,
+    "</body></html>",
+  ].join("");
+}

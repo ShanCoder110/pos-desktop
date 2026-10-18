@@ -57,6 +57,15 @@ pub async fn receive_transfer(
     ))
 }
 
+pub async fn delete_transfer(
+    State(state): State<AppState>,
+    _ctx: RequestContext,
+    Path(id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    TransferService::delete_permanent(&state.db, parse_id(&id)?).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 fn parse_id(value: &str) -> Result<Uuid, AppError> {
     Uuid::parse_str(value).map_err(|_| AppError::Validation(ERROR_INVALID_ID.into()))
 }

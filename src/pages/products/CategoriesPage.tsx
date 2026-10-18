@@ -26,9 +26,9 @@ import {
 } from "@/components/common";
 import type { FilterChip } from "@/components/common/FilterPicker";
 import { applyFilterChip } from "@/utils/filterChips";
+import { compareNameSearch } from "@/utils/salePricing";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
-import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import {
   CATEGORY_COPY,
   CATEGORY_TABLE_COLUMNS,
@@ -94,7 +94,7 @@ export function CategoriesPage() {
   const [q, setQ] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_ALL);
   const [cols, setCols] = useState(CATEGORY_TABLE_COLUMNS.map((c) => c.id));
   const [view, setView] = useState<HubView>("table");
   const [selected, setSelected] = useState<string[]>([]);
@@ -109,7 +109,7 @@ export function CategoriesPage() {
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const nameChip = chips.find((c) => c.field === "name")?.value.toLowerCase();
-    return rows.filter((r) => {
+    const list = rows.filter((r) => {
       const count = categoryProductCount(r, products);
       if (needle && !r.name.toLowerCase().includes(needle)) return false;
       if (sectionKpi === "used") return count > 0;
@@ -117,6 +117,8 @@ export function CategoriesPage() {
       if (nameChip && !r.name.toLowerCase().includes(nameChip)) return false;
       return true;
     });
+    if (!needle) return list;
+    return [...list].sort((a, b) => compareNameSearch(a.name, b.name, needle));
   }, [rows, q, chips, sectionKpi, products]);
 
   useLayoutEffect(() => {

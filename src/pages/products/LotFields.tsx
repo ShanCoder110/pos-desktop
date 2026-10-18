@@ -225,7 +225,7 @@ export function LotUnitLines({
                 gridTemplateColumns: `repeat(${showLeft ? 3 : 2}, minmax(0, 1fr))`,
               }}
             >
-              <Field label="Qty">
+              <Field label="Qty" required={!lockReceived}>
                 <TextInput
                   inputMode="decimal"
                   maxLength={FIELD_LIMITS.qty}
@@ -249,11 +249,24 @@ export function LotUnitLines({
                     inputMode="decimal"
                     maxLength={FIELD_LIMITS.qty}
                     placeholder="0"
-                    value={lockedQtyDisplay(units, stockSymbol, unit, left)}
-                    disabled
-                    readOnly
+                    value={
+                      onLeft
+                        ? qtyValue("left", unit)
+                        : lockedQtyDisplay(units, stockSymbol, unit, left)
+                    }
+                    disabled={!onLeft}
+                    readOnly={!onLeft}
+                    onFocus={() => {
+                      if (!onLeft) return;
+                      setQtyEdit({ id: unit.id, field: "left" });
+                      setQtyDraft(displayQty(qtyInUnit(units, stockSymbol, unit, left)));
+                    }}
+                    onBlur={() => setQtyEdit(null)}
+                    onChange={(event) => {
+                      if (!onLeft) return;
+                      setQty("left", unit, event.target.value);
+                    }}
                   />
-                  {receivedLockedHint()}
                 </Field>
               ) : null}
               <Field label="Damaged">

@@ -22,6 +22,7 @@ export function PosProductSearch({
   open,
   browse,
   categories,
+  productTotalCount,
   categoryPickerOpen,
   selectedCategory,
   results,
@@ -45,6 +46,8 @@ export function PosProductSearch({
   open: boolean;
   browse: boolean;
   categories: PosCategoryChoice[];
+  /** Total products for the All row (unfiltered catalog). */
+  productTotalCount: number;
   categoryPickerOpen: boolean;
   selectedCategory?: { id: string; name: string };
   results: PosSearchResult[];
@@ -63,7 +66,8 @@ export function PosProductSearch({
   onClose: () => void;
 }) {
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    const optionCount = categoryPickerOpen ? categories.length : results.length;
+    // Category picker: index 0 = All, then categories.
+    const optionCount = categoryPickerOpen ? categories.length + 1 : results.length;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       onActiveIndex(Math.min(activeIndex + 1, Math.max(0, optionCount - 1)));
@@ -72,9 +76,13 @@ export function PosProductSearch({
       onActiveIndex(Math.max(activeIndex - 1, 0));
     } else if (event.key === "Enter") {
       event.preventDefault();
-      const category = categories[activeIndex];
-      if (categoryPickerOpen && category) onCategorySelect(category.id);
-      else onEnter();
+      if (categoryPickerOpen) {
+        if (activeIndex <= 0) onClearCategory();
+        else {
+          const category = categories[activeIndex - 1];
+          if (category) onCategorySelect(category.id);
+        }
+      } else onEnter();
     } else if (event.key === "Escape") {
       event.preventDefault();
       onClose();
@@ -105,7 +113,7 @@ export function PosProductSearch({
           selectedCategory
             ? `Search in ${selectedCategory.name} — F3`
             : categoryPickerOpen
-              ? "Choose a category"
+              ? "Search categories"
               : "Search ID, name, SKU or barcode — F3"
         }
         value={query}
@@ -129,28 +137,38 @@ export function PosProductSearch({
           <>
             <div className="search-head flex items-center justify-between">
               <span>Choose category</span>
-              {selectedCategory ? (
-                <button type="button" className="pos-search-head-action" onClick={onClearCategory}>
-                  All products
-                </button>
-              ) : null}
             </div>
             <div className="pos-category-results">
-              {categories.map((category, index) => (
-                <button
-                  key={category.id}
-                  type="button"
-                  className={`pos-category-hit ${index === activeIndex ? "is-active" : ""} ${category.id === selectedCategory?.id ? "is-current" : ""}`}
-                  onMouseEnter={() => onActiveIndex(index)}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    onCategorySelect(category.id);
-                  }}
-                >
-                  <span>{category.name}</span>
-                  <small>{category.count} products</small>
-                </button>
-              ))}
+              <button
+                type="button"
+                className={`pos-category-hit ${activeIndex === 0 ? "is-active" : ""} ${!selectedCategory ? "is-current" : ""}`}
+                onMouseEnter={() => onActiveIndex(0)}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  onClearCategory();
+                }}
+              >
+                <span>All</span>
+                <small>{productTotalCount} products</small>
+              </button>
+              {categories.map((category, index) => {
+                const rowIndex = index + 1;
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    className={`pos-category-hit ${rowIndex === activeIndex ? "is-active" : ""} ${category.id === selectedCategory?.id ? "is-current" : ""}`}
+                    onMouseEnter={() => onActiveIndex(rowIndex)}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      onCategorySelect(category.id);
+                    }}
+                  >
+                    <span>{category.name}</span>
+                    <small>{category.count} products</small>
+                  </button>
+                );
+              })}
               {!categories.length ? (
                 <div className="pos-search-empty">No categories found</div>
               ) : null}

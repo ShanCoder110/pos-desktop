@@ -4940,9 +4940,9 @@ html[data-theme="dark"] .ui-pop-item.is-on {
 }
 
 .ui-date-range-panel {
-  left: auto;
-  right: 0;
-  width: min(420px, calc(100vw - 24px));
+  /* Position comes from Popover portal (fixed); keep width/padding only. */
+  width: min(420px, calc(100vw - 24px)) !important;
+  max-width: calc(100vw - 16px);
   padding: 0;
   overflow: hidden;
 }

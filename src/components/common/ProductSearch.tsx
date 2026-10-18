@@ -5,6 +5,7 @@ import type { Product } from "@/shared/types";
 import { money, cn } from "@/utils/format";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { toaster } from "@/components/common/Toast";
+import { compareProductSearch } from "@/utils/salePricing";
 
 export function ProductSearch({
   products,
@@ -53,11 +54,13 @@ export function ProductSearch({
   const results = useMemo(() => {
     const needle = debouncedQuery.trim().toLowerCase();
     const matches = needle
-      ? products.filter((product) =>
-          `${product.name} ${product.sku} ${product.barcode ?? ""} ${product.category}`
-            .toLowerCase()
-            .includes(needle),
-        )
+      ? products
+          .filter((product) =>
+            `${product.name} ${product.sku} ${product.barcode ?? ""} ${product.category}`
+              .toLowerCase()
+              .includes(needle),
+          )
+          .sort((a, b) => compareProductSearch(a, b, needle))
       : products;
     return matches.slice(0, maxResults);
   }, [debouncedQuery, maxResults, products]);
@@ -121,7 +124,7 @@ export function ProductSearch({
           className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] text-ink outline-none shadow-none"
           placeholder={placeholder}
           maxLength={FIELD_LIMITS.search}
-          value={open ? query : selected ? `${selected.name} · ${selected.sku}` : query}
+          value={open ? query : selected ? selected.name : query}
           onFocus={() => {
             if (disabled) return;
             inputRef.current?.select();
@@ -290,5 +293,7 @@ function unitLabelForProduct(product: Product) {
 }
 
 function isLowStock(product: Product) {
-  return product.stock > 0 && product.stock < (product.minimumStock ?? 20);
+  const threshold = Number(product.minimumStock) || 0;
+  if (threshold <= 0) return false;
+  return product.stock > 0 && product.stock <= threshold;
 }

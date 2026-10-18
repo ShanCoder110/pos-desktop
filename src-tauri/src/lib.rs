@@ -1,4 +1,5 @@
 pub mod backend;
+mod printers;
 
 use backend::{config::Config, constants::LOG_TARGET, logging, server};
 use tauri::Manager;
@@ -9,6 +10,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![
+            printers::list_system_printers,
+            printers::cut_thermal_paper
+        ])
         .setup(|app| {
             if let Err(error) = Config::load() {
                 eprintln!("config load failed: {error}");

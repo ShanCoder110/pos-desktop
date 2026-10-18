@@ -133,6 +133,7 @@ export default function App() {
                 <Route path={routes.users} element={<UsersPage />} />
                 <Route path={routes.production} element={<RepairPage />} />
                 <Route path={routes.repair} element={<RepairPage />} />
+                <Route path={`${routes.repair}/:repairShopId`} element={<RepairPage />} />
                 <Route path={routes.expenses} element={<ExpensesPage />} />
                 <Route path={routes.transactions} element={<TransactionsPage />} />
                 <Route path={routes.shops} element={<ShopsPage />} />

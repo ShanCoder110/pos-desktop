@@ -67,6 +67,60 @@ export function productMatchesQuery(product: Product, query: string): boolean {
   );
 }
 
+function searchWords(value: string): string[] {
+  return value
+    .trim()
+    .toLowerCase()
+    .split(/[\s\-_+/]+/)
+    .filter(Boolean);
+}
+
+/**
+ * Lower = better.
+ * Typing "r": 1st word starts with r, then 2nd word, then 3rd… then mid-word substring.
+ */
+export function nameSearchRank(name: string, query: string): number {
+  const q = query.trim().toLowerCase();
+  if (!q) return 10_000;
+  const n = name.trim().toLowerCase();
+  if (!n) return 10_000;
+  if (n === q) return 0;
+  const words = searchWords(n);
+  const wordIndex = words.findIndex((word) => word.startsWith(q));
+  if (wordIndex >= 0) return 1 + wordIndex;
+  const at = n.indexOf(q);
+  if (at >= 0) return 500 + at;
+  return 10_000;
+}
+
+export function compareNameSearch(a: string, b: string, query: string): number {
+  const diff = nameSearchRank(a, query) - nameSearchRank(b, query);
+  return diff !== 0 ? diff : a.localeCompare(b);
+}
+
+export function productSearchRank(product: Product, query: string): number {
+  const q = query.trim().toLowerCase();
+  if (!q) return 10_000;
+  if (product.productNo != null && product.productNo > 0 && String(product.productNo) === q) {
+    return 0;
+  }
+  const byName = nameSearchRank(product.name ?? "", q);
+  const byUrdu = nameSearchRank(product.urduName ?? "", q);
+  const nameRank = Math.min(byName, byUrdu);
+  if (nameRank < 500) return nameRank;
+  if ((product.sku ?? "").toLowerCase().startsWith(q)) return 800;
+  if ((product.barcode ?? "").toLowerCase().startsWith(q)) return 800;
+  if (nameRank < 10_000) return nameRank;
+  if ((product.sku ?? "").toLowerCase().includes(q)) return 900;
+  if ((product.barcode ?? "").toLowerCase().includes(q)) return 900;
+  return 10_000;
+}
+
+export function compareProductSearch(a: Product, b: Product, query: string): number {
+  const diff = productSearchRank(a, query) - productSearchRank(b, query);
+  return diff !== 0 ? diff : (a.name ?? "").localeCompare(b.name ?? "");
+}
+
 /** Selling price for one displayed unit at the given tier (uses product_units row, not base×factor). */
 export function unitTierPrice(unit: ProductSellUnit | undefined, tier: SalePriceTier): number {
   if (!unit) return 0;
@@ -111,6 +165,38 @@ export function displayToBaseQty(unit: ProductSellUnit, displayQty: number): num
 /** Whether inventory contains at least one complete unit (for example one full pack). */
 export function hasCompleteSellUnit(unit: ProductSellUnit, baseAvailable: number): boolean {
   return baseAvailable + 0.000001 >= displayToBaseQty(unit, 1);
+}
+
+/**
+ * How many of this sell unit can be taken from base stock.
+ * Whole packs/rolls are floored; length-style units (factor ≤ 1) stay fractional.
+ */
+export function availableDisplayQty(
+  unit: ProductSellUnit | undefined,
+  baseAvailable: number,
+): number {
+  if (!unit) return Math.max(0, baseAvailable);
+  const basePerUnit = displayToBaseQty(unit, 1);
+  if (!(basePerUnit > 0)) return Math.max(0, baseAvailable);
+  const available = Math.max(0, baseAvailable / basePerUnit);
+  return basePerUnit > 1 ? Math.floor(available + 1e-9) : +available.toFixed(4);
+}
+
+/** Whole units only — credit / repair qty fields never take fractions. */
+export function availableWholeQty(
+  unit: ProductSellUnit | undefined,
+  baseAvailable: number,
+): number {
+  return Math.max(0, Math.floor(availableDisplayQty(unit, baseAvailable) + 1e-9));
+}
+
+export function parseWholeQtyDraft(raw: string) {
+  return raw.replace(/[^\d]/g, "");
+}
+
+export function wholeQty(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.floor(value + 1e-9);
 }
 
 /** Positive balance is an advance. paidNow is money kept, not change handed back. */

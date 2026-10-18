@@ -391,12 +391,18 @@ export function InvoicesPage() {
                       ? (customerNames[open.customerId] ?? "Customer")
                       : "Walk-in customer"}
                   </h3>
-                  {open.customerId && customerDetails[open.customerId]?.phone ? (
+                  {open.customerId &&
+                  (customerDetails[open.customerId]?.phone ||
+                    customerDetails[open.customerId]?.address ||
+                    customerDetails[open.customerId]?.cityName) ? (
                     <p className="mt-1 text-[11px] text-muted">
-                      {customerDetails[open.customerId]?.phone}
-                      {customerDetails[open.customerId]?.cityName
-                        ? ` · ${customerDetails[open.customerId]?.cityName}`
-                        : ""}
+                      {[
+                        customerDetails[open.customerId]?.phone,
+                        customerDetails[open.customerId]?.address,
+                        customerDetails[open.customerId]?.cityName,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </p>
                   ) : null}
                 </div>

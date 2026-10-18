@@ -8,7 +8,7 @@ use crate::backend::{
     dto::{MasterRequest, MasterResponse, PageQuery, Paginated, PaginationMeta},
     errors::AppError,
     repositories::{MasterKind, MasterRepository},
-    util::optional_pk_mobile,
+    util::{capitalize_name, optional_pk_mobile},
 };
 
 pub struct MasterService;
@@ -46,6 +46,9 @@ impl MasterService {
     ) -> Result<MasterResponse, AppError> {
         request.validate()?;
         let mut request = request;
+        if matches!(kind, MasterKind::Supplier) {
+            request.name = capitalize_name(&request.name);
+        }
         if matches!(kind, MasterKind::Supplier | MasterKind::Customer) {
             request.phone = optional_pk_mobile(request.phone.as_deref())?;
         }
@@ -62,6 +65,9 @@ impl MasterService {
     ) -> Result<MasterResponse, AppError> {
         request.validate()?;
         let mut request = request;
+        if matches!(kind, MasterKind::Supplier) {
+            request.name = capitalize_name(&request.name);
+        }
         if matches!(kind, MasterKind::Supplier | MasterKind::Customer) {
             request.phone = optional_pk_mobile(request.phone.as_deref())?;
         }

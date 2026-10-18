@@ -72,6 +72,7 @@ export function DateRangePeriodPicker({
     <Popover
       open={open}
       onOpenChange={setOpen}
+      align="end"
       panelClassName="ui-date-range-panel"
       trigger={
         <Button className="ui-date-range-trigger" onClick={openPicker} aria-label="Filter by date">

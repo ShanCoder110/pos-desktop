@@ -268,7 +268,7 @@ impl TransferRepository {
             }
             let unit_cost = BranchLotQty::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT id, remaining_base_quantity AS remaining, purchase_price_per_base AS unit_cost FROM product_lots WHERE id = ? LIMIT 1",
+                "SELECT id, remaining_base_quantity AS remaining, (CAST(purchase_price_per_base AS REAL) * 1.0) AS unit_cost FROM product_lots WHERE id = ? LIMIT 1",
                 [item.product_lot_id.into()],
             ))
             .one(transaction)
@@ -279,7 +279,7 @@ impl TransferRepository {
 
             let existing = BranchLotQty::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "SELECT id, remaining_base_quantity AS remaining, 0 AS unit_cost FROM branch_lots WHERE branch_id = ? AND product_lot_id = ? LIMIT 1",
+                "SELECT id, remaining_base_quantity AS remaining, CAST(0 AS REAL) AS unit_cost FROM branch_lots WHERE branch_id = ? AND product_lot_id = ? LIMIT 1",
                 [header.to_branch_id.into(), item.product_lot_id.into()],
             ))
             .one(transaction)
@@ -350,6 +350,163 @@ impl TransferRepository {
         let _ = ERROR_TRANSFER_NOT_FOUND;
         Ok(())
     }
+
+    /// Permanently delete a transfer and put stock back where it belongs.
+    /// DRAFT → drop. SENT/PARTIAL → undo send. RECEIVED → move stock back to from branch.
+    pub async fn delete_permanent(
+        transaction: &DatabaseTransaction,
+        id: Uuid,
+    ) -> Result<(), AppError> {
+        let header = load_header(transaction, id).await?;
+        let now = now_utc();
+        let items = TransferItemRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT id, product_id, product_lot_id, requested_base_quantity, sent_base_quantity, received_base_quantity, damaged_in_transit_quantity FROM stock_transfer_items WHERE stock_transfer_id = ?",
+            [id.into()],
+        ))
+        .all(transaction)
+        .await?;
+
+        match header.status.as_str() {
+            "DRAFT" | "CANCELLED" => {}
+            "SENT" | "PARTIAL" => {
+                for item in &items {
+                    let qty = quantity(item.sent_base_quantity);
+                    if qty <= Decimal::ZERO {
+                        continue;
+                    }
+                    add_branch_lot_qty(
+                        transaction,
+                        header.from_branch_id,
+                        item.product_lot_id,
+                        qty,
+                        now,
+                    )
+                    .await?;
+                }
+            }
+            "RECEIVED" => {
+                for item in &items {
+                    let qty = quantity(item.received_base_quantity);
+                    if qty <= Decimal::ZERO {
+                        continue;
+                    }
+                    subtract_branch_lot_qty(
+                        transaction,
+                        header.to_branch_id,
+                        item.product_lot_id,
+                        qty,
+                    )
+                    .await?;
+                    add_branch_lot_qty(
+                        transaction,
+                        header.from_branch_id,
+                        item.product_lot_id,
+                        qty,
+                        now,
+                    )
+                    .await?;
+                }
+            }
+            other => {
+                return Err(AppError::Conflict(format!(
+                    "Transfer cannot be deleted (status: {other})."
+                )));
+            }
+        }
+
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "DELETE FROM stock_movements WHERE reference_type = ? AND reference_id = ?",
+                [REFERENCE_TRANSFER.into(), id.into()],
+            ))
+            .await?;
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "DELETE FROM stock_transfer_items WHERE stock_transfer_id = ?",
+                [id.into()],
+            ))
+            .await?;
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "DELETE FROM stock_transfers WHERE id = ?",
+                [id.into()],
+            ))
+            .await?;
+        Ok(())
+    }
+}
+
+async fn add_branch_lot_qty(
+    transaction: &DatabaseTransaction,
+    branch_id: Uuid,
+    product_lot_id: Uuid,
+    qty: Decimal,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), AppError> {
+    let existing = BranchLotQty::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT id, remaining_base_quantity AS remaining, CAST(0 AS REAL) AS unit_cost FROM branch_lots WHERE branch_id = ? AND product_lot_id = ? LIMIT 1",
+        [branch_id.into(), product_lot_id.into()],
+    ))
+    .one(transaction)
+    .await?;
+    if let Some(existing) = existing {
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE branch_lots SET remaining_base_quantity = remaining_base_quantity + ?, allocated_base_quantity = allocated_base_quantity + ?, updated_at = ? WHERE id = ?",
+                [qty.into(), qty.into(), now.into(), existing.id.into()],
+            ))
+            .await?;
+    } else {
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "INSERT INTO branch_lots (id, branch_id, product_lot_id, allocated_base_quantity, remaining_base_quantity, reserved_base_quantity, damaged_base_quantity, updated_at) VALUES (?, ?, ?, ?, ?, 0, 0, ?)",
+                [
+                    Uuid::new_v4().into(),
+                    branch_id.into(),
+                    product_lot_id.into(),
+                    qty.into(),
+                    qty.into(),
+                    now.into(),
+                ],
+            ))
+            .await?;
+    }
+    Ok(())
+}
+
+async fn subtract_branch_lot_qty(
+    transaction: &DatabaseTransaction,
+    branch_id: Uuid,
+    product_lot_id: Uuid,
+    qty: Decimal,
+) -> Result<(), AppError> {
+    let branch_lot = BranchLotQty::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT id, remaining_base_quantity AS remaining, CAST(0 AS REAL) AS unit_cost FROM branch_lots WHERE branch_id = ? AND product_lot_id = ? LIMIT 1",
+        [branch_id.into(), product_lot_id.into()],
+    ))
+    .one(transaction)
+    .await?
+    .ok_or(AppError::Conflict(ERROR_INSUFFICIENT_STOCK.into()))?;
+    if branch_lot.remaining < qty {
+        return Err(AppError::Conflict(ERROR_INSUFFICIENT_STOCK.into()));
+    }
+    let now = now_utc();
+    transaction
+        .execute_raw(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE branch_lots SET remaining_base_quantity = remaining_base_quantity - ?, allocated_base_quantity = MAX(0, allocated_base_quantity - ?), updated_at = ? WHERE id = ?",
+            [qty.into(), qty.into(), now.into(), branch_lot.id.into()],
+        ))
+        .await?;
+    Ok(())
 }
 
 async fn load_header(

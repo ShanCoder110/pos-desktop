@@ -1,6 +1,7 @@
 import type { Customer, InvoiceLine } from "@/shared/types";
 import type { ShopSettings } from "@/shared/types";
 import { receiptMoney } from "@/utils/format";
+import { isReceiptUrdu } from "@/utils/receiptLanguage";
 import { isTauri } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -47,7 +48,7 @@ export function buildReceiptText(opts: {
     invoiceNumber,
   } = opts;
   const shop = settings.receiptShopName || settings.shopName;
-  const urdu = settings.receiptLanguage === "UR";
+  const urdu = isReceiptUrdu(settings.receiptLanguage);
   const status =
     paid <= 0.009
       ? urdu
@@ -61,20 +62,29 @@ export function buildReceiptText(opts: {
           ? "ادا شدہ"
           : "Paid";
   const subtotal = total + Math.max(0, discount);
-  const newBalance = customer.isWalking ? Math.max(0, total - paid) : (balanceAfter ?? 0);
+  const due = Math.max(0, total - paid);
+  const newBalance = customer.isWalking ? due : (balanceAfter ?? 0);
+  const sideMark = (amount: number) => {
+    if (amount > 0.009) return " N";
+    if (amount < -0.009) return " P";
+    return "";
+  };
   const bits = [
     `*${shop}*`,
     paid + 0.009 < total ? `*${status.toUpperCase()}*` : undefined,
     invoiceNumber ? `${urdu ? "انوائس" : "Invoice"}: ${invoiceNumber}` : undefined,
     `${urdu ? "گاہک" : "Customer"}: ${customer.name}`,
     customer.phone ? `${urdu ? "فون" : "Phone"}: ${customer.phone}` : undefined,
+    customer.address?.trim()
+      ? `${urdu ? "پتہ" : "Address"}: ${customer.address.trim()}`
+      : undefined,
     "",
     ...lines.map(
       (line) =>
         `${line.qty} ${receiptTextUnit(line.unit, urdu)} ${urdu ? line.urduName?.trim() || line.name : line.name} — ${receiptMoney(line.qty * line.price)}`,
     ),
     "",
-    `${urdu ? "ذیلی کل" : "Subtotal"}: ${receiptMoney(subtotal)}`,
+    `${urdu ? "کل رقم" : "Subtotal"}: ${receiptMoney(subtotal)}`,
     `${urdu ? "رعایت" : "Discount"}: ${discount > 0 ? "-" : ""}${receiptMoney(discount)}`,
   ];
   if (
@@ -83,12 +93,14 @@ export function buildReceiptText(opts: {
     balanceBefore != null &&
     Math.abs(balanceBefore) > 0.009
   ) {
-    bits.push(`${urdu ? "سابقہ بیلنس" : "Sabka Balance"}: ${receiptMoney(balanceBefore)}`);
+    bits.push(
+      `${urdu ? "سابقہ بیلنس" : "Previous Balance"}${sideMark(balanceBefore)}: ${receiptMoney(Math.abs(balanceBefore))}`,
+    );
   }
   bits.push(
-    `*${urdu ? "کل بل" : "Total Bill"} (${lines.length} ${urdu ? "اشیاء" : `item${lines.length === 1 ? "" : "s"}`}): ${receiptMoney(total)}*`,
-    `*${urdu ? "ادا شدہ رقم" : "Amount paid"}: ${receiptMoney(paid)}*`,
-    `*${urdu ? "نیا بیلنس" : "New Balance"}: ${receiptMoney(newBalance)}*`,
+    `*${urdu ? "موجودہ بل" : "Current Bill"} (${lines.length} ${urdu ? "اشیاء" : `item${lines.length === 1 ? "" : "s"}`}): ${receiptMoney(total)}*`,
+    `*${urdu ? "نقد وصول" : "Cash Received"}: ${receiptMoney(paid)}*`,
+    `*${urdu ? "باقی رقم" : "Remaining Amount"}${customer.isWalking ? "" : sideMark(newBalance)}: ${receiptMoney(Math.abs(newBalance))}*`,
   );
   if (settings.footer) bits.push("", settings.footer);
   return bits.filter((line) => line !== undefined).join("\n");
@@ -124,37 +136,56 @@ function waitForPrintFonts(doc: Document): Promise<void> {
   return fonts
     .load("16px 'Jameel Noori Nastaleeq'")
     .catch(() => undefined)
+    .then(() => fonts.load("700 16px 'Jameel Noori Nastaleeq'").catch(() => undefined))
     .then(() => fonts.ready)
-    .then(() => undefined);
+    .then(
+      () =>
+        new Promise<void>((resolve) => {
+          // Extra paint so Urdu metrics match on-screen preview before snapshot/print.
+          window.setTimeout(resolve, 120);
+        }),
+    );
 }
 
 /** Print HTML after Jameel Noori (and other) fonts are ready so Urdu is not substituted. */
-export function printReceiptHtml(html: string) {
-  const frame = document.createElement("iframe");
-  frame.style.position = "fixed";
-  frame.style.right = "0";
-  frame.style.bottom = "0";
-  frame.style.width = "0";
-  frame.style.height = "0";
-  frame.style.border = "0";
-  frame.setAttribute("aria-hidden", "true");
-  document.body.appendChild(frame);
-  const doc = frame.contentDocument ?? frame.contentWindow?.document;
-  if (!doc) {
-    document.body.removeChild(frame);
-    window.print();
-    return;
-  }
-  doc.open();
-  doc.write(html);
-  doc.close();
+export function printReceiptHtml(html: string): Promise<void> {
+  return new Promise((resolve) => {
+    const frame = document.createElement("iframe");
+    frame.style.position = "fixed";
+    frame.style.right = "0";
+    frame.style.bottom = "0";
+    frame.style.width = "0";
+    frame.style.height = "0";
+    frame.style.border = "0";
+    frame.setAttribute("aria-hidden", "true");
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument ?? frame.contentWindow?.document;
+    if (!doc) {
+      document.body.removeChild(frame);
+      window.print();
+      resolve();
+      return;
+    }
+    doc.open();
+    doc.write(html);
+    doc.close();
 
-  const win = frame.contentWindow;
-  void waitForPrintFonts(doc).then(() => {
-    win?.focus();
-    win?.print();
-    window.setTimeout(() => {
-      if (frame.parentNode) document.body.removeChild(frame);
-    }, 60_000);
+    const win = frame.contentWindow;
+    void waitForPrintFonts(doc).then(() => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        window.setTimeout(() => {
+          if (frame.parentNode) document.body.removeChild(frame);
+        }, 60_000);
+        resolve();
+      };
+      win?.addEventListener("afterprint", done, { once: true });
+      win?.focus();
+      win?.print();
+      // Fallback if afterprint never fires (some WebViews).
+      window.setTimeout(done, 1500);
+    });
   });
 }

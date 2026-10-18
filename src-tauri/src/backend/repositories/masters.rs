@@ -132,12 +132,30 @@ impl MasterRepository {
             _ => "created_at",
         };
         let direction = query.sort_direction.unwrap_or_default().sql();
+        // When searching: names that start with the query rank above substring hits.
+        let (order_sql, mut order_values) = if let Some(search) = query
+            .search
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let q = search.to_lowercase();
+            let prefix = format!("{q}%");
+            (
+                    "CASE WHEN lower(name) = ? THEN 0 WHEN lower(name) LIKE ? THEN 1 ELSE 2 END ASC, name ASC, id ASC"
+                        .to_owned(),
+                    vec![q.into(), prefix.into()],
+                )
+        } else {
+            (format!("{sort} {direction}, id ASC"), Vec::new())
+        };
         let sql = format!(
-            "SELECT {} FROM {} WHERE {where_sql} ORDER BY {sort} {direction}, id ASC LIMIT ? OFFSET ?",
+            "SELECT {} FROM {} WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
             kind.projection(),
             kind.table()
         );
         let mut page_values = values;
+        page_values.append(&mut order_values);
         page_values.push((query.per_page as i64).into());
         page_values.push((query.offset() as i64).into());
         let rows = MasterRow::find_by_statement(Statement::from_sql_and_values(

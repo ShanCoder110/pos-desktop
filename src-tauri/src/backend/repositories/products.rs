@@ -89,11 +89,43 @@ impl ProductRepository {
             _ => "p.created_at",
         };
         let direction = query.page.sort_direction.unwrap_or_default().sql();
+        // When searching: names/IDs that start with the query rank above substring hits.
+        let (order_sql, mut order_values) = if let Some(search) = query
+            .page
+            .search
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let q = search.to_lowercase();
+            let prefix = format!("{q}%");
+            (
+                "CASE \
+                        WHEN lower(p.name) = ? THEN 0 \
+                        WHEN CAST(p.product_no AS TEXT) = ? THEN 0 \
+                        WHEN lower(p.name) LIKE ? THEN 1 \
+                        WHEN lower(COALESCE(p.urdu_name, '')) LIKE ? THEN 1 \
+                        WHEN lower(p.sku) LIKE ? THEN 2 \
+                        WHEN lower(p.barcode) LIKE ? THEN 2 \
+                        ELSE 3 \
+                     END ASC, p.name ASC, p.id ASC"
+                    .to_owned(),
+                vec![
+                    q.clone().into(),
+                    q.into(),
+                    prefix.clone().into(),
+                    prefix.clone().into(),
+                    prefix.clone().into(),
+                    prefix.into(),
+                ],
+            )
+        } else {
+            (format!("{sort} {direction}, p.id ASC"), Vec::new())
+        };
         let (projection, mut projection_values) = projection_sql(branch_id);
-        let sql = format!(
-            "{projection} WHERE {conditions} ORDER BY {sort} {direction}, p.id ASC LIMIT ? OFFSET ?"
-        );
+        let sql = format!("{projection} WHERE {conditions} ORDER BY {order_sql} LIMIT ? OFFSET ?");
         projection_values.append(&mut values);
+        projection_values.append(&mut order_values);
         projection_values.push((query.page.per_page as i64).into());
         projection_values.push((query.page.offset() as i64).into());
         let rows = ProductProjection::find_by_statement(Statement::from_sql_and_values(
