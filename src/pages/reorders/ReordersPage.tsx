@@ -270,7 +270,7 @@ export function ReordersPage() {
             return {
               orderNumber: row.orderNumber,
               product: item
-                ? products.find((row) => row.id === item.productId)?.name ?? item.productId
+                ? (products.find((row) => row.id === item.productId)?.name ?? item.productId)
                 : "—",
               supplier: supplierLabel(row.supplierId, suppliers),
               city: supplierCityName(row.supplierId, suppliers) || "—",

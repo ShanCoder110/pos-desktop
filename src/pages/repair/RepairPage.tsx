@@ -73,7 +73,8 @@ export function RepairPage() {
 
   const rows = useMemo(() => {
     return seed.filter((r) => {
-      const text = `${r.productionNumber} ${productNames[r.productId] ?? r.productId}`.toLowerCase();
+      const text =
+        `${r.productionNumber} ${productNames[r.productId] ?? r.productId}`.toLowerCase();
       if (q && !text.includes(q.toLowerCase())) return false;
       if (tab !== "all") return r.status === tab.toUpperCase();
       return true;

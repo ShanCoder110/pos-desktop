@@ -167,38 +167,41 @@ export function StockCountPage() {
     return () => controller.abort();
   }, [productId, branchId, allowed, products]);
 
-  const reloadHistory = useCallback((signal?: AbortSignal) => {
-    setLoading((current) => ({ ...current, history: true }));
-    setHistoryError(null);
-    return listStockMovements(
-      {
-        movementType: "ADJUSTMENT",
-        perPage: DEFAULT_PAGE_SIZE * 2,
-        branchId: branchId || undefined,
-      },
-      signal,
-    )
-      .then((response) => {
-        const rows = response.data
-          .filter(
-            (row) => row.referenceType === "StockAdjustment" || row.movementType === "ADJUSTMENT",
-          )
-          .map(mapStockMovement);
-        const outcome = classifyListFetch({ ok: true, rows }, STOCK_COUNT_COPY.loadFailed);
-        if (outcome.kind === "empty" || outcome.kind === "data") {
-          setHistory(rows);
-          setHistoryError(null);
-        }
-      })
-      .catch((error) => {
-        const outcome = classifyListFetch({ ok: false, error }, STOCK_COUNT_COPY.loadFailed);
-        if (outcome.kind !== "error") return;
-        setHistory([]);
-        setHistoryError(outcome.message);
-        toaster.error(outcome.message);
-      })
-      .finally(() => setLoading((current) => ({ ...current, history: false })));
-  }, [branchId]);
+  const reloadHistory = useCallback(
+    (signal?: AbortSignal) => {
+      setLoading((current) => ({ ...current, history: true }));
+      setHistoryError(null);
+      return listStockMovements(
+        {
+          movementType: "ADJUSTMENT",
+          perPage: DEFAULT_PAGE_SIZE * 2,
+          branchId: branchId || undefined,
+        },
+        signal,
+      )
+        .then((response) => {
+          const rows = response.data
+            .filter(
+              (row) => row.referenceType === "StockAdjustment" || row.movementType === "ADJUSTMENT",
+            )
+            .map(mapStockMovement);
+          const outcome = classifyListFetch({ ok: true, rows }, STOCK_COUNT_COPY.loadFailed);
+          if (outcome.kind === "empty" || outcome.kind === "data") {
+            setHistory(rows);
+            setHistoryError(null);
+          }
+        })
+        .catch((error) => {
+          const outcome = classifyListFetch({ ok: false, error }, STOCK_COUNT_COPY.loadFailed);
+          if (outcome.kind !== "error") return;
+          setHistory([]);
+          setHistoryError(outcome.message);
+          toaster.error(outcome.message);
+        })
+        .finally(() => setLoading((current) => ({ ...current, history: false })));
+    },
+    [branchId],
+  );
 
   useEffect(() => {
     if (!allowed) return;

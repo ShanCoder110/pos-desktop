@@ -164,15 +164,9 @@ export function LotsPage() {
     setChartLotId("");
   }, [chartProductId]);
 
-  const productOf = useCallback(
-    (id: string) => products.find((p) => p.id === id),
-    [products],
-  );
+  const productOf = useCallback((id: string) => products.find((p) => p.id === id), [products]);
 
-  const productLabel = useCallback(
-    (id: string) => productOf(id)?.name ?? id,
-    [productOf],
-  );
+  const productLabel = useCallback((id: string) => productOf(id)?.name ?? id, [productOf]);
 
   const supplierLabel = useCallback(
     (id: string) => hubSupplierLabel(id, suppliers, supplierRows),
