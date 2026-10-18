@@ -1,8 +1,12 @@
 //! List OS printers + send thermal paper-cut for Settings → Printer / POS print.
 
 use serde::Serialize;
+use std::process::Command;
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::io::Write;
-use std::process::{Command, Stdio};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::process::Stdio;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
