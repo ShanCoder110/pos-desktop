@@ -45,7 +45,9 @@ export default function App() {
   const [settings, setSettingsState] = useState<ShopSettings>(() => {
     try {
       const saved = window.localStorage.getItem("dukan:shop-settings");
-      return saved ? { ...defaultSettings, ...(JSON.parse(saved) as Partial<ShopSettings>) } : defaultSettings;
+      return saved
+        ? { ...defaultSettings, ...(JSON.parse(saved) as Partial<ShopSettings>) }
+        : defaultSettings;
     } catch {
       return defaultSettings;
     }
