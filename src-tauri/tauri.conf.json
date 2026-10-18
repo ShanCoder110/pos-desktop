@@ -37,7 +37,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGRUZBRDdFNTdGOTcxQTQKUldTa2NmbFhmcTN2ajJhVlpHeXNaMUxscng5NThrbWxjd000TThlSlZzcTdNM1F6bFFpZVhaM08K",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZEQzdBNDlFNDAyN0Q0ODgKUldTSTFDZEFucVRIYlZRNWFwbm50THdDMVZnRi8wODAvcUlnZG91eWxzNUg5RmJTdXdqalJtSkIK",
       "endpoints": [
         "https://github.com/ShanCoder110/pos-desktop/releases/latest/download/latest.json"
       ],
