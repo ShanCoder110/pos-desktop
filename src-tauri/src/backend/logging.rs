@@ -28,9 +28,7 @@ pub fn init(log_level: &str, log_dir: impl AsRef<Path>) -> Result<LogGuard, Stri
     let level = log_level.trim();
     let level = if level.is_empty() { "info" } else { level };
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new(format!(
-            "{level},tower_http=info,dukan_pos_backend=info"
-        ))
+        EnvFilter::new(format!("{level},tower_http=info,dukan_pos_backend=info"))
     });
 
     let daily = DailyTxt::open(log_dir.clone())?;
