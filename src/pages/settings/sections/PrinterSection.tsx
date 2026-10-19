@@ -3,7 +3,8 @@ import { Field, SelectInput, TextInput, Toggle, Button } from "@/components/comm
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { SettingsSection } from "@/pages/settings/SettingsSection";
 import { useSettingsForm } from "@/shared/settings";
-import { listSystemPrinters, type SystemPrinter } from "@/services/printers";
+import { toaster } from "@/components/common/Toast";
+import { cutThermalPaper, listSystemPrinters, type SystemPrinter } from "@/services/printers";
 import type { PaperWidth } from "@/shared/types";
 
 const KEYS = [
@@ -26,6 +27,7 @@ export function PrinterSection() {
   const { draft, patch, dirty, save, reset } = useSettingsForm(KEYS);
   const [printers, setPrinters] = useState<SystemPrinter[]>([]);
   const [loadingPrinters, setLoadingPrinters] = useState(false);
+  const [testingCut, setTestingCut] = useState(false);
 
   async function refreshPrinters() {
     setLoadingPrinters(true);
@@ -91,12 +93,53 @@ export function PrinterSection() {
         </div>
       </Field>
       <Field label="Printer name" hint="Exact OS name if it is not in the list above">
-        <TextInput
-          value={draft.printerName}
-          onChange={(e) => patch({ printerName: e.target.value })}
-          placeholder="e.g. XP-80C"
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <TextInput
+            className="min-w-[220px] flex-1"
+            value={draft.printerName}
+            onChange={(e) => patch({ printerName: e.target.value })}
+            placeholder="e.g. XP-Q200II"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            disabled={testingCut || !draft.printerName.trim()}
+            onClick={() => {
+              void (async () => {
+                setTestingCut(true);
+                try {
+                  const cut = await cutThermalPaper(draft.printerName);
+                  if (cut.ok) {
+                    toaster.success("Cut command sent — paper should feed and cut.");
+                    return;
+                  }
+                  if (cut.reason === "not-desktop") {
+                    toaster.error(
+                      "Paper cut only works in the desktop app (npm run tauri dev), not the browser.",
+                    );
+                    return;
+                  }
+                  if (cut.reason === "no-printer") {
+                    toaster.error("Enter the thermal printer OS name first.");
+                    return;
+                  }
+                  toaster.error(
+                    cut.message?.trim() || "Cut failed — check the printer name and connection.",
+                  );
+                } finally {
+                  setTestingCut(false);
+                }
+              })();
+            }}
+          >
+            {testingCut ? "Sending…" : "Test cut"}
+          </Button>
+        </div>
       </Field>
+      <p className="settings-note">
+        Cut uses raw ESC/POS (`ESC d 6` + `GS V 0`) and only runs inside the desktop app. Save the
+        printer name, restart Tauri after Rust changes, then use Test cut.
+      </p>
       <div className="settings-row">
         <Field label="Paper width" hint="58 mm / 80 mm thermal, or A4">
           <SelectInput

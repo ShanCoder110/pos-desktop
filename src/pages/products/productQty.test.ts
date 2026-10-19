@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { ProductSellUnit } from "@/shared/types";
 import { displayToBaseQty } from "@/utils/salePricing";
 import {
+  applyBaseUnitChange,
   assignBaseSymbol,
   baseChangeCostFactor,
+  canonicalUnit,
   containsLabel,
   containsRelationHint,
   deriveAll,
@@ -244,6 +246,47 @@ describe("gaz in 1 roll prices", () => {
       factorDirection: "multiply",
     });
     expect(derivePricesBetween(roll, gazFraction).price).toBe(61.11);
+  });
+
+  it("promotes Gaz to inventory and enables 1 Roll contains", () => {
+    const gazCard = unit({
+      id: "gaz",
+      symbol: "gaz",
+      name: "Gaz",
+      contains: 90,
+      factorDirection: "divide",
+      isBase: false,
+    });
+    const next = applyBaseUnitChange([roll, gazCard], "gaz");
+    const gaz = next.find((row) => row.id === "gaz")!;
+    const stock = next.find((row) => row.id === "roll")!;
+    expect(canonicalUnit(next)?.id).toBe("gaz");
+    expect(gaz.contains).toBe(1);
+    expect(gaz.isBase).toBe(true);
+    expect(gaz.isDefault).toBe(true);
+    expect(stock.contains).toBe(90);
+    expect(stock.factorDirection).toBe("multiply");
+    expect(stock.isBase).toBe(false);
+    expect(containsLabel(next, stock)).toBe("1 Roll contains");
+    expect(containsRelationHint(next, stock)).toBe("1 Roll = 90 Gaz");
+  });
+
+  it("leaves Roll contains blank when promoting a Gaz with no factor yet", () => {
+    const gazCard = unit({
+      id: "gaz",
+      symbol: "gaz",
+      name: "Gaz",
+      contains: 0,
+      factorDirection: "divide",
+      isBase: false,
+      kind: "smaller",
+    });
+    const next = applyBaseUnitChange([roll, gazCard], "gaz");
+    const stock = next.find((row) => row.id === "roll")!;
+    expect(canonicalUnit(next)?.id).toBe("gaz");
+    expect(stock.contains).toBe(0);
+    expect(stock.factorDirection).toBe("multiply");
+    expect(containsLabel(next, stock)).toBe("1 Roll contains");
   });
 
   it("treats typed 7 on Gaz as how many Gaz in 1 Roll", () => {

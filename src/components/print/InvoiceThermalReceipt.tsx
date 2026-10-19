@@ -73,14 +73,12 @@ const RECEIPT_LABELS = {
     lineTotal: "Total",
     subtotal: "Subtotal",
     discount: "Discount",
+    grandTotal: "Grand Total",
     previous: "Previous Balance",
-    currentBill: "Current Bill",
+    totalBill: "Total Bill",
     cashReceived: "Cash Received",
-    remaining: "Remaining Amount",
+    remaining: "Remaining",
     change: "Change",
-    paidStatus: "Paid",
-    partialStatus: "Partially paid",
-    unpaidStatus: "Unpaid",
     page: "Page",
     continued: "Continued",
     itemsWord: "items",
@@ -100,14 +98,12 @@ const RECEIPT_LABELS = {
     lineTotal: "رقم",
     subtotal: "کل رقم",
     discount: "رعایت",
+    grandTotal: "کل بل",
     previous: "سابقہ بیلنس",
-    currentBill: "موجودہ بل",
+    totalBill: "کل بل بشمول بیلنس",
     cashReceived: "نقد وصول",
     remaining: "باقی رقم",
     change: "واپسی",
-    paidStatus: "ادا شدہ",
-    partialStatus: "جزوی ادا شدہ",
-    unpaidStatus: "غیر ادا شدہ",
     page: "صفحہ",
     continued: "جاری ہے",
     itemsWord: "اشیاء",
@@ -121,22 +117,6 @@ const RECEIPT_LABELS = {
 function lineDisplayName(line: InvoiceLine, urdu: boolean) {
   if (!urdu) return line.name;
   return line.urduName?.trim() || line.name;
-}
-
-/** N = customer owes (positive), P = advance (negative). Empty when settled. */
-function balanceSideMark(amount: number): "N" | "P" | "" {
-  if (amount > 0.009) return "N";
-  if (amount < -0.009) return "P";
-  return "";
-}
-
-function ReceiptLabelWithMark({ label, mark }: { label: string; mark: "N" | "P" | "" }) {
-  return (
-    <span>
-      {label}
-      {mark ? <sup className="receipt-balance-mark">{mark}</sup> : null}
-    </span>
-  );
 }
 
 export type ThermalReceiptPage = {
@@ -154,7 +134,7 @@ export function InvoiceThermalReceipt({
   discount = 0,
   paid,
   balanceBefore,
-  balanceAfter,
+  balanceAfter: _balanceAfter,
   duplicate,
   invoiceNumber,
   page,
@@ -195,9 +175,11 @@ export function InvoiceThermalReceipt({
   const totalItems = lines.length;
   const showPreviousBalance =
     settings.showBalanceOnSlip && !customer.isWalking && Math.abs(balanceBefore) > 0.009;
+  // Ledger: + owes (add), − advance (subtract). totalBill = grand + previous.
+  const totalBill = showPreviousBalance ? total + balanceBefore : total;
   const due = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
-  const newBalance = customer.isWalking ? due : balanceAfter;
+  const remainingAmount = customer.isWalking ? due : totalBill - paid;
   const now = new Date();
   const dateLabel = isUrdu
     ? `${now.toLocaleDateString("en-GB", {
@@ -220,12 +202,6 @@ export function InvoiceThermalReceipt({
 
   const itemFrom = page && isSplit ? lines.findIndex((l) => l.id === page.items[0]?.id) + 1 : 1;
   const itemTo = page && isSplit ? itemFrom + page.items.length - 1 : totalItems;
-  const paymentStatus =
-    paid <= 0.009
-      ? labels.unpaidStatus
-      : paid + 0.009 < total
-        ? labels.partialStatus
-        : labels.paidStatus;
   const subtotal = total + Math.max(0, discount);
   const itemsWord = (n: number) => (n === 1 && !isUrdu ? labels.itemWord : labels.itemsWord);
 
@@ -310,17 +286,6 @@ export function InvoiceThermalReceipt({
         {showBrandHeader && duplicate ? (
           <div className="receipt-duplicate-bill" role="note">
             {isUrdu ? "نقل شدہ بل" : RECEIPT_BRANDING.duplicateBillLabel}
-          </div>
-        ) : null}
-
-        {showBrandHeader ? (
-          <div
-            className={`receipt-payment-banner receipt-payment-banner--${settings.receiptPaymentStatusSize} ${
-              paid <= 0.009 ? "is-unpaid" : paid + 0.009 < total ? "is-partial" : "is-paid"
-            }`}
-            role="status"
-          >
-            {paymentStatus}
           </div>
         ) : null}
 
@@ -444,21 +409,24 @@ export function InvoiceThermalReceipt({
         {showTotalsFooter ? (
           <>
             <div className="receipt-totals">
-              {showPreviousBalance ? (
-                <div className="receipt-total-row receipt-bold">
-                  <ReceiptLabelWithMark
-                    label={labels.previous}
-                    mark={balanceSideMark(balanceBefore)}
-                  />
-                  <span>Rs. {formatRs(Math.abs(balanceBefore))}</span>
-                </div>
-              ) : null}
               <div className="receipt-grand-total-row">
                 <span>
-                  {labels.currentBill} ({totalItems} {itemsWord(totalItems)})
+                  {labels.grandTotal} ({totalItems} {itemsWord(totalItems)})
                 </span>
                 <span>Rs. {formatRs(total)}</span>
               </div>
+              {showPreviousBalance ? (
+                <div className="receipt-total-row receipt-bold">
+                  <span>{labels.previous}</span>
+                  <span>Rs. {formatRs(Math.abs(balanceBefore))}</span>
+                </div>
+              ) : null}
+              {showPreviousBalance ? (
+                <div className="receipt-total-row receipt-bold">
+                  <span>{labels.totalBill}</span>
+                  <span>Rs. {formatRs(Math.abs(totalBill))}</span>
+                </div>
+              ) : null}
               <div className="receipt-total-row receipt-bold">
                 <span>{labels.cashReceived}</span>
                 <span>Rs. {formatRs(paid)}</span>
@@ -469,11 +437,8 @@ export function InvoiceThermalReceipt({
 
             <div className="receipt-totals">
               <div className="receipt-grand-total-row">
-                <ReceiptLabelWithMark
-                  label={labels.remaining}
-                  mark={customer.isWalking ? "" : balanceSideMark(newBalance)}
-                />
-                <span>Rs. {formatRs(Math.abs(customer.isWalking ? due : newBalance))}</span>
+                <span>{labels.remaining}</span>
+                <span>Rs. {formatRs(Math.abs(remainingAmount))}</span>
               </div>
               {customer.isWalking && change > 0.009 ? (
                 <div className="receipt-total-row receipt-bold">

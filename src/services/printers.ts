@@ -5,6 +5,9 @@ export type SystemPrinter = {
   isDefault: boolean;
 };
 
+export type CutThermalResult =
+  { ok: true } | { ok: false; reason: "not-desktop" | "no-printer" | "failed"; message?: string };
+
 /** OS printers for Settings → Printer (empty in browser / when listing fails). */
 export async function listSystemPrinters(): Promise<SystemPrinter[]> {
   if (!isTauri()) return [];
@@ -15,13 +18,26 @@ export async function listSystemPrinters(): Promise<SystemPrinter[]> {
   }
 }
 
-/** Feed + partial cut on the named thermal (no-op outside Tauri / if name blank). */
-export async function cutThermalPaper(printerName: string | undefined): Promise<void> {
+/**
+ * Feed + full cut (XP-Q200II) on the named thermal.
+ * Only works inside the Tauri desktop app with an exact OS printer name.
+ */
+export async function cutThermalPaper(printerName: string | undefined): Promise<CutThermalResult> {
   const name = printerName?.trim();
-  if (!isTauri() || !name) return;
+  if (!isTauri()) {
+    return { ok: false, reason: "not-desktop" };
+  }
+  if (!name) {
+    return { ok: false, reason: "no-printer" };
+  }
   try {
     await invoke("cut_thermal_paper", { printerName: name });
-  } catch {
-    // Driver may already cut after HTML print — ignore cut failures.
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "failed",
+      message: error instanceof Error ? error.message : String(error),
+    };
   }
 }

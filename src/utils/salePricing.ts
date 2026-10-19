@@ -199,9 +199,17 @@ export function wholeQty(value: number) {
   return Math.floor(value + 1e-9);
 }
 
-/** Positive balance is an advance. paidNow is money kept, not change handed back. */
+/**
+ * POS customer balance is the negated ledger: negative = Due (owes), positive = Cr (advance).
+ * `paidNow` is money kept, not change handed back.
+ */
 export function balanceAfterSale(currentBalance: number, billTotal: number, paidNow: number) {
   return +(currentBalance - billTotal + paidNow).toFixed(2);
+}
+
+/** Convert POS Due/Cr sign back to ledger (positive = Owes, negative = Advance). */
+export function posBalanceToLedger(posBalance: number) {
+  return posBalance === 0 ? 0 : -posBalance;
 }
 
 export function lineTotal(displayQty: number, unitPrice: number): number {

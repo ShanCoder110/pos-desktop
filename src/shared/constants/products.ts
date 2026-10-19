@@ -150,8 +150,8 @@ export const PRODUCT_COPY = {
   categoryRequired: "Choose a category",
   unitRequired: "Choose a unit",
   unitsHint:
-    "The opening-stock unit is the inventory unit. Add Gaz under Roll (1 Roll = 90 Gaz) or Pack over Piece (1 Pack = 12 Piece). Prices auto-fill from the conversion. The default sale unit only controls what POS selects first.",
-  stockUnit: "Default sale",
+    "New products start as Roll + Gaz. The inventory unit always shows Contains = 1. Make default on Gaz (or Meter) moves inventory there and enables 1 Roll contains on the bigger unit. Pack / Piece works the same way.",
+  stockUnit: "Inventory · default",
   makeStockUnit: "Make default",
   inventoryUnit: "Inventory unit",
   inventoryUnitHint: "Stock quantity is on Lots",

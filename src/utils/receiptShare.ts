@@ -44,34 +44,22 @@ export function buildReceiptText(opts: {
     discount = 0,
     paid,
     balanceBefore,
-    balanceAfter,
     invoiceNumber,
   } = opts;
   const shop = settings.receiptShopName || settings.shopName;
   const urdu = isReceiptUrdu(settings.receiptLanguage);
-  const status =
-    paid <= 0.009
-      ? urdu
-        ? "غیر ادا شدہ"
-        : "Unpaid"
-      : paid + 0.009 < total
-        ? urdu
-          ? "جزوی ادا شدہ"
-          : "Partially paid"
-        : urdu
-          ? "ادا شدہ"
-          : "Paid";
   const subtotal = total + Math.max(0, discount);
   const due = Math.max(0, total - paid);
-  const newBalance = customer.isWalking ? due : (balanceAfter ?? 0);
-  const sideMark = (amount: number) => {
-    if (amount > 0.009) return " N";
-    if (amount < -0.009) return " P";
-    return "";
-  };
+  const showPrevious =
+    settings.showBalanceOnSlip &&
+    !customer.isWalking &&
+    balanceBefore != null &&
+    Math.abs(balanceBefore) > 0.009;
+  // Ledger: + owes (add), − advance (subtract).
+  const totalBill = showPrevious ? total + (balanceBefore as number) : total;
+  const remainingAmount = customer.isWalking ? due : totalBill - paid;
   const bits = [
     `*${shop}*`,
-    paid + 0.009 < total ? `*${status.toUpperCase()}*` : undefined,
     invoiceNumber ? `${urdu ? "انوائس" : "Invoice"}: ${invoiceNumber}` : undefined,
     `${urdu ? "گاہک" : "Customer"}: ${customer.name}`,
     customer.phone ? `${urdu ? "فون" : "Phone"}: ${customer.phone}` : undefined,
@@ -86,21 +74,17 @@ export function buildReceiptText(opts: {
     "",
     `${urdu ? "کل رقم" : "Subtotal"}: ${receiptMoney(subtotal)}`,
     `${urdu ? "رعایت" : "Discount"}: ${discount > 0 ? "-" : ""}${receiptMoney(discount)}`,
+    `*${urdu ? "کل بل" : "Grand Total"} (${lines.length} ${urdu ? "اشیاء" : `item${lines.length === 1 ? "" : "s"}`}): ${receiptMoney(total)}*`,
   ];
-  if (
-    settings.showBalanceOnSlip &&
-    !customer.isWalking &&
-    balanceBefore != null &&
-    Math.abs(balanceBefore) > 0.009
-  ) {
+  if (showPrevious) {
     bits.push(
-      `${urdu ? "سابقہ بیلنس" : "Previous Balance"}${sideMark(balanceBefore)}: ${receiptMoney(Math.abs(balanceBefore))}`,
+      `${urdu ? "سابقہ بیلنس" : "Previous Balance"}: ${receiptMoney(Math.abs(balanceBefore as number))}`,
+      `${urdu ? "کل بل بشمول بیلنس" : "Total Bill"}: ${receiptMoney(Math.abs(totalBill))}`,
     );
   }
   bits.push(
-    `*${urdu ? "موجودہ بل" : "Current Bill"} (${lines.length} ${urdu ? "اشیاء" : `item${lines.length === 1 ? "" : "s"}`}): ${receiptMoney(total)}*`,
     `*${urdu ? "نقد وصول" : "Cash Received"}: ${receiptMoney(paid)}*`,
-    `*${urdu ? "باقی رقم" : "Remaining Amount"}${customer.isWalking ? "" : sideMark(newBalance)}: ${receiptMoney(Math.abs(newBalance))}*`,
+    `*${urdu ? "باقی رقم" : "Remaining"}: ${receiptMoney(Math.abs(remainingAmount))}*`,
   );
   if (settings.footer) bits.push("", settings.footer);
   return bits.filter((line) => line !== undefined).join("\n");

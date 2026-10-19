@@ -48,8 +48,8 @@ export function Badge({
 }
 
 export function BalanceBadge({ n }: { n: number }) {
-  if (n < 0) return <Badge tone="rose">Owes Rs {Math.abs(n).toLocaleString("en-PK")}</Badge>;
-  if (n > 0) return <Badge tone="emerald">Advance Rs {n.toLocaleString("en-PK")}</Badge>;
+  if (n > 0) return <Badge tone="rose">Owes Rs {n.toLocaleString("en-PK")}</Badge>;
+  if (n < 0) return <Badge tone="emerald">Advance Rs {Math.abs(n).toLocaleString("en-PK")}</Badge>;
   return <Badge>Settled</Badge>;
 }
 

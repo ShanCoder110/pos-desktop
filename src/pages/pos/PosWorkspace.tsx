@@ -7,9 +7,10 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { normalizeSellUnits, productSellUnits } from "@/pages/products/productQty";
+import { formatStockQty, normalizeSellUnits, productSellUnits } from "@/pages/products/productQty";
 import {
   balanceAfterSale,
+  posBalanceToLedger,
   displayToBaseQty,
   hasCompleteSellUnit,
   stockPerUnit,
@@ -259,8 +260,12 @@ function availableInUnit(unit: ProductSellUnit | undefined, baseAvailable: numbe
   const basePerUnit = displayToBaseQty(unit, 1);
   if (!(basePerUnit > 0)) return Math.max(0, baseAvailable);
   const available = Math.max(0, baseAvailable / basePerUnit);
-  // Complete packs/boxes are sellable as whole units; length units may be fractional.
-  return basePerUnit > 1 ? Math.floor(available + 1e-9) : +available.toFixed(4);
+  // Complete packs/boxes are sellable as whole units only.
+  if (basePerUnit > 1) return Math.floor(available + 1e-9);
+  // Length units (Gaz/Meter): snap float dust from roll↔gaz conversion (730.0073 → 730).
+  const nearestWhole = Math.round(available);
+  if (Math.abs(available - nearestWhole) < 0.05) return nearestWhole;
+  return Math.round(available * 100) / 100;
 }
 
 /** Low-stock warn only when a minimum is set. No limit → alert only at 0 (handled as out). */
@@ -1536,8 +1541,9 @@ export function PosWorkspace() {
       total: t.total,
       discount: t.lineDisc + t.billDiscount,
       paid: amountPaid,
-      balanceBefore: previousBalance,
-      balanceAfter,
+      // Receipts use ledger sign (Owes=N / Advance=P); POS UI keeps the negated Due/Cr sign.
+      balanceBefore: posBalanceToLedger(previousBalance),
+      balanceAfter: posBalanceToLedger(balanceAfter),
       customer: displayCustomer,
       invoiceNumber: invoiceNumber || undefined,
       language,
@@ -2211,9 +2217,12 @@ export function PosWorkspace() {
                             {stockWarn ? WARN_ICO : null}
                             <span
                               className="stock-num [font-size:11px]"
-                              title="This branch · shop total"
+                              title={`Shop total in ${prettyUnit(item.baseUnit)}: ${cartStockCompact(item.productId)}`}
                             >
-                              Left {cartStockCompact(item.productId)} {prettyUnit(item.baseUnit)}
+                              Left {formatStockQty(availableInUnit(activeUnit, left))}{" "}
+                              {activeUnit?.name ||
+                                prettyUnit(item.sellUnit) ||
+                                prettyUnit(item.baseUnit)}
                             </span>
                           </span>
                         </td>
@@ -2947,8 +2956,8 @@ export function PosWorkspace() {
                   lines: invoiceLines,
                   total: t.total,
                   paid: amountPaid,
-                  balanceBefore: previousBalance,
-                  balanceAfter,
+                  balanceBefore: posBalanceToLedger(previousBalance),
+                  balanceAfter: posBalanceToLedger(balanceAfter),
                   invoiceNumber: receiptInvoiceNo || undefined,
                 });
                 void openWhatsAppReceipt(displayCustomer.phone, text).catch(() =>
@@ -3241,8 +3250,8 @@ export function PosWorkspace() {
         total={receiptSnap?.total ?? t.total}
         discount={receiptSnap?.discount ?? t.lineDisc + t.billDiscount}
         paid={receiptSnap?.paid ?? amountPaid}
-        balanceBefore={receiptSnap?.balanceBefore ?? customer.balance}
-        balanceAfter={receiptSnap?.balanceAfter ?? balanceAfter}
+        balanceBefore={receiptSnap?.balanceBefore ?? posBalanceToLedger(customer.balance)}
+        balanceAfter={receiptSnap?.balanceAfter ?? posBalanceToLedger(balanceAfter)}
         duplicate={false}
         invoiceNumber={receiptSnap?.invoiceNumber ?? (receiptInvoiceNo || undefined)}
         splitOverride={splitPrint}

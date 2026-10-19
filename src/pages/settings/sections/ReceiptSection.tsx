@@ -29,7 +29,6 @@ const KEYS = [
   "receiptLogoScale",
   "receiptHeaderLayout",
   "receiptTextSize",
-  "receiptPaymentStatusSize",
   "receiptShopNameSize",
   "receiptShopNameBold",
   "receiptTaglineAlign",
@@ -322,12 +321,6 @@ export function ReceiptSection() {
               <SizeChoice
                 value={draft.receiptTextSize}
                 onChange={(receiptTextSize) => patch({ receiptTextSize })}
-              />
-            </ControlRow>
-            <ControlRow label="Payment status size">
-              <SizeChoice
-                value={draft.receiptPaymentStatusSize}
-                onChange={(receiptPaymentStatusSize) => patch({ receiptPaymentStatusSize })}
               />
             </ControlRow>
             <ControlRow label="Items table style">

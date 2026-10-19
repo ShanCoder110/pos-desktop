@@ -61,6 +61,7 @@ import {
   formatMixedQty,
   formatStockQty,
   isLinearStockUnit,
+  isBiggerSymbol,
   isSubdivisionSymbol,
   normalizeSellUnits,
   preferredUnit,
@@ -299,7 +300,6 @@ export function ProductForm({
     .join("|");
   const base = preferredUnit(sellUnits) ?? sellUnits[0];
   const inventory = canonicalUnit(sellUnits) ?? base;
-  const pack = biggerUnit(sellUnits);
   const stockSymbol = inventory?.symbol || product.unit || "pc";
   const priceLot = lotDraft.find((l) => l.id === priceLotId);
   const activeSuppliers = useMemo(() => {
@@ -622,20 +622,23 @@ export function ProductForm({
   function setDefaultSaleUnit(unitId: string) {
     const target = sellUnits.find((unit) => unit.id === unitId);
     if (!target) return;
-    const preferred = preferredUnit(sellUnits);
-    if (preferred?.id === target.id) return;
-
-    const next = setPreferredUnit(sellUnits, unitId);
+    const inventory = canonicalUnit(sellUnits);
+    // Make default also promotes inventory (Contains = 1) so the previous stock
+    // unit becomes the bigger "1 Roll contains" row and stays editable.
+    const next =
+      inventory?.id === target.id
+        ? setPreferredUnit(sellUnits, unitId)
+        : applyBaseUnitChange(sellUnits, unitId);
     const nextPreferred = preferredUnit(next) ?? target;
-    const inventory = canonicalUnit(next) ?? nextPreferred;
+    const nextInventory = canonicalUnit(next) ?? nextPreferred;
     const current = productRef.current;
 
     onChange({
       ...current,
       name: current.name,
       sellUnits: next,
-      unit: inventory.symbol || current.unit,
-      isLinear: isLinearStockUnit(inventory.symbol),
+      unit: nextInventory.symbol || current.unit,
+      isLinear: isLinearStockUnit(nextInventory.symbol),
       cost: nextPreferred.cost,
       min: nextPreferred.min,
       wholesale: nextPreferred.wholesale,
@@ -649,21 +652,61 @@ export function ProductForm({
       (unit) => (unit.symbol || "").trim().toLowerCase() === v.trim().toLowerCase(),
     );
     const currentInventory = canonicalUnit(sellUnits);
-    const next = existing
-      ? applyBaseUnitChange(sellUnits, existing.id)
-      : sellUnits.map((unit) =>
-          unit.id === currentInventory?.id
-            ? {
-                ...unit,
-                symbol: v,
-                name: displayName,
-                contains: 1,
-                factorDirection: "multiply" as const,
-                isBase: true,
-                kind: "base" as const,
-              }
-            : unit,
-        );
+    let next: ProductSellUnit[];
+    if (existing) {
+      next = applyBaseUnitChange(sellUnits, existing.id);
+    } else if (
+      currentInventory &&
+      sellUnits.length === 1 &&
+      ((isBiggerSymbol(currentInventory.symbol) && isSubdivisionSymbol(v)) ||
+        (isSubdivisionSymbol(currentInventory.symbol) && isBiggerSymbol(v)))
+    ) {
+      // Don't rename Roll → Gaz (loses the bigger unit). Demote current + add new inventory.
+      const createdId = crypto.randomUUID();
+      const demoted: ProductSellUnit = {
+        ...currentInventory,
+        contains: 0,
+        factorDirection: isSubdivisionSymbol(currentInventory.symbol)
+          ? ("divide" as const)
+          : ("multiply" as const),
+        isBase: false,
+        isDefault: false,
+        kind: isSubdivisionSymbol(currentInventory.symbol)
+          ? ("smaller" as const)
+          : ("bigger" as const),
+      };
+      const created: ProductSellUnit = {
+        id: createdId,
+        name: displayName,
+        symbol: v,
+        kind: "base",
+        contains: 1,
+        factorDirection: "multiply",
+        cost: demoted.cost,
+        min: demoted.min,
+        wholesale: demoted.wholesale,
+        price: demoted.price,
+        barcode: "",
+        priceManual: {},
+        isBase: true,
+        isDefault: true,
+      };
+      next = deriveAll([created, demoted]);
+    } else {
+      next = sellUnits.map((unit) =>
+        unit.id === currentInventory?.id
+          ? {
+              ...unit,
+              symbol: v,
+              name: displayName,
+              contains: 1,
+              factorDirection: "multiply" as const,
+              isBase: true,
+              kind: "base" as const,
+            }
+          : unit,
+      );
+    }
     const nextPreferred = preferredUnit(next);
     const inventory = canonicalUnit(next) ?? nextPreferred;
     if (!nextPreferred || !inventory) return;
@@ -854,8 +897,11 @@ export function ProductForm({
       toaster.warn(`${component?.name ?? "Component"} does not have enough stock`);
       return;
     }
-    const unitsError = validateSellUnits(sellUnits);
-    const invalidDraft = sellUnits.find((unit) => {
+    const inventoryId = canonicalUnit(sellUnits)?.id;
+    // Drop blank secondary rows (e.g. unused Gaz) so Roll-only products can save.
+    const unitsToSave = sellUnits.filter((unit) => unit.id === inventoryId || unit.contains > 0);
+    const unitsError = validateSellUnits(unitsToSave);
+    const invalidDraft = unitsToSave.find((unit) => {
       const raw = containsDrafts[unit.id];
       if (raw === undefined) return false;
       const value = Number(raw);
@@ -874,16 +920,16 @@ export function ProductForm({
       toaster.error(validationToastMessage(unitsError));
       return;
     }
-    if (hasMissingUnitPrices(sellUnits)) {
+    if (hasMissingUnitPrices(unitsToSave)) {
       setError("unitPrices");
       focusMissingUnitPrice();
       toaster.error(validationToastMessage("unitPrices"));
       return;
     }
-    const preferred = preferredUnit(sellUnits) ?? base;
-    const inventoryUnit = canonicalUnit(sellUnits) ?? preferred;
+    const preferred = preferredUnit(unitsToSave) ?? base;
+    const inventoryUnit = canonicalUnit(unitsToSave) ?? preferred;
     const inventorySymbol = inventoryUnit?.symbol || preferred.symbol || product.unit;
-    const packRow = pack;
+    const packRow = biggerUnit(unitsToSave);
     const metersInPack =
       packRow && conversionFactor(packRow) > 1 ? conversionFactor(packRow) : null;
     const totals = isNew ? { stock: product.stock, damaged: product.damaged } : lotTotals(lotDraft);
@@ -904,7 +950,7 @@ export function ProductForm({
       packPrice: packRow?.price ?? 0,
       stock: isNew ? product.stock : totals.stock,
       damaged: totals.damaged,
-      sellUnits,
+      sellUnits: unitsToSave,
       warrantyEnabled: Boolean(product.warrantyEnabled && product.warrantyQty > 0),
       warrantyDays: product.warrantyEnabled
         ? warrantyDaysOf(product.warrantyQty, product.warrantyUnit)

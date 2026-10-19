@@ -628,7 +628,8 @@ export function setPreferredUnit(units: ProductSellUnit[], nextId: string): Prod
 
 /**
  * Rewrite factors so `nextId` becomes the inventory (factor 1) unit.
- * Prefer `setPreferredUnit` for the UI "Set as base" button.
+ * Also marks it preferred sale. Bigger units (Roll/Pack) keep an editable
+ * "1 Roll contains" factor; unknown 1:1 demotions stay blank (contains 0).
  */
 export function applyBaseUnitChange(units: ProductSellUnit[], nextId: string): ProductSellUnit[] {
   const next = units.find((unit) => unit.id === nextId);
@@ -647,7 +648,29 @@ export function applyBaseUnitChange(units: ProductSellUnit[], nextId: string): P
       };
     }
     const ratio = inventoryPerSellUnit(unit) / perNew;
-    const inside = ratio < 1;
+    if (!(ratio > 0) || !Number.isFinite(ratio)) {
+      return {
+        ...unit,
+        contains: 0,
+        factorDirection: isSubdivisionSymbol(unit.symbol) ? "divide" : "multiply",
+        isBase: false,
+        isDefault: false,
+        kind: isSubdivisionSymbol(unit.symbol) ? "smaller" : "bigger",
+      };
+    }
+    const inside = ratio < 1 - 1e-9;
+    const outside = ratio > 1 + 1e-9;
+    if (!inside && !outside) {
+      // No real conversion yet (e.g. blank Gaz promoted) — leave factor empty.
+      return {
+        ...unit,
+        contains: 0,
+        factorDirection: isSubdivisionSymbol(unit.symbol) ? "divide" : "multiply",
+        isBase: false,
+        isDefault: false,
+        kind: isSubdivisionSymbol(unit.symbol) ? "smaller" : "bigger",
+      };
+    }
     return {
       ...unit,
       contains: Math.round((inside ? 1 / ratio : ratio) * 1e6) / 1e6,
@@ -790,11 +813,14 @@ export function sellUnitOptions(
 }
 
 function stockUnitForLabel(unitsList: ProductSellUnit[]) {
+  // Prefer the real inventory row (isBase / canonical). Falling back to "contains === 1"
+  // mis-labels Roll when Gaz was just promoted and both briefly share factor 1.
   return (
+    canonicalUnit(unitsList) ??
     unitsList.find(
       (unit) =>
         resolvedFactorDirection(unit) !== "divide" && Math.abs(conversionFactor(unit) - 1) < 1e-6,
-    ) ?? canonicalUnit(unitsList)
+    )
   );
 }
 

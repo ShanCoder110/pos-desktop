@@ -139,8 +139,9 @@ export function creditState(n: number): {
 
 export type BalanceTone = "owe" | "advance" | "settled";
 
+/** Ledger balance: positive = Owes, negative = Advance. */
 export function balanceMeta(n: number): { text: string; tone: BalanceTone } {
-  if (n < 0) return { text: `Owes ${money(-n)}`, tone: "owe" };
-  if (n > 0) return { text: `Advance ${money(n)}`, tone: "advance" };
+  if (n > 0) return { text: `Owes ${money(n)}`, tone: "owe" };
+  if (n < 0) return { text: `Advance ${money(-n)}`, tone: "advance" };
   return { text: "Settled", tone: "settled" };
 }

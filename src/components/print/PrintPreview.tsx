@@ -13,10 +13,22 @@ import {
 } from "@/utils/receiptShare";
 import { isReceiptUrdu, resolveReceiptLanguage } from "@/utils/receiptLanguage";
 import { receiptFontFamilyCss } from "@/shared/constants/receiptBranding";
+import { toaster } from "@/components/common/Toast";
 import { cutThermalPaper } from "@/services/printers";
 import { jameelNooriFontFaceCss } from "@/utils/receiptPrintFonts";
 import { buildReceiptPrintHtml, RECEIPT_THERMAL_CSS } from "@/utils/receiptThermalStyles";
 import { shouldSplitThermalBill, splitBillPages } from "@/utils/splitBillPages";
+
+function cutFailureMessage(result: Awaited<ReturnType<typeof cutThermalPaper>>) {
+  if (result.ok) return null;
+  if (result.reason === "not-desktop") {
+    return "Paper cut only works in the desktop app (npm run tauri dev), not the browser.";
+  }
+  if (result.reason === "no-printer") {
+    return "Set Settings → Printer → Thermal printer (exact OS name), then try again.";
+  }
+  return result.message?.trim() || "Paper cut failed — check the printer name and USB connection.";
+}
 
 function slipMatchesLanguage(node: HTMLElement, urdu: boolean) {
   const marker = node.querySelector("[data-receipt-lang]")?.getAttribute("data-receipt-lang");
@@ -135,8 +147,11 @@ export function PrintPreview({
     });
     await printReceiptHtml(html);
     if (thermal) {
-      // Extra feed is in the HTML; send ESC/POS partial cut when a till printer is set.
-      await cutThermalPaper(settings.printerName);
+      // Let the HTML job leave the queue, then send raw ESC/POS full cut (XP-Q200II).
+      await new Promise((resolve) => window.setTimeout(resolve, 400));
+      const cut = await cutThermalPaper(settings.printerName);
+      const fail = cutFailureMessage(cut);
+      if (fail) toaster.error(fail);
     }
     if (directPrint) onClose();
     return true;

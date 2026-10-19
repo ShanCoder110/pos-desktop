@@ -58,6 +58,9 @@ Use the **same English balance vocabulary** everywhere in UI copy, toasts, table
 | Supplier negative balance | **Advance** |
 | Ledger list footer column | **Balance after** |
 | Receipt prior / new amount | **Previous balance** / **Balance after** |
+| Receipt totals (below discount) | **Grand Total** → **Previous Balance** → **Total Bill** (owe adds, advance subtracts) → **Cash Received** → **Remaining** — no N/P marks |
+
+POS cashier UI keeps a **negated** customer balance (negative = Due, positive = Cr). Convert with `posBalanceToLedger` before thermal/WhatsApp so slip math uses ledger sign.
 
 **Examples (good):** `"Balance"`, `"Opening balance"`, `"Adjust balance"`, `"Current balance"`, `"Largest balances"`, `"Customer credit"` (page title for the credit hub).
 

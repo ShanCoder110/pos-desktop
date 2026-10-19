@@ -73,15 +73,18 @@ const isMain =
   Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
-  const { child } = await startLocalApi();
-  if (!child) {
-    console.log("[dev] Attached to existing API. Ctrl+C to leave (API keeps running).");
-    await new Promise((resolve) => {
-      process.once("SIGINT", resolve);
-      process.once("SIGTERM", resolve);
+  // No top-level await — Node warns (and can exit) when a TLA wait never settles.
+  startLocalApi()
+    .then(({ child }) => {
+      if (!child) {
+        console.log("[dev] Existing API left running. Start Vite with: npm run dev");
+        process.exit(0);
+        return;
+      }
+      child.on("exit", (code) => process.exit(code ?? 1));
+    })
+    .catch((error) => {
+      console.error(`[dev] API failed: ${error instanceof Error ? error.message : error}`);
+      process.exit(1);
     });
-    process.exit(0);
-  } else {
-    child.on("exit", (code) => process.exit(code ?? 1));
-  }
 }

@@ -105,15 +105,16 @@ Get-CimInstance Win32_Printer | ForEach-Object {
     Ok(printers)
 }
 
-/// Feed a few lines then partial-cut (ESC/POS). Used after HTML receipt print.
+/// Feed a few lines then full-cut (ESC/POS). Used after HTML receipt print.
 #[tauri::command]
 pub fn cut_thermal_paper(printer_name: String) -> Result<(), String> {
     let name = printer_name.trim();
     if name.is_empty() {
         return Err("Printer name is empty".into());
     }
-    // ESC d n — feed n lines; GS V 66 0 — partial cut (XP / Epson-style tills).
-    let payload: &[u8] = &[0x1B, 0x64, 0x08, 0x1D, 0x56, 0x42, 0x00];
+    // Xprinter XP-Q200II: ESC @ init, ESC d 6 feed, GS V 0 full cut (1B 40 1B 64 06 1D 56 00).
+    // Init helps after HTML/raster jobs so the cutter command is not ignored.
+    let payload: &[u8] = &[0x1B, 0x40, 0x1B, 0x64, 0x06, 0x1D, 0x56, 0x00];
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {

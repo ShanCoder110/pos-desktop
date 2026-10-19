@@ -4,6 +4,7 @@ import {
   cartLineTierPrices,
   convertLineToUnit,
   balanceAfterSale,
+  posBalanceToLedger,
   displayToBaseQty,
   availableDisplayQty,
   availableWholeQty,
@@ -133,6 +134,16 @@ describe("balanceAfterSale", () => {
     expect(balanceAfterSale(330, 15, 0)).toBe(315);
     expect(balanceAfterSale(-1170, 15, 0)).toBe(-1185);
     expect(balanceAfterSale(10, 15, 0)).toBe(-5);
+  });
+});
+
+describe("posBalanceToLedger", () => {
+  it("flips POS Due/Cr sign to ledger Owes/Advance", () => {
+    // POS −7501 Due → ledger +7501 Owes
+    expect(posBalanceToLedger(-7501)).toBe(7501);
+    // POS +73 Cr → ledger −73 Advance
+    expect(posBalanceToLedger(73)).toBe(-73);
+    expect(posBalanceToLedger(0)).toBe(0);
   });
 });
 
