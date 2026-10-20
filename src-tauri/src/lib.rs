@@ -12,7 +12,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             printers::list_system_printers,
-            printers::cut_thermal_paper
+            printers::cut_thermal_paper,
+            printers::print_thermal_receipt,
+            printers::print_thermal_test
         ])
         .setup(|app| {
             if let Err(error) = Config::load() {

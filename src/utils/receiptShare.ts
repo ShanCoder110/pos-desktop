@@ -74,18 +74,22 @@ export function buildReceiptText(opts: {
     "",
     `${urdu ? "کل رقم" : "Subtotal"}: ${receiptMoney(subtotal)}`,
     `${urdu ? "رعایت" : "Discount"}: ${discount > 0 ? "-" : ""}${receiptMoney(discount)}`,
-    `*${urdu ? "کل بل" : "Grand Total"} (${lines.length} ${urdu ? "اشیاء" : `item${lines.length === 1 ? "" : "s"}`}): ${receiptMoney(total)}*`,
   ];
   if (showPrevious) {
     bits.push(
+      `*${urdu ? "کل بل" : "Grand Total"} (${lines.length} ${urdu ? "اشیاء" : `item${lines.length === 1 ? "" : "s"}`}): ${receiptMoney(total)}*`,
       `${urdu ? "سابقہ بیلنس" : "Previous Balance"}: ${receiptMoney(Math.abs(balanceBefore as number))}`,
-      `${urdu ? "کل بل بشمول بیلنس" : "Total Bill"}: ${receiptMoney(Math.abs(totalBill))}`,
     );
   }
   bits.push(
+    `*${showPrevious ? (urdu ? "کل بل بشمول بیلنس" : "Total Bill") : urdu ? "کل بل" : "Total Bill"}: ${receiptMoney(Math.abs(totalBill))}*`,
     `*${urdu ? "نقد وصول" : "Cash Received"}: ${receiptMoney(paid)}*`,
-    `*${urdu ? "باقی رقم" : "Remaining"}: ${receiptMoney(Math.abs(remainingAmount))}*`,
   );
+  if (!customer.isWalking || due > 0.009) {
+    bits.push(
+      `*${urdu ? "باقی رقم" : "Remaining Amount"}: ${receiptMoney(Math.abs(remainingAmount))}*`,
+    );
+  }
   if (settings.footer) bits.push("", settings.footer);
   return bits.filter((line) => line !== undefined).join("\n");
 }

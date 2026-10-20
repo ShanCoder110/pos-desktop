@@ -2,7 +2,7 @@ use rust_decimal::{prelude::ToPrimitive, Decimal};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ActiveValue::Set, ColumnTrait, ConnectionTrait,
     DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait, FromQueryResult, QueryFilter,
-    Statement,
+    Statement, TransactionTrait,
 };
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -311,15 +311,69 @@ impl ProductRepository {
     }
 
     pub async fn soft_delete(database: &DatabaseConnection, id: Uuid) -> Result<bool, AppError> {
-        let Some(model) = Self::model(database, id).await? else {
+        let transaction = database.begin().await?;
+        let now = chrono::Utc::now();
+        let product_result = transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE products SET is_active = 0, deleted_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+                [now.into(), now.into(), id.into()],
+            ))
+            .await?;
+        if product_result.rows_affected() == 0 {
             return Ok(false);
-        };
-        let mut active: product::ActiveModel = model.into();
-        active.is_active = Set(false);
-        active.deleted_at = Set(Some(chrono::Utc::now()));
-        active.version = Set(active.version.take().unwrap_or(1) + 1);
-        active.updated_at = Set(chrono::Utc::now());
-        active.update(database).await?;
+        }
+        // Hide open stock with the product; invoice_items keep snapshotted names.
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE product_lots SET deleted_at = ?, version = version + 1, updated_at = ? WHERE product_id = ? AND deleted_at IS NULL",
+                [now.into(), now.into(), id.into()],
+            ))
+            .await?;
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE product_units SET deleted_at = ?, version = version + 1, updated_at = ? WHERE product_id = ? AND deleted_at IS NULL",
+                [now.into(), now.into(), id.into()],
+            ))
+            .await?;
+        transaction.commit().await?;
+        Ok(true)
+    }
+
+    /// Undo soft-delete for a product and its cascaded lots/units.
+    pub async fn restore_soft_deleted(
+        database: &DatabaseConnection,
+        id: Uuid,
+    ) -> Result<bool, AppError> {
+        let transaction = database.begin().await?;
+        let now = chrono::Utc::now();
+        let product_result = transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE products SET is_active = 1, deleted_at = NULL, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL",
+                [now.into(), id.into()],
+            ))
+            .await?;
+        if product_result.rows_affected() == 0 {
+            return Ok(false);
+        }
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE product_lots SET deleted_at = NULL, version = version + 1, updated_at = ? WHERE product_id = ? AND deleted_at IS NOT NULL",
+                [now.into(), id.into()],
+            ))
+            .await?;
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE product_units SET deleted_at = NULL, version = version + 1, updated_at = ? WHERE product_id = ? AND deleted_at IS NOT NULL",
+                [now.into(), id.into()],
+            ))
+            .await?;
+        transaction.commit().await?;
         Ok(true)
     }
 

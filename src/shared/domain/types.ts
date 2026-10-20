@@ -295,6 +295,8 @@ export interface InvoiceItemRow {
   productId: string;
   productUnitId?: string;
   productName?: string;
+  /** Soft-deleted from catalog after this invoice was created. */
+  productDeleted?: boolean;
   sku?: string;
   unitName: string;
   priceMode?: string;

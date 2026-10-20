@@ -252,7 +252,9 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
         .route(LOTS_ROUTE, get(handlers::list_lots))
         .route(
             LOT_BY_ID_ROUTE,
-            get(handlers::get_lot).put(handlers::update_lot),
+            get(handlers::get_lot)
+                .put(handlers::update_lot)
+                .delete(handlers::delete_lot),
         )
         .route(STOCK_ROUTE, get(handlers::list_stock))
         .route(STOCK_MOVEMENTS_ROUTE, get(handlers::list_stock_movements))

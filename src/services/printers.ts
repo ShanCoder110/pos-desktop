@@ -8,6 +8,25 @@ export type SystemPrinter = {
 export type CutThermalResult =
   { ok: true } | { ok: false; reason: "not-desktop" | "no-printer" | "failed"; message?: string };
 
+export type ThermalPrintResult = CutThermalResult;
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+  }
+  return btoa(binary);
+}
+
+function printError(error: unknown): ThermalPrintResult {
+  return {
+    ok: false,
+    reason: "failed",
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
 /** OS printers for Settings → Printer (empty in browser / when listing fails). */
 export async function listSystemPrinters(): Promise<SystemPrinter[]> {
   if (!isTauri()) return [];
@@ -34,10 +53,48 @@ export async function cutThermalPaper(printerName: string | undefined): Promise<
     await invoke("cut_thermal_paper", { printerName: name });
     return { ok: true };
   } catch (error) {
-    return {
-      ok: false,
-      reason: "failed",
-      message: error instanceof Error ? error.message : String(error),
-    };
+    return printError(error);
+  }
+}
+
+/** One slip page (PNG) as a silent ESC/POS raster + cut. Desktop app only. */
+export async function printThermalPng(
+  printerName: string | undefined,
+  png: Uint8Array,
+  paperWidth: string,
+): Promise<ThermalPrintResult> {
+  const name = printerName?.trim();
+  if (!isTauri()) return { ok: false, reason: "not-desktop" };
+  if (!name) return { ok: false, reason: "no-printer" };
+  try {
+    await invoke("print_thermal_receipt", {
+      printerName: name,
+      pngBase64: bytesToBase64(png),
+      paperWidth,
+    });
+    return { ok: true };
+  } catch (error) {
+    return printError(error);
+  }
+}
+
+/** Short text slip to confirm the saved printer. Desktop app only. */
+export async function printThermalTest(
+  printerName: string | undefined,
+  paperWidth: string,
+  shopName: string,
+): Promise<ThermalPrintResult> {
+  const name = printerName?.trim();
+  if (!isTauri()) return { ok: false, reason: "not-desktop" };
+  if (!name) return { ok: false, reason: "no-printer" };
+  try {
+    await invoke("print_thermal_test", {
+      printerName: name,
+      paperWidth,
+      shopName,
+    });
+    return { ok: true };
+  } catch (error) {
+    return printError(error);
   }
 }

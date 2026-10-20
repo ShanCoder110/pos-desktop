@@ -8,7 +8,9 @@ export type TrashItem = {
   deletedBy?: string;
 };
 
-export async function listTrash(entity: "suppliers" | "customers" | "users", signal?: AbortSignal) {
+export type TrashEntity = "suppliers" | "customers" | "users" | "products";
+
+export async function listTrash(entity: TrashEntity, signal?: AbortSignal) {
   return apiRequest<TrashItem[]>(`${API_ROUTES.trash}?entity=${entity}`, { signal });
 }
 

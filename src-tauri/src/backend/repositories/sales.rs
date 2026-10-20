@@ -93,6 +93,7 @@ struct InvoiceItemRow {
     product_id: Uuid,
     product_unit_id: Option<Uuid>,
     product_name: String,
+    product_deleted: i64,
     sku: String,
     unit_name: String,
     displayed_quantity: Decimal,
@@ -934,7 +935,15 @@ async fn hydrate_invoice(
 ) -> Result<InvoiceResponse, AppError> {
     let items = InvoiceItemRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        "SELECT id, product_id, product_unit_id, product_name, sku, unit_name, displayed_quantity, conversion_to_base, base_quantity, unit_price, minimum_price_snapshot, price_mode, sold_below_minimum, authorized_by, discount, tax, line_total, fifo_cost, gross_profit FROM invoice_items WHERE invoice_id = ? ORDER BY created_at ASC",
+        "SELECT ii.id, ii.product_id, ii.product_unit_id, ii.product_name,
+                CASE WHEN p.id IS NULL OR p.deleted_at IS NOT NULL THEN 1 ELSE 0 END AS product_deleted,
+                ii.sku, ii.unit_name, ii.displayed_quantity, ii.conversion_to_base, ii.base_quantity,
+                ii.unit_price, ii.minimum_price_snapshot, ii.price_mode, ii.sold_below_minimum,
+                ii.authorized_by, ii.discount, ii.tax, ii.line_total, ii.fifo_cost, ii.gross_profit
+           FROM invoice_items ii
+           LEFT JOIN products p ON p.id = ii.product_id
+          WHERE ii.invoice_id = ?
+          ORDER BY ii.created_at ASC",
         [row.id.into()],
     ))
     .all(database)
@@ -970,6 +979,7 @@ async fn hydrate_invoice(
                 product_id: item.product_id.to_string(),
                 product_unit_id: item.product_unit_id.map(|value| value.to_string()),
                 product_name: item.product_name,
+                product_deleted: item.product_deleted != 0,
                 sku: item.sku,
                 unit_name: item.unit_name,
                 displayed_quantity: decimal(item.displayed_quantity),

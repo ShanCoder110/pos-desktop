@@ -2,9 +2,14 @@ import { useEffect, useState } from "react";
 import { Field, SelectInput, TextInput, Toggle, Button } from "@/components/common";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { SettingsSection } from "@/pages/settings/SettingsSection";
-import { useSettingsForm } from "@/shared/settings";
+import { useSettings, useSettingsForm } from "@/shared/settings";
 import { toaster } from "@/components/common/Toast";
-import { cutThermalPaper, listSystemPrinters, type SystemPrinter } from "@/services/printers";
+import {
+  cutThermalPaper,
+  listSystemPrinters,
+  printThermalTest,
+  type SystemPrinter,
+} from "@/services/printers";
 import type { PaperWidth } from "@/shared/types";
 
 const KEYS = [
@@ -25,9 +30,11 @@ function pageCount(raw: string, fallback: number) {
 
 export function PrinterSection() {
   const { draft, patch, dirty, save, reset } = useSettingsForm(KEYS);
+  const { settings } = useSettings();
   const [printers, setPrinters] = useState<SystemPrinter[]>([]);
   const [loadingPrinters, setLoadingPrinters] = useState(false);
   const [testingCut, setTestingCut] = useState(false);
+  const [testingPrint, setTestingPrint] = useState(false);
 
   async function refreshPrinters() {
     setLoadingPrinters(true);
@@ -103,6 +110,42 @@ export function PrinterSection() {
           <Button
             type="button"
             variant="outline"
+            disabled={testingPrint || !draft.printerName.trim()}
+            onClick={() => {
+              void (async () => {
+                setTestingPrint(true);
+                try {
+                  const printed = await printThermalTest(
+                    draft.printerName,
+                    draft.printerPaperWidth,
+                    settings.receiptShopName || settings.shopName,
+                  );
+                  if (printed.ok) {
+                    toaster.success("Test print sent.");
+                    return;
+                  }
+                  if (printed.reason === "not-desktop") {
+                    toaster.error("Test print only works in the desktop app, not the browser.");
+                    return;
+                  }
+                  if (printed.reason === "no-printer") {
+                    toaster.error("Enter the thermal printer OS name first.");
+                    return;
+                  }
+                  toaster.error(
+                    printed.message?.trim() || "Test print failed — check the printer name.",
+                  );
+                } finally {
+                  setTestingPrint(false);
+                }
+              })();
+            }}
+          >
+            {testingPrint ? "Printing…" : "Test print"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
             disabled={testingCut || !draft.printerName.trim()}
             onClick={() => {
               void (async () => {
@@ -137,8 +180,9 @@ export function PrinterSection() {
         </div>
       </Field>
       <p className="settings-note">
-        Cut uses raw ESC/POS (`ESC d 6` + `GS V 0`) and only runs inside the desktop app. Save the
-        printer name, restart Tauri after Rust changes, then use Test cut.
+        Print, auto-print, and Test print send ESC/POS straight to this printer — no preview window
+        and no system print dialog. Each split page is its own slip and ends with a cut. Save the
+        printer name in the desktop app, then use Test print.
       </p>
       <div className="settings-row">
         <Field label="Paper width" hint="58 mm / 80 mm thermal, or A4">
@@ -166,9 +210,8 @@ export function PrinterSection() {
         label="Auto-print after sale"
       />
       <p className="settings-note">
-        Print and auto-print send the slip directly (no preview). Use Preview on POS only when you
-        want to check the bill first. Choose your thermal printer in the OS print dialog once, or
-        set it as the system default.
+        Sale complete and Print / F9 use the printer saved here. A4 still uses the system print
+        dialog. Split long bills still follow the page sizes below.
       </p>
       <Toggle
         checked={draft.splitLongBill}

@@ -69,6 +69,7 @@ import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import {
   DEFAULT_PRODUCT_COLUMNS,
   DEFAULT_REORDER_COLUMNS,
+  HUB_SUPPLIER_COPY,
   productsHref,
   PRODUCT_COPY,
   PRODUCT_HEALTH_FROM_LABEL,
@@ -79,7 +80,8 @@ import {
   type ProductInsightMetric,
 } from "@/shared/constants/products";
 import { REORDER_COPY } from "@/shared/constants/reorders";
-import { QUERY_CATEGORY_ID } from "@/shared/constants/query";
+import { QUERY_CATEGORY_ID, QUERY_SUPPLIER_ID } from "@/shared/constants/query";
+import { productBelongsToSupplier } from "@/pages/products/hubSupplierFilters";
 import { useSettings } from "@/shared/settings";
 import type { Product } from "@/shared/types";
 import type { InvoiceRow, ProductLotRow } from "@/shared/domain/types";
@@ -344,6 +346,7 @@ export function ProductsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const categoryIdFromUrl = searchParams.get(QUERY_CATEGORY_ID);
+  const supplierIdFromUrl = searchParams.get(QUERY_SUPPLIER_ID);
   const { settings } = useSettings();
   const {
     setActions,
@@ -361,6 +364,7 @@ export function ProductsPage() {
     refreshHub,
   } = useProductsHub();
   const categoryOptions = categories.map((c) => c.name);
+  const supplierOptions = suppliers.map((s) => s.name);
   const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.name ?? "";
   const { edit: lotEdit, openCreate: openAddLot, lotDrawer } = useLotDrawer();
 
@@ -455,6 +459,28 @@ export function ProductsPage() {
   }, [categoryIdFromUrl, categories, setSearchParams]);
 
   useEffect(() => {
+    if (!supplierIdFromUrl) return;
+    const supplier = suppliers.find((row) => row.id === supplierIdFromUrl);
+    if (!supplier) {
+      setSearchParams(
+        (current) => {
+          const params = new URLSearchParams(current);
+          params.delete(QUERY_SUPPLIER_ID);
+          return params;
+        },
+        { replace: true },
+      );
+      return;
+    }
+    setChips((prev) => {
+      const names = chipValuesForField(prev, "supplier");
+      if (names.length === 1 && names[0] === supplier.name) return prev;
+      return applyFilterChip(prev, makeFilterChip("supplier", "Supplier", [supplier.name]));
+    });
+    setPage(1);
+  }, [supplierIdFromUrl, suppliers, setSearchParams]);
+
+  useEffect(() => {
     setCols(tab === "low" ? DEFAULT_REORDER_COLUMNS : DEFAULT_PRODUCT_COLUMNS);
   }, [tab]);
 
@@ -524,6 +550,14 @@ export function ProductsPage() {
         }
         if (chip.field === "category" && selected.length && !selected.includes(r.category))
           return false;
+        if (chip.field === "supplier" && selected.length) {
+          const matched = selected.some((name) => {
+            const supplier = suppliers.find((row) => row.name === name);
+            if (!supplier) return false;
+            return productBelongsToSupplier(r, supplier.id, lots);
+          });
+          if (!matched) return false;
+        }
         if (chip.field === "sales") {
           const min = Math.min(...selected.map((value) => minAmount(value)));
           if (productSalesStats(r.id, salesStats).sales < min) return false;
@@ -580,7 +614,7 @@ export function ProductsPage() {
     const needle = q.trim();
     if (!needle) return list;
     return [...list].sort((a, b) => compareProductSearch(a, b, needle));
-  }, [searchRows, q, tab, chips, sectionKpi, salesStats, lots, rows]);
+  }, [searchRows, q, tab, chips, sectionKpi, salesStats, lots, rows, suppliers]);
 
   const pageCount = pageSize === PAGE_SIZE_ALL ? Math.max(filtered.length, 1) : pageSize;
   const pages = Math.max(1, Math.ceil(filtered.length / pageCount));
@@ -621,9 +655,22 @@ export function ProductsPage() {
     );
   }
 
+  function clearSupplierFromUrl() {
+    if (!searchParams.get(QUERY_SUPPLIER_ID)) return;
+    setSearchParams(
+      (current) => {
+        const params = new URLSearchParams(current);
+        params.delete(QUERY_SUPPLIER_ID);
+        return params;
+      },
+      { replace: true },
+    );
+  }
+
   function removeChip(field: string) {
     if (field === "health") setHealth(null);
     if (field === "category") clearCategoryFromUrl();
+    if (field === "supplier") clearSupplierFromUrl();
     setChips((prev) => prev.filter((c) => c.field !== field));
     setPage(1);
   }
@@ -631,6 +678,7 @@ export function ProductsPage() {
   function clearChips() {
     setHealth(null);
     clearCategoryFromUrl();
+    clearSupplierFromUrl();
     setChips([]);
     setPage(1);
   }
@@ -685,7 +733,7 @@ export function ProductsPage() {
         next.sku = updated.sku;
         setLots((prev) => [...prev.filter((lot) => lot.productId !== next.id)]);
       }
-      await refreshHub();
+      await refreshHub(undefined, { quiet: true });
       return true;
     } catch (error) {
       const message = shortError(error, PRODUCT_COPY.saveFailed);
@@ -835,6 +883,7 @@ export function ProductsPage() {
               { id: "name", label: "Name" },
               { id: "sku", label: "SKU" },
               { id: "category", label: "Category", options: categoryOptions, searchable: true },
+              { id: "supplier", label: "Supplier", options: supplierOptions, searchable: true },
               {
                 id: "sales",
                 label: "Total sales",
@@ -913,6 +962,15 @@ export function ProductsPage() {
                     onClick={() => navigate(productsHref("categories"))}
                   >
                     Back to categories
+                  </Button>
+                ) : null}
+                {supplierIdFromUrl ? (
+                  <Button
+                    variant="ghost"
+                    icon={<ArrowLeft size={14} />}
+                    onClick={() => navigate(productsHref("suppliers"))}
+                  >
+                    {HUB_SUPPLIER_COPY.backToSuppliers}
                   </Button>
                 ) : null}
                 {selected.length > 0 ? (
@@ -1308,7 +1366,7 @@ export function ProductsPage() {
                           onCreated={() => {
                             const index = shown.findIndex((item) => item.id === row.id);
                             setReorderId(null);
-                            void refreshHub();
+                            void refreshHub(undefined, { quiet: true });
                             if (tab === "low" && index >= 0) {
                               const next = shown[index + 1] ?? shown[index];
                               setFocusedId(next?.id ?? null);
@@ -1333,7 +1391,7 @@ export function ProductsPage() {
                           danger
                           icon={<Trash2 size={14} />}
                           onClick={() => {
-                            if (row.stock > 0 || row.claims > 0) setBlocked(true);
+                            if (row.claims > 0) setBlocked(true);
                             else setRemove(row);
                           }}
                         >
@@ -1433,7 +1491,7 @@ export function ProductsPage() {
       <ConfirmDialog
         open={blocked}
         title="Cannot delete"
-        body="This product still has lots or sales history. Clear those first."
+        body={PRODUCT_COPY.deleteBlockedClaims}
         danger={false}
         confirmLabel="OK"
         onCancel={() => setBlocked(false)}
@@ -1442,7 +1500,7 @@ export function ProductsPage() {
       <ConfirmDialog
         open={Boolean(remove)}
         title="Delete product?"
-        body={`${remove?.name ?? "This product"} will be removed from the catalog.`}
+        body={`${remove?.name ?? "This product"} — ${PRODUCT_COPY.deleteConfirm}`}
         onCancel={() => setRemove(null)}
         onConfirm={() => {
           if (!remove) {
@@ -1451,7 +1509,7 @@ export function ProductsPage() {
           }
           setProductLoading((current) => ({ ...current, deleting: true }));
           void deleteProduct(remove.id)
-            .then(() => refreshHub())
+            .then(() => refreshHub(undefined, { quiet: true }))
             .then(() => {
               setSelected((selectedIds) => selectedIds.filter((id) => id !== remove.id));
               toaster.success(PRODUCT_COPY.deleted);

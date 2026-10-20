@@ -498,7 +498,7 @@ export function ReordersPage() {
         suppliers={suppliers}
         onClose={() => setCreateOpen(false)}
         onCreated={() => {
-          void refreshHub();
+          void refreshHub(undefined, { quiet: true });
         }}
       />
       <ReorderDetailDrawer
@@ -522,7 +522,7 @@ export function ReordersPage() {
             .then(() => {
               toaster.success(REORDER_COPY.cancelled);
               setCancelRow(null);
-              void refreshHub();
+              void refreshHub(undefined, { quiet: true });
             })
             .catch((error) => toaster.error(shortError(error, REORDER_COPY.cancelFailed)));
         }}

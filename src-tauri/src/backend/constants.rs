@@ -213,12 +213,17 @@ pub const ERROR_PRODUCT_NO_INVALID: &str = "Product ID must be a positive whole 
 pub const ERROR_PRODUCT_NO_DUPLICATE: &str = "That product ID is already in use.";
 pub const SKU_MAX_LEN: usize = 32;
 pub const ERROR_CATEGORY_NOT_FOUND: &str = "Category not found.";
+pub const ERROR_CATEGORY_OTHER_PROTECTED: &str =
+    "Cannot delete the Other category — products without a group use it.";
+/// Stable id for the default “Other” product category (see migration m20261017_000017).
+pub const OTHER_PRODUCT_CATEGORY_ID: &str = "20000000-0000-4000-8000-000000000001";
 pub const ERROR_CITY_NOT_FOUND: &str = "City not found.";
 pub const ERROR_UNIT_NOT_FOUND: &str = "Unit not found.";
 pub const ERROR_SUPPLIER_NOT_FOUND: &str = "Supplier not found.";
 pub const ERROR_CUSTOMER_NOT_FOUND: &str = "Customer not found.";
 pub const ERROR_LOT_NOT_FOUND: &str = "Lot not found.";
 pub const ERROR_LOT_EDIT_DENIED: &str = "Only owners and managers can edit lots.";
+pub const ERROR_LOT_DELETE_DENIED: &str = "Only owners and managers can delete lots.";
 pub const ERROR_LOT_REMAINING_EXCEEDS_AVAILABLE: &str =
     "Remaining cannot exceed original minus sold minus damaged.";
 pub const ERROR_LOT_ORIGINAL_BELOW_COMMITTED: &str =

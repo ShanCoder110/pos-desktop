@@ -162,7 +162,7 @@ export function CategoriesPage() {
       if (isNew) await createMasterRecord("categories", payload);
       else await updateMasterRecord("categories", edit.id, payload);
       setEdit(null);
-      await refreshHub();
+      await refreshHub(undefined, { quiet: true });
       toaster.success(isNew ? CATEGORY_COPY.added : CATEGORY_COPY.saved);
     } catch (error) {
       toaster.error(shortError(error, CATEGORY_COPY.saveFailed));
@@ -182,7 +182,7 @@ export function CategoriesPage() {
     try {
       await Promise.all(ids.map((id) => deleteMasterRecord("categories", id)));
       setSelected((current) => current.filter((id) => !ids.includes(id)));
-      await refreshHub();
+      await refreshHub(undefined, { quiet: true });
       toaster.success(ids.length === 1 ? CATEGORY_COPY.deleted : CATEGORY_COPY.deletedMany);
     } catch (error) {
       toaster.error(shortError(error, CATEGORY_COPY.deleteFailed));
@@ -353,8 +353,8 @@ export function CategoriesPage() {
 
       <ConfirmDialog
         open={Boolean(remove)}
-        title="Delete category?"
-        body="Products still using this category will need a new group before save in the live app."
+        title={CATEGORY_COPY.deleteTitle}
+        body={CATEGORY_COPY.deleteBody}
         onCancel={() => setRemove(null)}
         onConfirm={() => {
           if (remove) void deleteCategories([remove.id]).then(() => setRemove(null));

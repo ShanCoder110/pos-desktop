@@ -15,17 +15,24 @@ import {
   toaster,
 } from "@/components/common";
 import { useQueryTab } from "@/hooks/useQueryTab";
-import { listTrash, purgeTrash, restoreTrash, type TrashItem } from "@/services/trash";
+import {
+  listTrash,
+  purgeTrash,
+  restoreTrash,
+  type TrashEntity,
+  type TrashItem,
+} from "@/services/trash";
 import { formatTableDateTime, shortError } from "@/utils/format";
 
 const TRASH_TABS = [
+  { id: "products", label: "Products" },
   { id: "suppliers", label: "Suppliers" },
   { id: "customers", label: "Customers" },
   { id: "users", label: "Users" },
 ] as const;
 
 export function TrashPage() {
-  const [tab, setTab] = useQueryTab(TRASH_TABS, "suppliers");
+  const [tab, setTab] = useQueryTab(TRASH_TABS, "products");
   const [rows, setRows] = useState<TrashItem[]>([]);
   const [purgeId, setPurgeId] = useState<string | null>(null);
   const [loading, setLoading] = useState({ page: true, action: false });
@@ -33,7 +40,7 @@ export function TrashPage() {
   useEffect(() => {
     const controller = new AbortController();
     setLoading((current) => ({ ...current, page: true }));
-    listTrash(tab as "suppliers" | "customers" | "users", controller.signal)
+    listTrash(tab as TrashEntity, controller.signal)
       .then(setRows)
       .catch(() => setRows([]))
       .finally(() => setLoading((current) => ({ ...current, page: false })));

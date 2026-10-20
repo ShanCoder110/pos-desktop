@@ -475,8 +475,19 @@ export function InvoicesPage() {
                   {open.items.map((item) => (
                     <tr key={item.id}>
                       <Td>
-                        <span className="font-semibold text-ink">
+                        <span
+                          className={
+                            item.productDeleted
+                              ? "font-semibold text-danger"
+                              : "font-semibold text-ink"
+                          }
+                        >
                           {item.productName || "Product"}
+                          {item.productDeleted ? (
+                            <span className="ml-1 text-[10px] font-bold uppercase tracking-wide">
+                              deleted
+                            </span>
+                          ) : null}
                         </span>
                         {item.sku ? (
                           <span className="block text-[10px] text-muted">{item.sku}</span>

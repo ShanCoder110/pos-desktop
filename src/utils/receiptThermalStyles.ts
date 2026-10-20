@@ -20,7 +20,7 @@ export const RECEIPT_THERMAL_CSS = `
 }
 
 .receipt-inner.receipt-size--small { font-size: 11px; }
-.receipt-inner.receipt-size--medium { font-size: 13px; }
+.receipt-inner.receipt-size--medium { font-size: 12px; }
 .receipt-inner.receipt-size--large { font-size: 15px; }
 
 .receipt-inner :not(.receipt-footer-urdu) {
@@ -273,7 +273,7 @@ export const RECEIPT_THERMAL_CSS = `
   text-transform: none;
 }
 .receipt-inner--urdu-rtl.receipt-size--small { font-size: 14px; }
-.receipt-inner--urdu-rtl.receipt-size--medium { font-size: 16px; }
+.receipt-inner--urdu-rtl.receipt-size--medium { font-size: 14px; }
 .receipt-inner--urdu-rtl.receipt-size--large { font-size: 18px; }
 
 .receipt-inner--urdu-rtl .receipt-meta,
@@ -392,6 +392,19 @@ export const RECEIPT_THERMAL_CSS = `
 .receipt-grand-total-row {
   font-weight: 700;
   font-size: 1.15em;
+}
+
+.receipt-total-bill {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 1.15em;
+  color: #000;
+  border-top: 1px solid #000;
+  border-bottom: 1px solid #000;
+  padding: 3px 0;
+  margin: 3px 0;
 }
 
 .receipt-bold {
@@ -514,7 +527,7 @@ export function buildReceiptPrintHtml(opts: {
     opts.urdu
       ? `
 .receipt-inner--urdu-rtl.receipt-size--small { font-size: 14px !important; }
-.receipt-inner--urdu-rtl.receipt-size--medium { font-size: 16px !important; }
+.receipt-inner--urdu-rtl.receipt-size--medium { font-size: 14px !important; }
 .receipt-inner--urdu-rtl.receipt-size--large { font-size: 18px !important; }
 .receipt-inner--urdu-rtl .receipt-meta-row > span:first-child,
 .receipt-inner--urdu-rtl .receipt-items-table th { font-weight: 700 !important; }

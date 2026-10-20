@@ -4,11 +4,13 @@ use validator::Validate;
 
 use crate::backend::{
     constants::{
-        DEFAULT_LOT_PREFIX, ERROR_LOT_EDIT_DENIED, ERROR_LOT_NOT_FOUND, SEQUENCE_KIND_LOT,
+        DEFAULT_LOT_PREFIX, ERROR_LOT_DELETE_DENIED, ERROR_LOT_EDIT_DENIED, ERROR_LOT_NOT_FOUND,
+        SEQUENCE_KIND_LOT,
     },
     context::RequestContext,
     dto::{
-        LotListQuery, LotResponse, Paginated, PaginationMeta, ReceiveLotRequest, UpdateLotRequest,
+        DeleteResponse, LotListQuery, LotResponse, Paginated, PaginationMeta, ReceiveLotRequest,
+        UpdateLotRequest,
     },
     errors::AppError,
     repositories::{LotRepository, SequenceRepository},
@@ -20,6 +22,14 @@ fn ensure_lot_edit_permission(context: &RequestContext) -> Result<(), AppError> 
         Ok(())
     } else {
         Err(AppError::Forbidden(ERROR_LOT_EDIT_DENIED))
+    }
+}
+
+fn ensure_lot_delete_permission(context: &RequestContext) -> Result<(), AppError> {
+    if matches!(context.role.as_str(), "OWNER" | "MANAGER") {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden(ERROR_LOT_DELETE_DENIED))
     }
 }
 
@@ -125,6 +135,21 @@ impl LotService {
         transaction.commit().await?;
         Self::get(database, lot_id).await
     }
+
+    pub async fn delete(
+        database: &DatabaseConnection,
+        context: &RequestContext,
+        id: Uuid,
+    ) -> Result<DeleteResponse, AppError> {
+        ensure_lot_delete_permission(context)?;
+        let transaction = database.begin().await?;
+        let lot_id = LotRepository::soft_delete(&transaction, id).await?;
+        transaction.commit().await?;
+        Ok(DeleteResponse {
+            id: lot_id.to_string(),
+            deleted: true,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -200,6 +225,167 @@ mod tests {
         .expect("stock query")
         .map(|row| row.stock)
         .unwrap_or(0.0)
+    }
+
+    /// Soft-delete removes remaining qty from stock and restores cost/prices from the previous lot.
+    #[tokio::test]
+    async fn lot_soft_delete_adjusts_stock_and_falls_back_prices() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let context = ctx("OWNER");
+
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "LotDelQA".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pc"))
+            .expect("pc");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                urdu_name: None,
+                name: "Lot Delete Widget".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                product_no: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id.clone(),
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(10, 0),
+                    min: Decimal::new(12, 0),
+                    wholesale: Decimal::new(14, 0),
+                    price: Decimal::new(20, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(40, 0),
+                    cost: Decimal::new(10, 0),
+                    received_date: "2026-10-01".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        assert!((product_stock(&database, &product.id).await - 40.0).abs() < 0.01);
+
+        let second = LotService::receive(
+            &database,
+            &context,
+            crate::backend::dto::ReceiveLotRequest {
+                product_id: product.id.clone(),
+                branch_id: Some(SEED_BRANCH_ID.into()),
+                branch_allocations: vec![],
+                supplier_id: None,
+                quantity: Decimal::new(25, 0),
+                cost: Decimal::new(18, 0),
+                received_date: "2026-10-10".into(),
+                expiry_date: None,
+                source_type: "OPENING".into(),
+                min: Some(Decimal::new(22, 0)),
+                wholesale: Some(Decimal::new(24, 0)),
+                retail: Some(Decimal::new(30, 0)),
+                damaged_quantity: Decimal::ZERO,
+                paid_now: Decimal::ZERO,
+                purchase_order_id: None,
+            },
+        )
+        .await
+        .expect("second lot");
+        assert!((product_stock(&database, &product.id).await - 65.0).abs() < 0.01);
+
+        let deleted = LotService::delete(&database, &context, Uuid::parse_str(&second.id).unwrap())
+            .await
+            .expect("delete second lot");
+        assert!(deleted.deleted);
+        assert!((product_stock(&database, &product.id).await - 40.0).abs() < 0.01);
+
+        let refreshed = ProductService::get(
+            &database,
+            Uuid::parse_str(&product.id).unwrap(),
+            Some(Uuid::parse_str(SEED_BRANCH_ID).unwrap()),
+        )
+        .await
+        .expect("product after delete");
+        let base = refreshed
+            .sell_units
+            .iter()
+            .find(|u| u.is_base)
+            .expect("base unit");
+        assert!((base.cost - 10.0).abs() < 0.01, "cost={}", base.cost);
+        assert!((base.min - 12.0).abs() < 0.01, "min={}", base.min);
+        assert!(
+            (base.wholesale - 14.0).abs() < 0.01,
+            "wholesale={}",
+            base.wholesale
+        );
+        assert!((base.price - 20.0).abs() < 0.01, "retail={}", base.price);
+
+        let cashier = ctx("CASHIER");
+        let forbidden = LotService::delete(
+            &database,
+            &cashier,
+            Uuid::parse_str(
+                &LotService::list(
+                    &database,
+                    LotListQuery {
+                        product_id: Some(product.id.clone()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .expect("list")
+                .data[0]
+                    .id,
+            )
+            .unwrap(),
+        )
+        .await;
+        assert!(
+            matches!(forbidden, Err(AppError::Forbidden(_))),
+            "cashier must get 403, got {forbidden:?}"
+        );
     }
 
     /// Lot of 100, sell 30 → remaining 100 rejected (422); remaining 60 allowed and stock syncs.

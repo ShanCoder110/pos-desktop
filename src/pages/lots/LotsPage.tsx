@@ -30,7 +30,7 @@ import { applyFilterChip, chipValuesForField } from "@/utils/filterChips";
 import { chipCsv, chipCsvFromNames, chipMinNumber } from "@/utils/filterQuery";
 import { createLoadGuard, isAbortError } from "@/utils/async";
 import { classifyListFetch } from "@/utils/listLoad";
-import { listAllLots, listLots, mapLotResponse } from "@/services/lots";
+import { deleteLot, listAllLots, listLots, mapLotResponse } from "@/services/lots";
 import { ensureSession } from "@/services/auth";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import { LotDetailDrawer } from "@/pages/lots/LotDetailDrawer";
@@ -50,7 +50,7 @@ import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import { LOT_COPY, LOT_FILTER_FIELDS, LOT_TABLE_COLUMNS } from "@/shared/constants/products";
 import type { ProductLotRow } from "@/shared/domain/types";
-import { formatTableDate, money } from "@/utils/format";
+import { formatTableDate, money, shortError } from "@/utils/format";
 
 function canEditLots(role: string | null | undefined) {
   return role === "OWNER" || role === "MANAGER";
@@ -120,8 +120,10 @@ export function LotsPage() {
     products,
     setProducts,
     setLots: syncHubLots,
-    refreshLots,
+    refreshHub,
+    bumpListsEpoch,
     suppliers,
+    listsEpoch,
   } = useProductsHub();
   const [rows, setRows] = useState<ProductLotRow[]>([]);
   const [filteredRows, setFilteredRows] = useState<ProductLotRow[]>([]);
@@ -142,6 +144,8 @@ export function LotsPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [detail, setDetail] = useState<ProductLotRow | null>(null);
   const [remove, setRemove] = useState<ProductLotRow | null>(null);
+  const [bulkRemoveIds, setBulkRemoveIds] = useState<string[] | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [reorderLotId, setReorderLotId] = useState<string | null>(null);
   const [chartProductId, setChartProductId] = useState("");
   const [chartLotId, setChartLotId] = useState("");
@@ -234,7 +238,7 @@ export function LotsPage() {
       guard.dispose();
       controller.abort();
     };
-  }, [apiFilters, page, pageSize, reloadToken]);
+  }, [apiFilters, page, pageSize, reloadToken, listsEpoch]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -253,7 +257,7 @@ export function LotsPage() {
         // Keep prior totals; primary table shows the loadError + Retry.
       });
     return () => controller.abort();
-  }, [apiFilters, products, reloadToken]);
+  }, [apiFilters, products, reloadToken, listsEpoch]);
 
   function writeLots(nextLots: ProductLotRow[], productIds: string[]) {
     setRows(nextLots);
@@ -264,15 +268,40 @@ export function LotsPage() {
   }
 
   function removeRow(row: ProductLotRow) {
-    // Backend has no lot delete; remove locally for UX then reload from API.
-    if (row.remainingQuantity < row.originalQuantity) setRemove(row);
-    else {
+    if (!lotEditAllowed) {
+      toaster.error(LOT_COPY.deleteDeniedCashier);
+      return;
+    }
+    setBulkRemoveIds(null);
+    setRemove(row);
+  }
+
+  async function confirmDelete() {
+    const ids = bulkRemoveIds?.length ? bulkRemoveIds : remove ? [remove.id] : [];
+    if (!ids.length) return;
+    setDeleting(true);
+    try {
+      for (const id of ids) {
+        await deleteLot(id);
+      }
+      const idSet = new Set(ids);
+      const productIds = [
+        ...new Set(rows.filter((row) => idSet.has(row.id)).map((row) => row.productId)),
+      ];
       writeLots(
-        rows.filter((x) => x.id !== row.id),
-        [row.productId],
+        rows.filter((row) => !idSet.has(row.id)),
+        productIds,
       );
-      setSelected((s) => s.filter((id) => id !== row.id));
-      void refreshLots();
+      setSelected((current) => current.filter((id) => !idSet.has(id)));
+      setRemove(null);
+      setBulkRemoveIds(null);
+      bumpListsEpoch();
+      await refreshHub(undefined, { quiet: true });
+      toaster.success(LOT_COPY.deleted);
+    } catch (error) {
+      toaster.error(shortError(error, LOT_COPY.deleteFailed));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -282,14 +311,14 @@ export function LotsPage() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (edit || detail || remove || nested || event.key !== "F2") return;
+      if (edit || detail || remove || bulkRemoveIds || nested || event.key !== "F2") return;
       event.preventDefault();
       event.stopPropagation();
       openCreate();
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [detail, edit, nested, openCreate, remove]);
+  }, [bulkRemoveIds, detail, edit, nested, openCreate, remove]);
 
   const supplierOptions = useMemo(
     () => hubSupplierOptions(suppliers, supplierRows),
@@ -450,23 +479,12 @@ export function LotsPage() {
                     danger
                     icon={<Trash2 size={14} />}
                     onClick={() => {
-                      const blocked = rows.find(
-                        (r) => selected.includes(r.id) && r.remainingQuantity < r.originalQuantity,
-                      );
-                      if (blocked) {
-                        setRemove(blocked);
+                      if (!lotEditAllowed) {
+                        toaster.error(LOT_COPY.deleteDeniedCashier);
                         return;
                       }
-                      const ids = [
-                        ...new Set(
-                          rows.filter((r) => selected.includes(r.id)).map((r) => r.productId),
-                        ),
-                      ];
-                      writeLots(
-                        rows.filter((r) => !selected.includes(r.id)),
-                        ids,
-                      );
-                      setSelected([]);
+                      setRemove(null);
+                      setBulkRemoveIds([...selected]);
                     }}
                   >
                     Delete
@@ -717,13 +735,19 @@ export function LotsPage() {
                           {REORDER_COPY.createAction}
                         </MenuItem>
                         {lotEditAllowed ? (
-                          <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
-                            {LOT_COPY.editAction}
-                          </MenuItem>
+                          <>
+                            <MenuItem icon={<Pencil size={14} />} onClick={() => openEdit(row)}>
+                              {LOT_COPY.editAction}
+                            </MenuItem>
+                            <MenuItem
+                              danger
+                              icon={<Trash2 size={14} />}
+                              onClick={() => removeRow(row)}
+                            >
+                              Delete
+                            </MenuItem>
+                          </>
                         ) : null}
-                        <MenuItem danger icon={<Trash2 size={14} />} onClick={() => removeRow(row)}>
-                          Delete
-                        </MenuItem>
                       </Menu>
                     </div>
                   </Td>
@@ -768,13 +792,20 @@ export function LotsPage() {
       />
 
       <ConfirmDialog
-        open={Boolean(remove)}
-        title="Cannot delete lot"
-        body="Sales already used this lot. Remaining stock must stay for history."
-        danger={false}
-        confirmLabel="OK"
-        onCancel={() => setRemove(null)}
-        onConfirm={() => setRemove(null)}
+        open={Boolean(remove) || Boolean(bulkRemoveIds?.length)}
+        title={LOT_COPY.deleteTitle}
+        body={LOT_COPY.deleteBody}
+        danger
+        confirmLabel={LOT_COPY.deleteConfirm}
+        onCancel={() => {
+          if (deleting) return;
+          setRemove(null);
+          setBulkRemoveIds(null);
+        }}
+        onConfirm={() => {
+          if (deleting) return;
+          void confirmDelete();
+        }}
       />
     </div>
   );

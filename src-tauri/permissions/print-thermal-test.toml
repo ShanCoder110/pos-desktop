@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-print-thermal-test"
+description = "Allows a short silent ESC/POS test slip on the selected printer."
+commands.allow = ["print_thermal_test"]

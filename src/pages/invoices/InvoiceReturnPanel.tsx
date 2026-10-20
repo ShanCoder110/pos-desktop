@@ -8,6 +8,7 @@ import { listReturns, postReturn } from "@/services/credit";
 type LineDraft = {
   invoiceItemId: string;
   productName: string;
+  productDeleted?: boolean;
   soldQty: number;
   unitPrice: number;
   alreadyReturned: number;
@@ -47,6 +48,7 @@ export function InvoiceReturnPanel({
           invoice.items.map((item) => ({
             invoiceItemId: item.id,
             productName: item.productName ?? item.productId,
+            productDeleted: item.productDeleted,
             soldQty: item.quantity,
             unitPrice: item.unitPrice,
             alreadyReturned: returnedByItem.get(item.id) ?? 0,
@@ -61,6 +63,7 @@ export function InvoiceReturnPanel({
           invoice.items.map((item) => ({
             invoiceItemId: item.id,
             productName: item.productName ?? item.productId,
+            productDeleted: item.productDeleted,
             soldQty: item.quantity,
             unitPrice: item.unitPrice,
             alreadyReturned: 0,
@@ -157,7 +160,18 @@ export function InvoiceReturnPanel({
               key={line.invoiceItemId}
               className="rounded-lg border border-line bg-paper/60 p-3 text-[12px]"
             >
-              <p className="font-semibold text-ink">{line.productName}</p>
+              <p
+                className={
+                  line.productDeleted ? "font-semibold text-danger" : "font-semibold text-ink"
+                }
+              >
+                {line.productName}
+                {line.productDeleted ? (
+                  <span className="ml-1 text-[10px] font-bold uppercase tracking-wide">
+                    deleted
+                  </span>
+                ) : null}
+              </p>
               <p className="text-[10px] text-muted">
                 Sold {line.soldQty} · Already returned {line.alreadyReturned} · Available {max}
               </p>

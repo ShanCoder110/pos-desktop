@@ -101,6 +101,8 @@ export const SUPPLIER_COPY = {
   removed: "Supplier removed",
   saveFailed: "Could not save supplier",
   removeFailed: "Could not remove supplier",
+  addInSelect: "Add supplier",
+  searchOrAdd: "Type to search or add",
   nameRequired: "Enter the supplier name",
   phoneInvalid: "Enter 11 digits starting with 03.",
   openingLabel: "Opening balance",

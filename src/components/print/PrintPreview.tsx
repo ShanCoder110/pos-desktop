@@ -14,20 +14,22 @@ import {
 import { isReceiptUrdu, resolveReceiptLanguage } from "@/utils/receiptLanguage";
 import { receiptFontFamilyCss } from "@/shared/constants/receiptBranding";
 import { toaster } from "@/components/common/Toast";
-import { cutThermalPaper } from "@/services/printers";
+import { printThermalPng, type ThermalPrintResult } from "@/services/printers";
 import { jameelNooriFontFaceCss } from "@/utils/receiptPrintFonts";
 import { buildReceiptPrintHtml, RECEIPT_THERMAL_CSS } from "@/utils/receiptThermalStyles";
 import { shouldSplitThermalBill, splitBillPages } from "@/utils/splitBillPages";
+import { isTauri } from "@tauri-apps/api/core";
+import { toBlob } from "html-to-image";
 
-function cutFailureMessage(result: Awaited<ReturnType<typeof cutThermalPaper>>) {
+function thermalFailure(result: ThermalPrintResult) {
   if (result.ok) return null;
   if (result.reason === "not-desktop") {
-    return "Paper cut only works in the desktop app (npm run tauri dev), not the browser.";
+    return "Silent print only works in the desktop app, not the browser.";
   }
   if (result.reason === "no-printer") {
     return "Set Settings → Printer → Thermal printer (exact OS name), then try again.";
   }
-  return result.message?.trim() || "Paper cut failed — check the printer name and USB connection.";
+  return result.message?.trim() || "Print failed — check the printer name and connection.";
 }
 
 function slipMatchesLanguage(node: HTMLElement, urdu: boolean) {
@@ -138,6 +140,41 @@ export function PrintPreview({
     if (!node) return false;
     if (!slipMatchesLanguage(node, isUrdu)) return false;
 
+    if (thermal) {
+      if (!isTauri()) {
+        toaster.error(thermalFailure({ ok: false, reason: "not-desktop" }) ?? "Print failed");
+        if (directPrint) onClose();
+        return true;
+      }
+      const pageNodes = [...node.querySelectorAll<HTMLElement>(".slip-page")];
+      if (!pageNodes.length) return false;
+      const copies = Math.max(1, Math.min(9, Number(settings.copies) || 1));
+      for (let copy = 0; copy < copies; copy += 1) {
+        for (const page of pageNodes) {
+          const blob = await toBlob(page, {
+            pixelRatio: 2,
+            backgroundColor: "#ffffff",
+            cacheBust: true,
+          });
+          if (!blob) {
+            toaster.error("Could not capture the receipt.");
+            if (directPrint) onClose();
+            return true;
+          }
+          const png = new Uint8Array(await blob.arrayBuffer());
+          const result = await printThermalPng(settings.printerName, png, paper);
+          const fail = thermalFailure(result);
+          if (fail) {
+            toaster.error(fail);
+            if (directPrint) onClose();
+            return true;
+          }
+        }
+      }
+      if (directPrint) onClose();
+      return true;
+    }
+
     const html = buildReceiptPrintHtml({
       bodyHtml: node.innerHTML,
       urdu: isUrdu,
@@ -146,13 +183,6 @@ export function PrintPreview({
       latinFontCss,
     });
     await printReceiptHtml(html);
-    if (thermal) {
-      // Let the HTML job leave the queue, then send raw ESC/POS full cut (XP-Q200II).
-      await new Promise((resolve) => window.setTimeout(resolve, 400));
-      const cut = await cutThermalPaper(settings.printerName);
-      const fail = cutFailureMessage(cut);
-      if (fail) toaster.error(fail);
-    }
     if (directPrint) onClose();
     return true;
   }, [
@@ -160,8 +190,10 @@ export function PrintPreview({
     isUrdu,
     latinFontCss,
     onClose,
+    paper,
     printPageSize,
     printWidth,
+    settings.copies,
     settings.printerName,
     thermal,
   ]);
@@ -239,7 +271,7 @@ export function PrintPreview({
   // Direct print (EN + UR): render off-screen, then system print + paper cut.
   if (directPrint) {
     return (
-      <div className="pointer-events-none fixed -left-[10000px] top-0 opacity-0" aria-hidden>
+      <div className="pointer-events-none fixed -left-[10000px] top-0" aria-hidden>
         <style>{`${jameelNooriFontFaceCss()}${RECEIPT_THERMAL_CSS}`}</style>
         {slip}
       </div>
@@ -281,8 +313,8 @@ export function PrintPreview({
             </p>
           ) : null}
           <p className="text-[10px] text-slate-400">
-            Uses Settings → Printer (thermal size). Set your thermal as the OS default for one-click
-            print. F10 toggles split cuts.
+            Thermal prints go straight to Settings → Printer. Each split page is its own cut. F10
+            toggles split cuts.
           </p>
         </div>
       </div>

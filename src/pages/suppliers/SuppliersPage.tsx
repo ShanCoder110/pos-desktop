@@ -14,6 +14,7 @@ import {
   MenuItem,
   MoneyInput,
   PageHead,
+  PAGE_SIZE_ALL,
   Pagination,
   SelectInput,
   Table,
@@ -98,7 +99,6 @@ import {
   SUPPLIER_TABS,
 } from "@/shared/constants/suppliers";
 
-const PAGE = DEFAULT_PAGE_SIZE;
 const SUPPLIER_ADJUST_FORM_ID = "supplier-adjust-form";
 const SUPPLIER_PAY_FORM_ID = "supplier-pay-form";
 const blank: SupplierRow = {
@@ -434,7 +434,7 @@ export function SuppliersPage() {
   const [search, setSearch] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_ALL);
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
   const [counts, setCounts] = useState({ all: 0, active: 0 });
@@ -453,7 +453,7 @@ export function SuppliersPage() {
   const [ledgerRows, setLedgerRows] = useState<SupplierLedgerEntry[]>([]);
   const [ledgerFiltered, setLedgerFiltered] = useState<SupplierLedgerEntry[]>([]);
   const [ledgerPage, setLedgerPage] = useState(1);
-  const [ledgerPageSize, setLedgerPageSize] = useState(PAGE);
+  const [ledgerPageSize, setLedgerPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [ledgerTotal, setLedgerTotal] = useState(0);
   const [ledgerPages, setLedgerPages] = useState(1);
   const [dateRange, setDateRange] = useState<DateRangeFilter>(() =>
@@ -496,16 +496,34 @@ export function SuppliersPage() {
     const controller = new AbortController();
     const guard = createLoadGuard();
     setLoading((current) => ({ ...current, fetching: true }));
-    listMasterRecords("suppliers", { ...filters, page, perPage: pageSize }, controller.signal)
+    const load =
+      pageSize === PAGE_SIZE_ALL
+        ? listAllMasterRecords("suppliers", filters, controller.signal).then((data) => ({
+            rows: data.map(mapSupplier),
+            total: data.length,
+            pages: 1,
+          }))
+        : listMasterRecords(
+            "suppliers",
+            { ...filters, page, perPage: pageSize },
+            controller.signal,
+          ).then((response) => ({
+            rows: response.data.map(mapSupplier),
+            total: response.meta.totalItems,
+            pages: Math.max(1, response.meta.totalPages),
+          }));
+    void load
       .then((response) => {
         if (!guard.isActive()) return;
-        setRows(response.data.map(mapSupplier));
-        setTotal(response.meta.totalItems);
-        setPages(Math.max(1, response.meta.totalPages));
+        setRows(response.rows);
+        setTotal(response.total);
+        setPages(response.pages);
       })
       .catch(() => {
         if (!guard.isActive()) return;
         setRows([]);
+        setTotal(0);
+        setPages(1);
       })
       .finally(() => {
         if (!guard.isActive()) return;
@@ -1248,7 +1266,7 @@ export function SuppliersPage() {
       <ConfirmDialog
         open={Boolean(remove)}
         title="Delete supplier?"
-        body="Blocked if lots still point here."
+        body="Products are kept. Lots and purchase history still show this supplier name."
         onCancel={() => setRemove(null)}
         onConfirm={() => {
           if (!remove) return;

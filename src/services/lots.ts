@@ -21,6 +21,9 @@ export interface LotResponse {
   soldProfit?: number;
   shrinkCost?: number;
   purchasePricePerBase: number;
+  minimumPrice?: number;
+  wholesalePrice?: number;
+  retailPrice?: number;
   receivedDate: string;
   expiryDate?: string | null;
   branchLots?: {
@@ -100,9 +103,9 @@ export function mapLotResponse(lot: LotResponse): ProductLotRow {
     supplierId: lot.supplierId ?? "",
     lotNumber: lot.lotNumber,
     purchasePrice: purchase,
-    minimumPrice: 0,
-    wholesalePrice: 0,
-    retailPrice: 0,
+    minimumPrice: Number(lot.minimumPrice) || 0,
+    wholesalePrice: Number(lot.wholesalePrice) || 0,
+    retailPrice: Number(lot.retailPrice) || 0,
     originalQuantity: lot.originalBaseQuantity,
     remainingQuantity: lot.remainingBaseQuantity,
     damagedQuantity: lot.damagedBaseQuantity,
@@ -162,6 +165,12 @@ export function updateLot(id: string, payload: UpdateLotPayload) {
     method: "PUT",
     body: JSON.stringify(payload),
   }).then(mapLotResponse);
+}
+
+export function deleteLot(id: string) {
+  return apiRequest<{ id: string; deleted: boolean }>(API_ROUTES.lotById(id), {
+    method: "DELETE",
+  });
 }
 
 /** Build receive payload from a ProductLotRow filled by LotForm. */

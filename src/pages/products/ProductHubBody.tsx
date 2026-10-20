@@ -1,5 +1,6 @@
 import { useProductsHub } from "@/pages/products/ProductsLayout";
 import { CategoriesPage } from "@/pages/products/CategoriesPage";
+import { ProductSuppliersPage } from "@/pages/products/ProductSuppliersPage";
 import { ProductsPage } from "@/pages/products/ProductsPage";
 import { LotsPage } from "@/pages/lots/LotsPage";
 import { UnitsPage } from "@/pages/units/UnitsPage";
@@ -11,6 +12,7 @@ export function ProductHubBody() {
   if (section === "lots") return <LotsPage />;
   if (section === "units") return <UnitsPage />;
   if (section === "categories") return <CategoriesPage />;
+  if (section === "suppliers") return <ProductSuppliersPage />;
   if (section === "transfers") return <TransfersPage />;
   if (section === "reorders") return <ReordersPage />;
   return <ProductsPage />;

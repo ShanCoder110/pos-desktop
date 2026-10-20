@@ -194,10 +194,19 @@ export function SearchableSelect({
           disabled && "is-disabled",
           invalid && "is-invalid",
         )}
-        onClick={() => {
-          if (disabled || searchable) return;
-          if (open) setOpen(false);
-          else openMenu("");
+        onMouseDown={(e) => {
+          if (disabled) return;
+          const target = e.target as HTMLElement;
+          // Input / clear / chevron handle themselves; padding/gap clicks open here.
+          if (target.closest("input, button, .ui-combo-clear, .ui-combo-chevron")) return;
+          e.preventDefault();
+          if (open) {
+            setOpen(false);
+            setQ("");
+          } else {
+            openMenu("");
+            inputRef.current?.focus();
+          }
         }}
       >
         {searchable ? (
@@ -226,6 +235,12 @@ export function SearchableSelect({
             data-field={name}
             aria-haspopup="listbox"
             aria-expanded={open}
+            onMouseDown={(e) => {
+              if (disabled) return;
+              e.preventDefault();
+              if (open) setOpen(false);
+              else openMenu("");
+            }}
             onKeyDown={onControlKeyDown}
           >
             <span className={cn("truncate", !selected && "text-muted")}>
@@ -251,7 +266,27 @@ export function SearchableSelect({
               <X size={13} />
             </span>
           ) : null}
-          <ChevronDown size={14} />
+          <button
+            type="button"
+            tabIndex={-1}
+            className="ui-combo-chevron [display:grid] [place-items:center] [width:22px] [height:22px] [margin:0] [padding:0] [border:0] [border-radius:6px] [background:transparent] [color:inherit] [cursor:pointer]"
+            aria-label={open ? "Close" : "Open"}
+            disabled={disabled}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (disabled) return;
+              if (open) {
+                setOpen(false);
+                setQ("");
+              } else {
+                openMenu("");
+                inputRef.current?.focus();
+              }
+            }}
+          >
+            <ChevronDown size={14} />
+          </button>
         </span>
       </div>
       {open

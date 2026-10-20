@@ -205,6 +205,7 @@ export function CreditCustomerPage() {
           invoiceNumber: inv.invoiceNumber,
           date: inv.createdAt,
           productName: item.productName || "Product",
+          productDeleted: Boolean(item.productDeleted),
           sku: item.sku,
           quantity: item.quantity,
           unitName: item.unitName,
@@ -449,7 +450,18 @@ export function CreditCustomerPage() {
                     <Td>{formatTableDateTime(line.date)}</Td>
                     <Td className="font-medium text-ink">#{line.invoiceNumber}</Td>
                     <Td>
-                      <div className="font-medium text-ink">{line.productName}</div>
+                      <div
+                        className={
+                          line.productDeleted ? "font-medium text-danger" : "font-medium text-ink"
+                        }
+                      >
+                        {line.productName}
+                        {line.productDeleted ? (
+                          <span className="ml-1 text-[10px] font-bold uppercase tracking-wide">
+                            deleted
+                          </span>
+                        ) : null}
+                      </div>
                       {line.sku ? (
                         <div className="text-[11px] text-muted">SKU: {line.sku}</div>
                       ) : null}
@@ -811,7 +823,20 @@ export function CreditCustomerPage() {
                 {openInvoice.items.map((item) => (
                   <tr key={item.id}>
                     <Td>
-                      <span className="font-semibold text-ink">{item.productName}</span>
+                      <span
+                        className={
+                          item.productDeleted
+                            ? "font-semibold text-danger"
+                            : "font-semibold text-ink"
+                        }
+                      >
+                        {item.productName}
+                        {item.productDeleted ? (
+                          <span className="ml-1 text-[10px] font-bold uppercase tracking-wide">
+                            deleted
+                          </span>
+                        ) : null}
+                      </span>
                       {item.sku ? (
                         <span className="block text-[10px] text-muted">{item.sku}</span>
                       ) : null}

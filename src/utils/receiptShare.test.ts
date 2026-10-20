@@ -65,7 +65,7 @@ describe("WhatsApp receipt sharing", () => {
     expect(owes).toContain("Previous Balance: Rs 7,501");
     expect(owes).toContain("Total Bill: Rs 7,551");
     expect(owes).toContain("Cash Received: Rs 0");
-    expect(owes).toContain("Remaining: Rs 7,551");
+    expect(owes).toContain("Remaining Amount: Rs 7,551");
     expect(owes).not.toContain(" N:");
     expect(owes).not.toContain(" P:");
     expect(owes.indexOf("Grand Total")).toBeLessThan(owes.indexOf("Previous Balance"));
@@ -96,7 +96,7 @@ describe("WhatsApp receipt sharing", () => {
     expect(advance).toContain("Grand Total (1 item): Rs 10");
     expect(advance).toContain("Previous Balance: Rs 73");
     expect(advance).toContain("Total Bill: Rs 63");
-    expect(advance).toContain("Remaining: Rs 73");
+    expect(advance).toContain("Remaining Amount: Rs 73");
     expect(advance).not.toContain(" P:");
   });
 });

@@ -23,6 +23,7 @@ import {
   ShoppingCart,
   Tags,
   Trash2,
+  Truck,
   Wallet,
   XCircle,
 } from "lucide-react";
@@ -41,6 +42,7 @@ import { createLoadGuard, isAbortError } from "@/utils/async";
 import { hubSideQuery } from "@/utils/hubLoad";
 import { toaster } from "@/components/common";
 import { openLotStockValue } from "@/pages/products/productFifo";
+import { supplierProductCount } from "@/pages/products/hubSupplierFilters";
 import { PRODUCT_COPY } from "@/shared/constants/products";
 import { ensureSession } from "@/services/auth";
 import { listAllProducts } from "@/services/products";
@@ -52,7 +54,7 @@ import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { Outlet } from "react-router-dom";
 
 export type HubSection =
-  "catalog" | "lots" | "units" | "categories" | "transfers" | "reorders" | "low";
+  "catalog" | "lots" | "units" | "categories" | "suppliers" | "transfers" | "reorders" | "low";
 
 export function matchesHealth(row: Product, kpi: ProductHealth) {
   if (kpi === "healthy") return row.stock >= (row.minimumStock ?? 20);
@@ -66,6 +68,7 @@ export function hubSection(tab: string): HubSection {
     tab === "lots" ||
     tab === "units" ||
     tab === "categories" ||
+    tab === "suppliers" ||
     tab === "transfers" ||
     tab === "reorders" ||
     tab === "low"
@@ -97,7 +100,13 @@ type HubCtx = {
   transfers: { id: string; status: string; items: unknown[] }[];
   purchaseOrders: { id: string; status: string; total: number }[];
   loading: { hub: boolean; products: boolean; lots: boolean };
-  refreshHub: (signal?: AbortSignal) => Promise<void>;
+  /** Bumped after lot/product mutations so paginated LotsPage refetches without a full hub skeleton. */
+  listsEpoch: number;
+  bumpListsEpoch: () => void;
+  refreshHub: (
+    signal?: AbortSignal,
+    options?: { quiet?: boolean; guard?: ReturnType<typeof createLoadGuard> },
+  ) => Promise<void>;
   refreshLots: (signal?: AbortSignal) => Promise<void>;
   refreshProducts: (signal?: AbortSignal) => Promise<void>;
 };
@@ -119,6 +128,8 @@ const ProductsHubContext = createContext<HubCtx>({
   transfers: [],
   purchaseOrders: [],
   loading: { hub: true, products: false, lots: false },
+  listsEpoch: 0,
+  bumpListsEpoch: () => undefined,
   refreshHub: async () => undefined,
   refreshLots: async () => undefined,
   refreshProducts: async () => undefined,
@@ -427,6 +438,69 @@ function CategoriesKpis() {
   );
 }
 
+function SuppliersKpis() {
+  const { sectionKpi, setSectionKpi, suppliers, products, lots } = useProductsHub();
+  const used = suppliers.filter((row) => supplierProductCount(row.id, products, lots) > 0).length;
+  const empty = suppliers.length - used;
+  const biggest = suppliers.reduce(
+    (best, row) => {
+      const n = supplierProductCount(row.id, products, lots);
+      return n > best.count ? { name: row.name, count: n } : best;
+    },
+    { name: "—", count: 0 },
+  );
+
+  function toggle(id: string) {
+    setSectionKpi(sectionKpi === id ? null : id);
+  }
+
+  return (
+    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
+      <KpiCard
+        label="Suppliers"
+        value={suppliers.length}
+        hint="Purchase contacts"
+        tone="info"
+        icon={<Truck size={16} />}
+        active={sectionKpi === null}
+        onClick={() => setSectionKpi(null)}
+      />
+      <KpiCard
+        label="In use"
+        value={used}
+        hint="Have products"
+        tone="phantom"
+        icon={<Package size={16} />}
+        active={sectionKpi === "used"}
+        onClick={() => toggle("used")}
+      />
+      <KpiCard
+        label="Empty"
+        value={empty}
+        hint="No products yet"
+        tone="stale"
+        icon={<Box size={16} />}
+        active={sectionKpi === "empty"}
+        onClick={() => toggle("empty")}
+      />
+      <KpiCard
+        label="Products"
+        value={products.length}
+        hint="Assigned SKUs"
+        tone="ok"
+        icon={<Package size={16} />}
+      />
+      <KpiCard
+        label="Largest"
+        value={biggest.count}
+        hint={biggest.name}
+        tone="warn"
+        icon={<Layers size={16} />}
+      />
+    </div>
+  );
+}
+
 function ReordersKpis() {
   const { sectionKpi, setSectionKpi, purchaseOrders } = useProductsHub();
   const pending = purchaseOrders.filter((row) => row.status === "PENDING").length;
@@ -567,6 +641,7 @@ function ProductHubKpis() {
   if (section === "lots") return <LotsKpis />;
   if (section === "units") return <UnitsKpis />;
   if (section === "categories") return <CategoriesKpis />;
+  if (section === "suppliers") return <SuppliersKpis />;
   if (section === "transfers") return <TransfersKpis />;
   if (section === "reorders") return <ReordersKpis />;
   if (section === "low") return <LowStockKpis />;
@@ -592,6 +667,8 @@ export function ProductsLayout() {
     { id: string; status: string; total: number }[]
   >([]);
   const [loading, setLoading] = useState({ hub: true, products: false, lots: false });
+  const [listsEpoch, setListsEpoch] = useState(0);
+  const bumpListsEpoch = useCallback(() => setListsEpoch((n) => n + 1), []);
 
   const refreshProducts = useCallback(async (signal?: AbortSignal) => {
     setLoading((current) => ({ ...current, products: true }));
@@ -618,9 +695,15 @@ export function ProductsLayout() {
   }, []);
 
   const refreshHub = useCallback(
-    async (signal?: AbortSignal, guard?: ReturnType<typeof createLoadGuard>) => {
+    async (
+      signal?: AbortSignal,
+      options?: { quiet?: boolean; guard?: ReturnType<typeof createLoadGuard> },
+    ) => {
+      const guard = options?.guard;
+      const quiet = options?.quiet ?? false;
       if (guard && !guard.isActive()) return;
-      setLoading((current) => ({ ...current, hub: true }));
+      // quiet: refresh table data in place (no KPI/table skeleton flash).
+      if (!quiet) setLoading((current) => ({ ...current, hub: true }));
       try {
         // Products are required for the catalog. Side queries soft-fail only on
         // 403 (e.g. GET /stock/movements?movementType=ADJUSTMENT for cashiers).
@@ -674,12 +757,13 @@ export function ProductsLayout() {
         setPurchaseOrders(
           poRows.map((row) => ({ id: row.id, status: row.status, total: row.total })),
         );
+        if (quiet) setListsEpoch((n) => n + 1);
       } catch (error) {
         if (isAbortError(error)) return;
         if (guard && !guard.isActive()) return;
         toaster.error(shortError(error, PRODUCT_COPY.loadFailed));
       } finally {
-        if (!guard || guard.isActive()) {
+        if (!quiet && (!guard || guard.isActive())) {
           setLoading((current) => ({ ...current, hub: false }));
         }
       }
@@ -691,7 +775,10 @@ export function ProductsLayout() {
   // useMemo (e.g. `(s) => refreshLots(s).then(...)`) recreated them whenever
   // `lots`/`products` changed and caused child pages to refetch in a loop.
   const refreshHubFn = useCallback(
-    (signal?: AbortSignal) => refreshHub(signal).then(() => undefined),
+    (
+      signal?: AbortSignal,
+      options?: { quiet?: boolean; guard?: ReturnType<typeof createLoadGuard> },
+    ) => refreshHub(signal, options).then(() => undefined),
     [refreshHub],
   );
   const refreshLotsFn = useCallback(
@@ -721,6 +808,8 @@ export function ProductsLayout() {
       transfers,
       purchaseOrders,
       loading,
+      listsEpoch,
+      bumpListsEpoch,
       refreshHub: refreshHubFn,
       refreshLots: refreshLotsFn,
       refreshProducts: refreshProductsFn,
@@ -737,6 +826,8 @@ export function ProductsLayout() {
       transfers,
       purchaseOrders,
       loading,
+      listsEpoch,
+      bumpListsEpoch,
       refreshHubFn,
       refreshLotsFn,
       refreshProductsFn,
@@ -751,7 +842,7 @@ export function ProductsLayout() {
   useEffect(() => {
     const controller = new AbortController();
     const guard = createLoadGuard();
-    void refreshHub(controller.signal, guard);
+    void refreshHub(controller.signal, { guard });
     return () => {
       guard.dispose();
       controller.abort();

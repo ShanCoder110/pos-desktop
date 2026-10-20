@@ -478,7 +478,7 @@ export function TransfersPage() {
           onSavingChange={setCreating}
           onSaved={() => {
             setReloadKey((key) => key + 1);
-            void refreshHub();
+            void refreshHub(undefined, { quiet: true });
           }}
         />
       </Drawer>

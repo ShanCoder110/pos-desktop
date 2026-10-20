@@ -22,6 +22,7 @@ import {
   PRODUCT_FORM_SECTIONS,
   type ProductFormSection,
 } from "@/shared/constants/products";
+import { SUPPLIER_COPY } from "@/shared/constants/suppliers";
 import type { Product, ProductBranchStock, ProductSellUnit } from "@/shared/types";
 import { cn, money, shortError, warrantyDaysOf } from "@/utils/format";
 import { useProductsHub } from "@/pages/products/ProductsLayout";
@@ -225,6 +226,7 @@ export function ProductForm({
   >([]);
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [creatingUnit, setCreatingUnit] = useState(false);
+  const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [sessionBranchId, setSessionBranchId] = useState("");
   const categoryOptions = useMemo(() => {
@@ -238,8 +240,20 @@ export function ProductForm({
     for (const row of [...hubUnits, ...localUnits]) rows.set(row.id, row);
     return [...rows.values()];
   }, [hubUnits, localUnits]);
-  const suppliers = hubSuppliers.length ? hubSuppliers : localSuppliers;
+  const suppliers = useMemo(() => {
+    const rows = new Map<string, { id: string; name: string; isActive: boolean }>();
+    for (const row of [...hubSuppliers, ...localSuppliers]) rows.set(row.id, row);
+    return [...rows.values()];
+  }, [hubSuppliers, localSuppliers]);
   const supplierName = (id: string) => suppliers.find((s) => s.id === id)?.name ?? "";
+  const supplierOptions = useMemo(
+    () =>
+      suppliers
+        .filter((s) => s.isActive)
+        .map((s) => ({ value: s.id, label: s.name }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [suppliers],
+  );
 
   useEffect(() => {
     if (!isNew) return;
@@ -541,13 +555,58 @@ export function ProductForm({
           ? current
           : [...current, { id: created.id, name: created.name }],
       );
-      await refreshHub();
+      await refreshHub(undefined, { quiet: true });
       patch({ category: created.name, categoryId: created.id });
       toaster.success("Category added");
     } catch (error) {
       toaster.error(shortError(error, "Could not add category"));
     } finally {
       setCreatingCategory(false);
+    }
+  }
+
+  async function addSupplier(name: string, selectForLotId?: string) {
+    const trimmed = name.trim();
+    if (!trimmed || creatingSupplier) return;
+    const existing = suppliers.find(
+      (row) => row.name.trim().toLowerCase() === trimmed.toLowerCase(),
+    );
+    if (existing) {
+      if (selectForLotId) {
+        setLotDraft((prev) =>
+          prev.map((row) =>
+            row.id === selectForLotId ? { ...row, supplierId: existing.id } : row,
+          ),
+        );
+      } else {
+        patch({ supplierId: existing.id });
+      }
+      return;
+    }
+    setCreatingSupplier(true);
+    try {
+      const created = await createMasterRecord("suppliers", {
+        name: trimmed,
+        isActive: true,
+      });
+      setLocalSuppliers((current) =>
+        current.some((row) => row.id === created.id)
+          ? current
+          : [...current, { id: created.id, name: created.name, isActive: created.isActive }],
+      );
+      await refreshHub(undefined, { quiet: true });
+      if (selectForLotId) {
+        setLotDraft((prev) =>
+          prev.map((row) => (row.id === selectForLotId ? { ...row, supplierId: created.id } : row)),
+        );
+      } else {
+        patch({ supplierId: created.id });
+      }
+      toaster.success(SUPPLIER_COPY.added);
+    } catch (error) {
+      toaster.error(shortError(error, SUPPLIER_COPY.saveFailed));
+    } finally {
+      setCreatingSupplier(false);
     }
   }
 
@@ -593,7 +652,7 @@ export function ProductForm({
         );
         patch({ sellUnits: deriveAll(updated) });
       }
-      await refreshHub();
+      await refreshHub(undefined, { quiet: true });
       toaster.success("Unit added");
     } catch (error) {
       toaster.error(shortError(error, "Could not add unit"));
@@ -993,7 +1052,7 @@ export function ProductForm({
             expiryDate: lot.expiryDate ? lot.expiryDate.slice(0, 10) : null,
           });
         }
-        if (adjusted.length) await refreshHub();
+        if (adjusted.length) await refreshHub(undefined, { quiet: true });
       } catch (error) {
         toaster.error(shortError(error, PRODUCT_COPY.saveFailed));
         return;
@@ -1278,10 +1337,11 @@ export function ProductForm({
                   value={product.supplierId ?? ""}
                   onChange={(v) => patch({ supplierId: v })}
                   placeholder="Optional"
-                  searchPlaceholder="Type to search"
-                  options={suppliers
-                    .filter((s) => s.isActive)
-                    .map((s) => ({ value: s.id, label: s.name }))}
+                  searchPlaceholder={SUPPLIER_COPY.searchOrAdd}
+                  options={supplierOptions}
+                  disabled={creatingSupplier}
+                  onCreate={(label) => void addSupplier(label)}
+                  createLabel={SUPPLIER_COPY.addInSelect}
                 />
               </Field>
             ) : null}
@@ -1894,11 +1954,12 @@ export function ProductForm({
                             )
                           }
                           placeholder="Choose supplier"
-                          searchPlaceholder="Search suppliers"
-                          options={suppliers
-                            .filter((s) => s.isActive)
-                            .map((s) => ({ value: s.id, label: s.name }))}
+                          searchPlaceholder={SUPPLIER_COPY.searchOrAdd}
+                          options={supplierOptions}
                           clearable={false}
+                          disabled={creatingSupplier}
+                          onCreate={(label) => void addSupplier(label, lot.id)}
+                          createLabel={SUPPLIER_COPY.addInSelect}
                         />
                       </Field>
                       <UnitQtyFields

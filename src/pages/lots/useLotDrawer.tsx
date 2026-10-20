@@ -82,7 +82,7 @@ export function useLotDrawer() {
     setProducts,
     categories,
     units,
-    refreshHub,
+    bumpListsEpoch,
     refreshLots,
     refreshProducts,
   } = useProductsHub();
@@ -181,6 +181,45 @@ export function useLotDrawer() {
       wholesalePrice: product?.wholesale ?? lot.wholesalePrice,
       retailPrice: product?.retail ?? lot.retailPrice,
     });
+  }
+
+  async function createSupplierQuick(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const existing = supplierRows.find(
+      (row) => row.name.trim().toLowerCase() === trimmed.toLowerCase(),
+    );
+    if (existing) {
+      setEdit((current) => (current ? { ...current, supplierId: existing.id } : current));
+      return;
+    }
+    setLoading((current) => ({ ...current, nested: true }));
+    try {
+      const created = await createMasterRecord("suppliers", {
+        name: trimmed,
+        isActive: true,
+      });
+      const row: SupplierRow = {
+        id: created.id,
+        name: created.name,
+        phone: created.phone ?? "",
+        email: created.email ?? "",
+        address: created.address ?? "",
+        cityId: created.cityId ?? "",
+        cityName: created.cityName ?? "",
+        notes: created.notes ?? "",
+        currentBalance: created.balance ?? 0,
+        isActive: created.isActive,
+      };
+      setSupplierRows((current) => [...current, row]);
+      setApiSupplierIds((prev) => new Set([...prev, created.id]));
+      setEdit((current) => (current ? { ...current, supplierId: created.id } : current));
+      toaster.success(SUPPLIER_COPY.added);
+    } catch (error) {
+      toaster.error(shortError(error, SUPPLIER_COPY.saveFailed));
+    } finally {
+      setLoading((current) => ({ ...current, nested: false }));
+    }
   }
 
   async function saveNestedSupplier(values: SupplierFormValues) {
@@ -362,14 +401,15 @@ export function useLotDrawer() {
         if (sellUnits?.length) {
           await persistSellUnits(lot.productId, sellUnits);
         }
+        // Refresh products + lots in place (no hub skeleton). Bump epoch so LotsPage table refetches.
         await Promise.all([refreshLots(), refreshProducts()]);
+        bumpListsEpoch();
         toaster.success(
           created.purchaseOrderNumber
             ? linkedPoToast(created.purchaseOrderNumber, created.purchaseOrderStatus)
             : "Lot added",
         );
         closeLotDrawer();
-        void refreshHub();
       } catch (error) {
         toaster.error(error instanceof Error ? error.message : "Could not receive lot");
       } finally {
@@ -417,9 +457,9 @@ export function useLotDrawer() {
         await persistSellUnits(next.productId, sellUnits);
       }
       await Promise.all([refreshLots(), refreshProducts()]);
+      bumpListsEpoch();
       toaster.success("Lot updated");
       closeLotDrawer();
-      void refreshHub();
     } catch (error) {
       toaster.error(shortError(error, "Could not update lot"));
     } finally {
@@ -462,11 +502,13 @@ export function useLotDrawer() {
               setNestedSupplier(blankSupplierRow());
               setNested("supplier");
             }}
+            onCreateSupplier={(name) => void createSupplierQuick(name)}
             onOpenAddProduct={() => {
               setNestedProduct(blankProduct());
               setNested("product");
             }}
             suspendShortcuts={Boolean(nested)}
+            creatingSupplier={loading.nested}
             onChange={setEdit}
             onSave={saveLot}
             onClose={closeLotDrawer}
@@ -535,6 +577,7 @@ export function useLotDrawer() {
     try {
       await unlinkPurchaseOrderLot(lot.purchaseOrderId, lot.id);
       await refreshLots();
+      bumpListsEpoch();
       toaster.success(REORDER_COPY.unlinked);
     } catch (error) {
       toaster.error(shortError(error, REORDER_COPY.unlinkFailed));

@@ -77,7 +77,7 @@ const RECEIPT_LABELS = {
     previous: "Previous Balance",
     totalBill: "Total Bill",
     cashReceived: "Cash Received",
-    remaining: "Remaining",
+    remaining: "Remaining Amount",
     change: "Change",
     page: "Page",
     continued: "Continued",
@@ -180,6 +180,7 @@ export function InvoiceThermalReceipt({
   const due = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
   const remainingAmount = customer.isWalking ? due : totalBill - paid;
+  const showRemaining = customer.isWalking ? due > 0.009 || change > 0.009 : true;
   const now = new Date();
   const dateLabel = isUrdu
     ? `${now.toLocaleDateString("en-GB", {
@@ -395,7 +396,7 @@ export function InvoiceThermalReceipt({
           </div>
         ) : null}
 
-        <div className="receipt-divider-solid" />
+        {showTotalsFooter && showPreviousBalance ? <div className="receipt-divider-solid" /> : null}
 
         {isSplit ? (
           <div className="receipt-grand-total-row">
@@ -409,44 +410,52 @@ export function InvoiceThermalReceipt({
         {showTotalsFooter ? (
           <>
             <div className="receipt-totals">
-              <div className="receipt-grand-total-row">
-                <span>
-                  {labels.grandTotal} ({totalItems} {itemsWord(totalItems)})
-                </span>
-                <span>Rs. {formatRs(total)}</span>
-              </div>
+              {showPreviousBalance ? (
+                <div className="receipt-grand-total-row">
+                  <span>
+                    {labels.grandTotal} ({totalItems} {itemsWord(totalItems)})
+                  </span>
+                  <span>Rs. {formatRs(total)}</span>
+                </div>
+              ) : null}
               {showPreviousBalance ? (
                 <div className="receipt-total-row receipt-bold">
                   <span>{labels.previous}</span>
                   <span>Rs. {formatRs(Math.abs(balanceBefore))}</span>
                 </div>
               ) : null}
-              {showPreviousBalance ? (
-                <div className="receipt-total-row receipt-bold">
-                  <span>{labels.totalBill}</span>
-                  <span>Rs. {formatRs(Math.abs(totalBill))}</span>
-                </div>
-              ) : null}
+              <div className="receipt-total-bill">
+                <span>
+                  {showPreviousBalance || !isUrdu ? labels.totalBill : labels.grandTotal}
+                  {showPreviousBalance ? "" : ` (${totalItems} ${itemsWord(totalItems)})`}
+                </span>
+                <span>Rs. {formatRs(Math.abs(totalBill))}</span>
+              </div>
               <div className="receipt-total-row receipt-bold">
                 <span>{labels.cashReceived}</span>
                 <span>Rs. {formatRs(paid)}</span>
               </div>
             </div>
 
-            <div className="receipt-divider" />
-
-            <div className="receipt-totals">
-              <div className="receipt-grand-total-row">
-                <span>{labels.remaining}</span>
-                <span>Rs. {formatRs(Math.abs(remainingAmount))}</span>
-              </div>
-              {customer.isWalking && change > 0.009 ? (
-                <div className="receipt-total-row receipt-bold">
-                  <span>{labels.change}</span>
-                  <span>Rs. {formatRs(change)}</span>
+            {showRemaining ? (
+              <>
+                <div className="receipt-divider" />
+                <div className="receipt-totals">
+                  {(customer.isWalking ? due > 0.009 : true) ? (
+                    <div className="receipt-grand-total-row">
+                      <span>{labels.remaining}</span>
+                      <span>Rs. {formatRs(Math.abs(remainingAmount))}</span>
+                    </div>
+                  ) : null}
+                  {customer.isWalking && change > 0.009 ? (
+                    <div className="receipt-total-row receipt-bold">
+                      <span>{labels.change}</span>
+                      <span>Rs. {formatRs(change)}</span>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
+              </>
+            ) : null}
 
             <div className="receipt-divider" />
 

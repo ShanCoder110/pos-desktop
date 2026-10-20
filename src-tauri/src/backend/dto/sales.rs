@@ -80,6 +80,8 @@ pub struct InvoiceItemResponse {
     pub product_id: String,
     pub product_unit_id: Option<String>,
     pub product_name: String,
+    /// True when the catalog product was soft-deleted after this sale.
+    pub product_deleted: bool,
     pub sku: String,
     pub unit_name: String,
     pub displayed_quantity: f64,

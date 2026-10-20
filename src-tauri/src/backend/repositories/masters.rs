@@ -328,20 +328,114 @@ impl MasterRepository {
         id: Uuid,
         deleted_by: Option<Uuid>,
     ) -> Result<bool, AppError> {
+        let transaction = database.begin().await?;
+        if matches!(kind, MasterKind::Category) {
+            prepare_category_delete(&transaction, id).await?;
+        }
+        // Suppliers: soft-delete contact only — products and lots stay (history keeps supplier_id).
         let sql = format!(
             "UPDATE {} SET is_active = 0, deleted_at = ?, deleted_by = ?, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
             kind.table()
         );
         let now = chrono::Utc::now();
-        let result = database
+        let result = transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
                 sql,
                 [now.into(), deleted_by.into(), now.into(), id.into()],
             ))
             .await?;
-        Ok(result.rows_affected() > 0)
+        let deleted = result.rows_affected() > 0;
+        transaction.commit().await?;
+        Ok(deleted)
     }
+}
+
+/// Move products off this category onto Other, then allow soft-delete. Never deletes products.
+async fn prepare_category_delete(
+    database: &impl ConnectionTrait,
+    category_id: Uuid,
+) -> Result<(), AppError> {
+    use crate::backend::constants::{ERROR_CATEGORY_NOT_FOUND, ERROR_CATEGORY_OTHER_PROTECTED};
+
+    #[derive(Debug, FromQueryResult)]
+    struct NameRow {
+        name: String,
+    }
+    let row = NameRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT name FROM product_categories WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+        [category_id.into()],
+    ))
+    .one(database)
+    .await?
+    .ok_or(AppError::NotFound(ERROR_CATEGORY_NOT_FOUND))?;
+    if row.name.trim().eq_ignore_ascii_case("other") {
+        return Err(AppError::Validation(ERROR_CATEGORY_OTHER_PROTECTED.into()));
+    }
+
+    let other_id = ensure_other_category(database).await?;
+    if other_id == category_id {
+        return Err(AppError::Validation(ERROR_CATEGORY_OTHER_PROTECTED.into()));
+    }
+    let now = chrono::Utc::now();
+    database
+        .execute_raw(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "UPDATE products SET category_id = ?, version = version + 1, updated_at = ? WHERE category_id = ? AND deleted_at IS NULL",
+            [other_id.into(), now.into(), category_id.into()],
+        ))
+        .await?;
+    Ok(())
+}
+
+async fn ensure_other_category(database: &impl ConnectionTrait) -> Result<Uuid, AppError> {
+    use crate::backend::constants::OTHER_PRODUCT_CATEGORY_ID;
+
+    #[derive(Debug, FromQueryResult)]
+    struct IdRow {
+        id: Uuid,
+    }
+    if let Some(row) = IdRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT id FROM product_categories WHERE deleted_at IS NULL AND lower(name) = 'other' LIMIT 1",
+        [],
+    ))
+    .one(database)
+    .await?
+    {
+        return Ok(row.id);
+    }
+    // Restore soft-deleted Other if present.
+    if let Some(row) = IdRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT id FROM product_categories WHERE lower(name) = 'other' ORDER BY deleted_at DESC LIMIT 1",
+        [],
+    ))
+    .one(database)
+    .await?
+    {
+        let now = chrono::Utc::now();
+        database
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE product_categories SET is_active = 1, deleted_at = NULL, deleted_by = NULL, version = version + 1, updated_at = ? WHERE id = ?",
+                [now.into(), row.id.into()],
+            ))
+            .await?;
+        return Ok(row.id);
+    }
+    let other_id = Uuid::parse_str(OTHER_PRODUCT_CATEGORY_ID)
+        .map_err(|_| AppError::Internal("Invalid OTHER_PRODUCT_CATEGORY_ID constant.".into()))?;
+    let now = chrono::Utc::now();
+    database
+        .execute_raw(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "INSERT INTO product_categories (id, name, description, is_active, version, created_at, updated_at) VALUES (?, 'Other', 'Products without a selected category', 1, 1, ?, ?)",
+            [other_id.into(), now.into(), now.into()],
+        ))
+        .await?;
+    Ok(other_id)
 }
 
 async fn ensure_unique_party_phone(

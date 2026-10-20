@@ -143,6 +143,9 @@ pub struct LotResponse {
     /// Shrinkage at lot FIFO cost (qty × purchase_price_per_base).
     pub shrink_cost: f64,
     pub purchase_price_per_base: f64,
+    pub minimum_price: f64,
+    pub wholesale_price: f64,
+    pub retail_price: f64,
     pub received_date: String,
     pub expiry_date: Option<String>,
     pub branch_lots: Vec<BranchLotResponse>,

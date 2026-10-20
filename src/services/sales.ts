@@ -13,6 +13,8 @@ export interface InvoiceItemResponse {
   productId: string;
   productUnitId?: string | null;
   productName: string;
+  /** Catalog product was soft-deleted after this sale. */
+  productDeleted?: boolean;
   sku: string;
   unitName: string;
   displayedQuantity: number;
@@ -101,6 +103,7 @@ export function mapInvoice(row: InvoiceResponse): InvoiceRow {
     productId: item.productId,
     productUnitId: item.productUnitId ?? undefined,
     productName: item.productName,
+    productDeleted: Boolean(item.productDeleted),
     sku: item.sku,
     unitName: item.unitName,
     priceMode: item.priceMode,

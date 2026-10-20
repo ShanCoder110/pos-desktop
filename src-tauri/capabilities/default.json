@@ -9,6 +9,8 @@
     "process:default",
     "updater:default",
     "allow-list-system-printers",
-    "allow-cut-thermal-paper"
+    "allow-cut-thermal-paper",
+    "allow-print-thermal-receipt",
+    "allow-print-thermal-test"
   ]
 }

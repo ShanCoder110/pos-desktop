@@ -45,6 +45,9 @@ struct LotRow {
     remaining_base_quantity: Decimal,
     damaged_base_quantity: Decimal,
     purchase_price_per_base: Decimal,
+    minimum_price: Decimal,
+    wholesale_price: Decimal,
+    retail_price: Decimal,
     received_date: chrono::NaiveDate,
     expiry_date: Option<chrono::NaiveDate>,
     purchase_order_id: Option<Uuid>,
@@ -155,7 +158,7 @@ impl LotRepository {
         };
         let direction = query.page.sort_direction.unwrap_or_default().sql();
         let sql = format!(
-            "SELECT pl.id, pl.product_id, p.name AS product_name, pl.supplier_id, pl.lot_number, pl.source_type, pl.original_base_quantity, pl.remaining_base_quantity, pl.damaged_base_quantity, CAST(pl.purchase_price_per_base AS REAL) AS purchase_price_per_base, pl.received_date, pl.expiry_date, po.id AS purchase_order_id, po.order_number AS purchase_order_number, po.status AS purchase_order_status, pl.created_at, pl.updated_at FROM product_lots pl JOIN products p ON p.id = pl.product_id LEFT JOIN goods_receipt_items gri ON gri.id = pl.goods_receipt_item_id LEFT JOIN purchase_order_items poi ON poi.id = gri.purchase_order_item_id LEFT JOIN purchase_orders po ON po.id = poi.purchase_order_id WHERE {conditions} ORDER BY {sort} {direction}, pl.id ASC LIMIT ? OFFSET ?"
+            "SELECT pl.id, pl.product_id, p.name AS product_name, pl.supplier_id, pl.lot_number, pl.source_type, pl.original_base_quantity, pl.remaining_base_quantity, pl.damaged_base_quantity, CAST(pl.purchase_price_per_base AS REAL) AS purchase_price_per_base, CAST(pl.minimum_price AS REAL) AS minimum_price, CAST(pl.wholesale_price AS REAL) AS wholesale_price, CAST(pl.retail_price AS REAL) AS retail_price, pl.received_date, pl.expiry_date, po.id AS purchase_order_id, po.order_number AS purchase_order_number, po.status AS purchase_order_status, pl.created_at, pl.updated_at FROM product_lots pl JOIN products p ON p.id = pl.product_id LEFT JOIN goods_receipt_items gri ON gri.id = pl.goods_receipt_item_id LEFT JOIN purchase_order_items poi ON poi.id = gri.purchase_order_item_id LEFT JOIN purchase_orders po ON po.id = poi.purchase_order_id WHERE {conditions} ORDER BY {sort} {direction}, pl.id ASC LIMIT ? OFFSET ?"
         );
         let mut page_values = values;
         page_values.push((query.page.per_page as i64).into());
@@ -177,7 +180,7 @@ impl LotRepository {
         let query = LotListQuery::default();
         let (conditions, values) = build_conditions(&query, Some(id))?;
         let sql = format!(
-            "SELECT pl.id, pl.product_id, p.name AS product_name, pl.supplier_id, pl.lot_number, pl.source_type, pl.original_base_quantity, pl.remaining_base_quantity, pl.damaged_base_quantity, CAST(pl.purchase_price_per_base AS REAL) AS purchase_price_per_base, pl.received_date, pl.expiry_date, po.id AS purchase_order_id, po.order_number AS purchase_order_number, po.status AS purchase_order_status, pl.created_at, pl.updated_at FROM product_lots pl JOIN products p ON p.id = pl.product_id LEFT JOIN goods_receipt_items gri ON gri.id = pl.goods_receipt_item_id LEFT JOIN purchase_order_items poi ON poi.id = gri.purchase_order_item_id LEFT JOIN purchase_orders po ON po.id = poi.purchase_order_id WHERE {conditions} LIMIT 1"
+            "SELECT pl.id, pl.product_id, p.name AS product_name, pl.supplier_id, pl.lot_number, pl.source_type, pl.original_base_quantity, pl.remaining_base_quantity, pl.damaged_base_quantity, CAST(pl.purchase_price_per_base AS REAL) AS purchase_price_per_base, CAST(pl.minimum_price AS REAL) AS minimum_price, CAST(pl.wholesale_price AS REAL) AS wholesale_price, CAST(pl.retail_price AS REAL) AS retail_price, pl.received_date, pl.expiry_date, po.id AS purchase_order_id, po.order_number AS purchase_order_number, po.status AS purchase_order_status, pl.created_at, pl.updated_at FROM product_lots pl JOIN products p ON p.id = pl.product_id LEFT JOIN goods_receipt_items gri ON gri.id = pl.goods_receipt_item_id LEFT JOIN purchase_order_items poi ON poi.id = gri.purchase_order_item_id LEFT JOIN purchase_orders po ON po.id = poi.purchase_order_id WHERE {conditions} LIMIT 1"
         );
         let rows = LotRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
@@ -187,6 +190,41 @@ impl LotRepository {
         .all(database)
         .await?;
         Ok(hydrate(database, rows).await?.into_iter().next())
+    }
+
+    /// Soft-delete a lot. Remaining qty drops out of product stock; catalog prices
+    /// fall back to the previous open lot (FIFO with remaining, else newest open).
+    pub async fn soft_delete(
+        transaction: &DatabaseTransaction,
+        id: Uuid,
+    ) -> Result<Uuid, AppError> {
+        #[derive(Debug, FromQueryResult)]
+        struct LotProductRow {
+            product_id: Uuid,
+        }
+        let row = LotProductRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "SELECT product_id FROM product_lots WHERE id = ? AND deleted_at IS NULL LIMIT 1",
+            [id.into()],
+        ))
+        .one(transaction)
+        .await?
+        .ok_or(AppError::NotFound(ERROR_LOT_NOT_FOUND))?;
+        let product_id = row.product_id;
+        let now = now_utc();
+        let updated = transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE product_lots SET deleted_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+                [now.into(), now.into(), id.into()],
+            ))
+            .await?
+            .rows_affected();
+        if updated == 0 {
+            return Err(AppError::NotFound(ERROR_LOT_NOT_FOUND));
+        }
+        restore_product_prices_after_lot_delete(transaction, product_id, now).await?;
+        Ok(id)
     }
 
     pub async fn update(
@@ -295,13 +333,16 @@ impl LotRepository {
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "UPDATE product_lots SET supplier_id = ?, original_base_quantity = ?, remaining_base_quantity = ?, damaged_base_quantity = ?, purchase_price_per_base = COALESCE(?, purchase_price_per_base), expiry_date = CASE WHEN ? THEN ? ELSE expiry_date END, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+                "UPDATE product_lots SET supplier_id = ?, original_base_quantity = ?, remaining_base_quantity = ?, damaged_base_quantity = ?, purchase_price_per_base = COALESCE(?, purchase_price_per_base), minimum_price = COALESCE(?, minimum_price), wholesale_price = COALESCE(?, wholesale_price), retail_price = COALESCE(?, retail_price), expiry_date = CASE WHEN ? THEN ? ELSE expiry_date END, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
                 [
                     supplier_id.into(),
                     next_original.into(),
                     next_remaining.into(),
                     next_damaged.into(),
                     next_cost.into(),
+                    request.min.map(money_value).into(),
+                    request.wholesale.map(money_value).into(),
+                    request.retail.map(money_value).into(),
                     i64::from(next_expiry.is_some()).into(),
                     next_expiry.flatten().into(),
                     now.into(),
@@ -416,7 +457,7 @@ impl LotRepository {
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?)",
+                "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, minimum_price, wholesale_price, retail_price, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, ?)",
                 [
                     lot_id.into(),
                     product_id.into(),
@@ -427,6 +468,9 @@ impl LotRepository {
                     remaining.into(),
                     damaged.into(),
                     cost.into(),
+                    money_value(request.min.unwrap_or(Decimal::ZERO)).into(),
+                    money_value(request.wholesale.unwrap_or(Decimal::ZERO)).into(),
+                    money_value(request.retail.unwrap_or(Decimal::ZERO)).into(),
                     received_date.into(),
                     expiry_date.into(),
                     context.user_id.into(),
@@ -738,6 +782,9 @@ async fn hydrate(
                 sold_profit: decimal(metric.profit),
                 shrink_cost: decimal(shrink_cost),
                 purchase_price_per_base: decimal(row.purchase_price_per_base),
+                minimum_price: decimal(row.minimum_price),
+                wholesale_price: decimal(row.wholesale_price),
+                retail_price: decimal(row.retail_price),
                 received_date: row.received_date.to_string(),
                 expiry_date: row.expiry_date.map(|value| value.to_string()),
                 branch_lots: by_lot.remove(&row.id).unwrap_or_default(),
@@ -905,6 +952,76 @@ async fn lot_sale_metrics_batch(
 
 fn decimal(value: Decimal) -> f64 {
     value.to_f64().unwrap_or_default()
+}
+
+/// After a lot is soft-deleted, point base unit prices at the previous open lot.
+/// Prefer FIFO open (remaining > 0); else newest remaining open lot; else cost = 0.
+async fn restore_product_prices_after_lot_delete(
+    transaction: &DatabaseTransaction,
+    product_id: Uuid,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), AppError> {
+    #[derive(Debug, FromQueryResult)]
+    struct PrevPrices {
+        purchase_price_per_base: Decimal,
+        minimum_price: Decimal,
+        wholesale_price: Decimal,
+        retail_price: Decimal,
+    }
+    let previous = PrevPrices::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT purchase_price_per_base, minimum_price, wholesale_price, retail_price
+         FROM product_lots
+         WHERE product_id = ? AND deleted_at IS NULL
+         ORDER BY
+           CASE WHEN remaining_base_quantity > 0 THEN 0 ELSE 1 END,
+           CASE WHEN remaining_base_quantity > 0 THEN received_date END ASC,
+           CASE WHEN remaining_base_quantity > 0 THEN created_at END ASC,
+           received_date DESC,
+           created_at DESC
+         LIMIT 1",
+        [product_id.into()],
+    ))
+    .one(transaction)
+    .await?;
+
+    let (cost, min, wholesale, retail) = match previous {
+        Some(row) => (
+            money_value(row.purchase_price_per_base),
+            money_value(row.minimum_price),
+            money_value(row.wholesale_price),
+            money_value(row.retail_price),
+        ),
+        None => (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO),
+    };
+
+    // Always restore cost from previous open lot (0 if none). Sell prices restore
+    // when the previous lot stored them; legacy lots may only have cost.
+    if min > Decimal::ZERO || wholesale > Decimal::ZERO || retail > Decimal::ZERO {
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE product_units SET cost_reference = ?, minimum_price = ?, wholesale_price = ?, retail_price = ?, updated_at = ? WHERE product_id = ? AND is_base = 1 AND deleted_at IS NULL",
+                [
+                    cost.into(),
+                    min.into(),
+                    wholesale.into(),
+                    retail.into(),
+                    now.into(),
+                    product_id.into(),
+                ],
+            ))
+            .await?;
+    } else {
+        transaction
+            .execute_raw(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "UPDATE product_units SET cost_reference = ?, updated_at = ? WHERE product_id = ? AND is_base = 1 AND deleted_at IS NULL",
+                [cost.into(), now.into(), product_id.into()],
+            ))
+            .await?;
+    }
+    Ok(())
 }
 
 async fn apply_product_unit_prices(

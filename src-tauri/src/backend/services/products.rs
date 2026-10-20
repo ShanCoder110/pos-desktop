@@ -541,6 +541,8 @@ async fn insert_opening_stock(
     opening: &OpeningStockInput,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), AppError> {
+    use sea_orm::{DbBackend, FromQueryResult, Statement};
+
     let branch_id = parse_uuid(&opening.branch_id, "openingStock.branchId")?;
     let supplier_id = opening
         .supplier_id
@@ -553,6 +555,24 @@ async fn insert_opening_stock(
         .as_deref()
         .map(|value| parse_date(value, ERROR_INVALID_EXPIRY_DATE))
         .transpose()?;
+    #[derive(Debug, FromQueryResult)]
+    struct BaseSellPrices {
+        minimum_price: Decimal,
+        wholesale_price: Decimal,
+        retail_price: Decimal,
+    }
+    let sell = BaseSellPrices::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT minimum_price, wholesale_price, retail_price FROM product_units WHERE product_id = ? AND is_base = 1 AND deleted_at IS NULL LIMIT 1",
+        [product_id.into()],
+    ))
+    .one(transaction)
+    .await?
+    .unwrap_or(BaseSellPrices {
+        minimum_price: Decimal::ZERO,
+        wholesale_price: Decimal::ZERO,
+        retail_price: Decimal::ZERO,
+    });
     let lot_id = Uuid::new_v4();
     let lot_number =
         SequenceRepository::next(transaction, SEQUENCE_KIND_LOT, DEFAULT_LOT_PREFIX).await?;
@@ -570,6 +590,9 @@ async fn insert_opening_stock(
             remaining_base_quantity: Set(opening.quantity),
             damaged_base_quantity: Set(Decimal::ZERO),
             purchase_price_per_base: Set(opening.cost),
+            minimum_price: Set(sell.minimum_price),
+            wholesale_price: Set(sell.wholesale_price),
+            retail_price: Set(sell.retail_price),
             received_date: Set(received_date),
             expiry_date: Set(expiry_date),
             created_by: Set(created_by),

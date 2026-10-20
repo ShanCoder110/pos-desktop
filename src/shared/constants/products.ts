@@ -1,4 +1,4 @@
-import { QUERY_CATEGORY_ID, QUERY_TAB } from "@/shared/constants/query";
+import { QUERY_CATEGORY_ID, QUERY_SUPPLIER_ID, QUERY_TAB } from "@/shared/constants/query";
 import { routes } from "@/shared/constants/routes";
 
 export const PRODUCT_TAB_ALL = "all";
@@ -8,6 +8,7 @@ export const PRODUCT_SECTION_TABS = [
   { id: "lots", label: "Lots" },
   { id: "units", label: "Units" },
   { id: "categories", label: "Categories" },
+  { id: "suppliers", label: "Suppliers" },
   { id: "transfers", label: "Transfers" },
   { id: "reorders", label: "Reorders" },
   { id: "low", label: "Low stock" },
@@ -59,6 +60,10 @@ export function productsHref(tab: ProductSectionTab = PRODUCT_TAB_ALL) {
 
 export function productsCategoryHref(categoryId: string) {
   return `${routes.products}?${QUERY_TAB}=${PRODUCT_TAB_ALL}&${QUERY_CATEGORY_ID}=${encodeURIComponent(categoryId)}`;
+}
+
+export function productsSupplierHref(supplierId: string) {
+  return `${routes.products}?${QUERY_TAB}=${PRODUCT_TAB_ALL}&${QUERY_SUPPLIER_ID}=${encodeURIComponent(supplierId)}`;
 }
 
 export const PRODUCT_INSIGHT_METRICS = [
@@ -134,6 +139,24 @@ export const CATEGORY_COPY = {
   saveFailed: "Could not save category",
   deleteFailed: "Could not delete category",
   loadFailed: "Could not load categories",
+  deleteTitle: "Delete category?",
+  deleteBody: "Products are kept. Any products in this category move to Other.",
+} as const;
+
+export const HUB_SUPPLIER_COPY = {
+  added: "Supplier added",
+  saved: "Supplier saved",
+  deleted: "Supplier deleted",
+  deletedMany: "Suppliers deleted",
+  saveFailed: "Could not save supplier",
+  deleteFailed: "Could not delete supplier",
+  loadFailed: "Could not load suppliers",
+  searchPlaceholder: "Search suppliers",
+  addAction: "Add supplier",
+  viewProducts: "View products",
+  backToSuppliers: "Back to suppliers",
+  deleteTitle: "Delete supplier?",
+  deleteBody: "Products are kept. Lots and purchase history still show this supplier name.",
 } as const;
 
 export const PRODUCT_COPY = {
@@ -143,9 +166,11 @@ export const PRODUCT_COPY = {
   salesProfit: "Sales profit",
   added: "Product added",
   saved: "Product saved",
-  deleted: "Product deleted",
+  deleted: "Product moved to trash",
+  deleteConfirm: "Moved to trash with its lots. Past invoices keep the name (shown as deleted).",
   saveFailed: "Could not save product",
   deleteFailed: "Could not delete product",
+  deleteBlockedClaims: "Clear warranty claims before deleting.",
   loadFailed: "Could not load products",
   categoryRequired: "Choose a category",
   unitRequired: "Choose a unit",
@@ -237,6 +262,13 @@ export const LOT_COPY = {
   editAction: "Edit",
   editDescription: "Adjust quantities, supplier, and prices",
   editDeniedCashier: "Only owners and managers can edit lots",
+  deleteTitle: "Delete lot?",
+  deleteBody:
+    "Remaining stock leaves this product. Cost and prices fall back to the previous open lot if any. Sale history for this lot stays.",
+  deleteConfirm: "Delete lot",
+  deleted: "Lot deleted",
+  deleteFailed: "Could not delete lot",
+  deleteDeniedCashier: "Only owners and managers can delete lots",
   branchStockTitle: "Branch stock",
   branchStockHint: "Quantity left in each branch for this lot",
   branchSplitTitle: "Split between branches",
@@ -304,6 +336,11 @@ export const LOT_TABLE_COLUMNS = [
 ];
 
 export const CATEGORY_TABLE_COLUMNS = [
+  { id: "name", label: "Name", locked: true },
+  { id: "products", label: "Products" },
+];
+
+export const HUB_SUPPLIER_TABLE_COLUMNS = [
   { id: "name", label: "Name", locked: true },
   { id: "products", label: "Products" },
 ];

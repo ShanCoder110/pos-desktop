@@ -177,7 +177,7 @@ export function UnitsPage() {
       if (isNew) await createMasterRecord("units", payload);
       else await updateMasterRecord("units", edit.id, payload);
       await reloadUnits();
-      await refreshHub();
+      await refreshHub(undefined, { quiet: true });
       setEdit(null);
       toaster.success(isNew ? "Unit added" : "Unit saved");
     } catch (error) {
@@ -194,7 +194,7 @@ export function UnitsPage() {
       await Promise.all(ids.map((id) => deleteMasterRecord("units", id)));
       setRows((current) => current.filter((row) => !ids.includes(row.id)));
       setSelected((current) => current.filter((id) => !ids.includes(id)));
-      await refreshHub();
+      await refreshHub(undefined, { quiet: true });
       toaster.success(ids.length === 1 ? "Unit deleted" : "Units deleted");
     } catch (error) {
       toaster.error(shortError(error, "Could not delete unit"));

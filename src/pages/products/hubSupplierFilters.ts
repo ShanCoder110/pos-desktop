@@ -1,4 +1,5 @@
-import type { SupplierRow } from "@/shared/domain/types";
+import type { ProductLotRow, SupplierRow } from "@/shared/domain/types";
+import type { Product } from "@/shared/types";
 
 export type HubSupplier = {
   id: string;
@@ -7,6 +8,24 @@ export type HubSupplier = {
   cityId?: string | null;
   cityName?: string | null;
 };
+
+/** Product linked via current FIFO supplier or any received lot from that supplier. */
+export function productBelongsToSupplier(
+  product: Product,
+  supplierId: string,
+  lots: ProductLotRow[],
+) {
+  if (product.supplierId === supplierId) return true;
+  return lots.some((lot) => lot.productId === product.id && lot.supplierId === supplierId);
+}
+
+export function supplierProductCount(
+  supplierId: string,
+  products: Product[],
+  lots: ProductLotRow[],
+) {
+  return products.filter((product) => productBelongsToSupplier(product, supplierId, lots)).length;
+}
 
 export function mergeHubSuppliers(
   suppliers: HubSupplier[],

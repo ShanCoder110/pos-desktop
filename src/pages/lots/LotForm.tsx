@@ -33,6 +33,7 @@ import { listAllBranches } from "@/services/org";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { LOT_COPY } from "@/shared/constants/products";
 import type { ProductLotRow, SupplierRow } from "@/shared/domain/types";
+import { SUPPLIER_COPY } from "@/shared/constants/suppliers";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { cn } from "@/utils/format";
 import { resolveStockBranchId } from "@/utils/stockBranch";
@@ -144,9 +145,11 @@ export function LotForm({
   unitCatalog = [],
   isNew,
   onOpenAddSupplier,
+  onCreateSupplier,
   onOpenAddProduct,
   onAddProductUnit,
   suspendShortcuts = false,
+  creatingSupplier = false,
   onChange,
   onSave,
   onClose,
@@ -158,9 +161,11 @@ export function LotForm({
   unitCatalog?: { id: string; name: string; symbol: string }[];
   isNew: boolean;
   onOpenAddSupplier: () => void;
+  onCreateSupplier?: (name: string) => void;
   onOpenAddProduct: () => void;
   onAddProductUnit?: (productId: string, unit: ProductSellUnit) => Promise<void>;
   suspendShortcuts?: boolean;
+  creatingSupplier?: boolean;
   onChange: (lot: ProductLotRow) => void;
   onSave: (lot: ProductLotRow, sellUnits?: ProductSellUnit[]) => void;
   onClose: () => void;
@@ -698,10 +703,13 @@ export function LotForm({
                     value={lot.supplierId}
                     onChange={applySupplier}
                     placeholder="Choose supplier"
-                    searchPlaceholder="Search suppliers"
+                    searchPlaceholder={SUPPLIER_COPY.searchOrAdd}
                     clearable={false}
                     invalid={error === "supplier"}
                     options={supplierOptions}
+                    disabled={creatingSupplier}
+                    onCreate={onCreateSupplier}
+                    createLabel={SUPPLIER_COPY.addInSelect}
                   />
                 </Field>
                 {isNew ? (

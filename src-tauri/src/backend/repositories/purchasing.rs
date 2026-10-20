@@ -455,7 +455,7 @@ impl PurchasingRepository {
             transaction
                 .execute_raw(Statement::from_sql_and_values(
                     DbBackend::Sqlite,
-                    "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, 1, NULL, ?, ?, ?)",
+                    "INSERT INTO product_lots (id, product_id, supplier_id, goods_receipt_item_id, production_job_id, lot_number, source_type, original_base_quantity, remaining_base_quantity, damaged_base_quantity, purchase_price_per_base, minimum_price, wholesale_price, retail_price, received_date, expiry_date, created_by, version, deleted_at, origin_device_id, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, ?)",
                     [
                         lot_id.into(),
                         line.product_id.into(),
@@ -465,6 +465,9 @@ impl PurchasingRepository {
                         line.base_qty.into(),
                         line.base_qty.into(),
                         line.cost_per_base.into(),
+                        line.min.into(),
+                        line.wholesale.into(),
+                        line.retail.into(),
                         received_date.into(),
                         line.expiry.into(),
                         context.user_id.into(),
