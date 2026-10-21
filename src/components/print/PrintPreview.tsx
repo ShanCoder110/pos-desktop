@@ -1,22 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageCircle, Printer, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { Field, Modal, SelectInput, TextInput } from "@/components/common";
 import { InvoiceThermalReceipt } from "@/components/print/InvoiceThermalReceipt";
-import { useSettings } from "@/shared/settings";
-import type { Customer, InvoiceLine, ReceiptLanguage } from "@/shared/types";
+import { printSizeFromPaper, useSettings } from "@/shared/settings";
+import type { Customer, InvoiceLine, PaperWidth, ReceiptLanguage } from "@/shared/types";
 import {
   buildReceiptText,
-  printReceiptHtml,
   thermalLabel,
   thermalWidthPx,
   openWhatsAppReceipt,
 } from "@/utils/receiptShare";
 import { isReceiptUrdu, resolveReceiptLanguage } from "@/utils/receiptLanguage";
-import { receiptFontFamilyCss } from "@/shared/constants/receiptBranding";
 import { toaster } from "@/components/common/Toast";
-import { printThermalPng, type ThermalPrintResult } from "@/services/printers";
+import {
+  listSystemPrinters,
+  printThermalPng,
+  type SystemPrinter,
+  type ThermalPrintResult,
+} from "@/services/printers";
 import { jameelNooriFontFaceCss } from "@/utils/receiptPrintFonts";
-import { buildReceiptPrintHtml, RECEIPT_THERMAL_CSS } from "@/utils/receiptThermalStyles";
+import { RECEIPT_THERMAL_CSS } from "@/utils/receiptThermalStyles";
 import { shouldSplitThermalBill, splitBillPages } from "@/utils/splitBillPages";
 import { isTauri } from "@tauri-apps/api/core";
 import { toBlob } from "html-to-image";
@@ -56,6 +60,7 @@ export function PrintPreview({
   printRequestId = 0,
   /** Skip the preview overlay — render off-screen and send straight to the system printer. */
   directPrint = false,
+  onPrintingChange,
   /** POS Urdu/EN print button — overrides Settings → receipt language for this slip only. */
   languageOverride,
 }: {
@@ -72,12 +77,14 @@ export function PrintPreview({
   invoiceNumber?: string;
   /** POS F10 session toggle; falls back to settings.splitLongBill */
   splitOverride?: boolean;
-  /** Increment to open the native print dialog as soon as this preview is ready. */
+  /** Increment to send a silent print as soon as this preview is ready. */
   printRequestId?: number;
   directPrint?: boolean;
   languageOverride?: ReceiptLanguage;
+  /** True while a slip is being sent, so the cashier print controls stay disabled. */
+  onPrintingChange?: (printing: boolean) => void;
 }) {
-  const { settings: savedSettings } = useSettings();
+  const { settings: savedSettings, setSettings } = useSettings();
   const receiptLanguage = resolveReceiptLanguage(languageOverride, savedSettings.receiptLanguage);
   const settings = useMemo(
     () => ({ ...savedSettings, receiptLanguage }),
@@ -85,11 +92,21 @@ export function PrintPreview({
   );
   const slipRef = useRef<HTMLDivElement>(null);
   const handledPrintRequestRef = useRef("");
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const onPrintingChangeRef = useRef(onPrintingChange);
+  onPrintingChangeRef.current = onPrintingChange;
+  const [printing, setPrinting] = useState(false);
+  const printingLockRef = useRef(false);
+  const sendingRef = useRef(false);
+  const printerOverrideRef = useRef<{ name: string; paper: PaperWidth } | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupName, setSetupName] = useState("");
+  const [setupPaper, setSetupPaper] = useState<PaperWidth>("MM_80");
+  const [systemPrinters, setSystemPrinters] = useState<SystemPrinter[]>([]);
   const paper = settings.printerPaperWidth ?? settings.paperWidth;
   const thermal = settings.printSize === "thermal";
   const widthPx = thermal ? thermalWidthPx(paper) : 560;
-  const printWidth = thermal ? (paper === "MM_58" ? "54mm" : "72mm") : "210mm";
-  const printPageSize = thermal ? `${printWidth} auto` : "A4";
   const isUrdu = isReceiptUrdu(receiptLanguage);
   const splitOn = shouldSplitThermalBill(splitOverride ?? settings.splitLongBill, paper);
   const pages = useMemo(
@@ -133,19 +150,28 @@ export function PrintPreview({
     [settings, customer, lines, total, discount, paid, balanceBefore, balanceAfter, invoiceNumber],
   );
 
-  const latinFontCss = receiptFontFamilyCss(settings.receiptFontFamily);
-
   const runPrintJob = useCallback(async () => {
     const node = slipRef.current;
     if (!node) return false;
     if (!slipMatchesLanguage(node, isUrdu)) return false;
 
-    if (thermal) {
+    try {
+      const chosen = printerOverrideRef.current;
+      const printerName = (chosen?.name ?? settings.printerName)?.trim() ?? "";
+      const printPaper = chosen?.paper ?? paper;
       if (!isTauri()) {
-        toaster.error(thermalFailure({ ok: false, reason: "not-desktop" }) ?? "Print failed");
-        if (directPrint) onClose();
+        toaster.error("Silent print only works in the desktop app.");
+        printerOverrideRef.current = null;
+        if (directPrint) onCloseRef.current();
         return true;
       }
+      if (!printerName) {
+        toaster.error("Select a printer first.");
+        printerOverrideRef.current = null;
+        if (directPrint) onCloseRef.current();
+        return true;
+      }
+
       const pageNodes = [...node.querySelectorAll<HTMLElement>(".slip-page")];
       if (!pageNodes.length) return false;
       const copies = Math.max(1, Math.min(9, Number(settings.copies) || 1));
@@ -158,82 +184,209 @@ export function PrintPreview({
           });
           if (!blob) {
             toaster.error("Could not capture the receipt.");
-            if (directPrint) onClose();
+            printerOverrideRef.current = null;
+            if (directPrint) onCloseRef.current();
             return true;
           }
           const png = new Uint8Array(await blob.arrayBuffer());
-          const result = await printThermalPng(settings.printerName, png, paper);
+          const result = await printThermalPng(printerName, png, printPaper);
           const fail = thermalFailure(result);
           if (fail) {
             toaster.error(fail);
-            if (directPrint) onClose();
+            printerOverrideRef.current = null;
+            if (directPrint) onCloseRef.current();
             return true;
           }
         }
       }
-      if (directPrint) onClose();
+      printerOverrideRef.current = null;
+      if (directPrint) onCloseRef.current();
+      return true;
+    } catch (error) {
+      toaster.error(error instanceof Error ? error.message : "Print failed");
+      printerOverrideRef.current = null;
+      if (directPrint) onCloseRef.current();
       return true;
     }
+  }, [directPrint, isUrdu, paper, settings.copies, settings.printerName]);
 
-    const html = buildReceiptPrintHtml({
-      bodyHtml: node.innerHTML,
-      urdu: isUrdu,
-      printWidth,
-      printPageSize,
-      latinFontCss,
+  const setBusy = useCallback(
+    (busy: boolean) => {
+      printingLockRef.current = busy;
+      setPrinting(busy);
+      if (!directPrint) onPrintingChangeRef.current?.(busy);
+    },
+    [directPrint],
+  );
+
+  const beginSend = useCallback(() => {
+    if (sendingRef.current) return;
+    sendingRef.current = true;
+    setBusy(true);
+    let attempts = 0;
+    const tryPrint = () => {
+      void runPrintJob().then((ok) => {
+        if (ok) {
+          sendingRef.current = false;
+          if (!directPrint) setBusy(false);
+          return;
+        }
+        attempts += 1;
+        if (attempts < 24) {
+          window.setTimeout(tryPrint, isUrdu ? 80 : 50);
+          return;
+        }
+        sendingRef.current = false;
+        if (!directPrint) setBusy(false);
+        if (directPrint) onCloseRef.current();
+      });
+    };
+    tryPrint();
+  }, [directPrint, isUrdu, runPrintJob, setBusy]);
+
+  const openPrinterSetup = useCallback(() => {
+    const savedName = settings.printerName?.trim() ?? "";
+    setSetupName(savedName === "XP-80C" ? "" : savedName);
+    setSetupPaper(settings.printerPaperWidth ?? settings.paperWidth ?? "MM_80");
+    setSetupOpen(true);
+    void listSystemPrinters().then((rows) => {
+      setSystemPrinters(rows);
+      setSetupName((current) => {
+        if (current.trim() && current.trim() !== "XP-80C") return current;
+        return rows.find((row) => row.isDefault)?.name ?? rows[0]?.name ?? "";
+      });
     });
-    await printReceiptHtml(html);
-    if (directPrint) onClose();
-    return true;
-  }, [
-    directPrint,
-    isUrdu,
-    latinFontCss,
-    onClose,
-    paper,
-    printPageSize,
-    printWidth,
-    settings.copies,
-    settings.printerName,
-    thermal,
-  ]);
+  }, [settings.paperWidth, settings.printerName, settings.printerPaperWidth]);
 
   const handlePrint = useCallback(() => {
-    void runPrintJob();
+    if (printingLockRef.current || sendingRef.current) return true;
+    if (!settings.printerSetupDone) {
+      setBusy(true);
+      openPrinterSetup();
+      return true;
+    }
+    beginSend();
     return true;
-  }, [runPrintJob]);
+  }, [beginSend, openPrinterSetup, setBusy, settings.printerSetupDone]);
+
+  function confirmPrinterSetup() {
+    const name = setupName.trim();
+    if (!name) {
+      toaster.error("Select a printer first.");
+      return;
+    }
+    if (sendingRef.current) return;
+    setSettings({
+      ...savedSettings,
+      printerName: name,
+      printerPaperWidth: setupPaper,
+      printSize: printSizeFromPaper(setupPaper),
+      printerSetupDone: true,
+    });
+    toaster.success("Printer saved.");
+    printerOverrideRef.current = { name, paper: setupPaper };
+    setSetupOpen(false);
+    beginSend();
+  }
+
+  function cancelPrinterSetup() {
+    setSetupOpen(false);
+    if (!directPrint) setBusy(false);
+    if (directPrint) onClose();
+  }
+
+  const printerSetup = (
+    <Modal
+      open={setupOpen}
+      front
+      title="Select printer"
+      subtitle="Choose the receipt printer. Save stores it for the next prints."
+      onClose={cancelPrinterSetup}
+      footer={
+        <>
+          <Button onClick={cancelPrinterSetup}>Cancel</Button>
+          <Button variant="primary" disabled={sendingRef.current} onClick={confirmPrinterSetup}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-3">
+        <Field label="Printer">
+          <SelectInput
+            value={
+              systemPrinters.some((row) => row.name === setupName)
+                ? setupName
+                : setupName
+                  ? "__custom__"
+                  : ""
+            }
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value === "__custom__") return;
+              setSetupName(value);
+            }}
+          >
+            <option value="">Select printer…</option>
+            {systemPrinters.map((row) => (
+              <option key={row.name} value={row.name}>
+                {row.name}
+                {row.isDefault ? " (system default)" : ""}
+              </option>
+            ))}
+            {setupName && !systemPrinters.some((row) => row.name === setupName) ? (
+              <option value="__custom__">{setupName}</option>
+            ) : null}
+          </SelectInput>
+        </Field>
+        <Field label="Printer name" hint="Exact name from the computer if it is not in the list">
+          <TextInput
+            value={setupName}
+            onChange={(event) => setSetupName(event.target.value)}
+            placeholder="e.g. XP-80C"
+          />
+        </Field>
+        <Field label="Paper width">
+          <SelectInput
+            value={setupPaper}
+            onChange={(event) => setSetupPaper(event.target.value as PaperWidth)}
+          >
+            <option value="MM_58">58 mm thermal</option>
+            <option value="MM_80">80 mm thermal</option>
+            <option value="A4">A4</option>
+          </SelectInput>
+        </Field>
+      </div>
+    </Modal>
+  );
 
   useEffect(() => {
     if (!open || printRequestId <= 0) return;
     const jobKey = `${printRequestId}:${isUrdu ? "UR" : "EN"}`;
     if (handledPrintRequestRef.current === jobKey) return;
+
+    if (!settings.printerSetupDone) {
+      handledPrintRequestRef.current = jobKey;
+      openPrinterSetup();
+      return;
+    }
+
+    if (sendingRef.current) return;
     handledPrintRequestRef.current = jobKey;
-
-    let cancelled = false;
-    let attempts = 0;
-    let timeoutId = 0;
-
-    const tryPrint = () => {
-      if (cancelled) return;
-      attempts += 1;
-      void runPrintJob().then((ok) => {
-        if (cancelled || ok) return;
-        if (attempts < 24) {
-          timeoutId = window.setTimeout(tryPrint, isUrdu ? 80 : 50);
-        }
-      });
-    };
-
     const frame = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(tryPrint);
+      window.requestAnimationFrame(() => {
+        if (handledPrintRequestRef.current !== jobKey) return;
+        beginSend();
+      });
     });
 
     return () => {
-      cancelled = true;
       window.cancelAnimationFrame(frame);
-      if (timeoutId) window.clearTimeout(timeoutId);
+      // Strict Mode cleans up before the slip is painted. Allow the second run
+      // to send, unless the send already started.
+      if (!sendingRef.current) handledPrintRequestRef.current = "";
     };
-  }, [isUrdu, open, printRequestId, runPrintJob]);
+  }, [beginSend, isUrdu, open, openPrinterSetup, printRequestId, settings.printerSetupDone]);
 
   if (!open) return null;
 
@@ -271,10 +424,13 @@ export function PrintPreview({
   // Direct print (EN + UR): render off-screen, then system print + paper cut.
   if (directPrint) {
     return (
-      <div className="pointer-events-none fixed -left-[10000px] top-0" aria-hidden>
-        <style>{`${jameelNooriFontFaceCss()}${RECEIPT_THERMAL_CSS}`}</style>
-        {slip}
-      </div>
+      <>
+        <div className="pointer-events-none fixed -left-[10000px] top-0" aria-hidden>
+          <style>{`${jameelNooriFontFaceCss()}${RECEIPT_THERMAL_CSS}`}</style>
+          {slip}
+        </div>
+        {printerSetup}
+      </>
     );
   }
 
@@ -301,8 +457,13 @@ export function PrintPreview({
             {splitOn && pages.length > 1 ? ` · ${pages.length} pages` : ""}
             {settings.printerName ? ` · ${settings.printerName}` : ""}
           </p>
-          <Button variant="primary" icon={<Printer size={14} />} onClick={() => handlePrint()}>
-            {isUrdu ? "پرنٹ" : "Print"}
+          <Button
+            variant="primary"
+            icon={<Printer size={14} />}
+            disabled={printing}
+            onClick={() => handlePrint()}
+          >
+            {printing ? (isUrdu ? "پرنٹ ہو رہا ہے" : "Printing…") : isUrdu ? "پرنٹ" : "Print"}
           </Button>
           <Button disabled={!hasPhone} icon={<MessageCircle size={14} />} onClick={handleWhatsApp}>
             WhatsApp
@@ -318,6 +479,7 @@ export function PrintPreview({
           </p>
         </div>
       </div>
+      {printerSetup}
     </div>
   );
 }

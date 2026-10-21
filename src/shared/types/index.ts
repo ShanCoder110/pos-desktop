@@ -72,6 +72,8 @@ export interface ShopSettings {
   itemsTableBordered: boolean;
   printerName: string;
   printerPaperWidth: PaperWidth;
+  /** True after the user picks a printer (first print or Settings → Printer). */
+  printerSetupDone: boolean;
   copies: number;
   splitLongBill: boolean;
   /** Products on first cut slip when split is on (dukan default 12). */

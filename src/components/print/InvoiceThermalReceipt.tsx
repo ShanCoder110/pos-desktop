@@ -487,7 +487,6 @@ export function InvoiceThermalReceipt({
                 </p>
               ) : null}
             </div>
-            <div className="receipt-cut-gap" aria-hidden="true" />
             <p className="receipt-footer-credit">
               {isUrdu ? (
                 <>

@@ -6,8 +6,9 @@ export const RECEIPT_THERMAL_CSS = `
   width: 100%;
   max-width: 100%;
   margin: 0;
-  /* No left pad; keep right inset — XP-Q200II printable width is < roll width */
-  padding: 4px 14px 3mm 8px;
+  /* Side inset stays — the printable width is narrower than the roll.
+     Top and bottom stay within 2 mm; the cutter feed is added after the image. */
+  padding: 1mm 14px 1mm 8px;
   font-size: 12px;
   font-weight: 400;
   box-sizing: border-box;
@@ -486,10 +487,6 @@ export const RECEIPT_THERMAL_CSS = `
   text-transform: none;
 }
 
-.receipt-cut-gap {
-  height: 12mm;
-}
-
 .receipt-footer-credit {
   font-size: 0.7em;
   font-weight: 600;
@@ -537,8 +534,6 @@ export function buildReceiptPrintHtml(opts: {
 .receipt-divider-solid { border-top: 1px solid #000 !important; }
 `
       : "",
-    /* Extra feed so the blade cuts below the credit line, not through it. */
-    ".receipt-cut-gap { height: 14mm !important; }",
     "</style></head><body>",
     opts.bodyHtml,
     "</body></html>",

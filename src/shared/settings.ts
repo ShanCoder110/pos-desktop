@@ -55,6 +55,7 @@ export const defaultSettings: ShopSettings = {
   itemsTableBordered: false,
   printerName: "XP-80C",
   printerPaperWidth: "MM_80",
+  printerSetupDone: false,
   copies: 1,
   splitLongBill: false,
   splitFirstPageItems: 12,
@@ -103,13 +104,14 @@ export function useSettingsForm<K extends keyof ShopSettings>(keys: readonly K[]
     setDraft(live);
   }
 
-  function save() {
+  function save(extra?: Partial<ShopSettings>) {
     const paper =
       (draft as { printerPaperWidth?: PaperWidth }).printerPaperWidth ??
       (draft as { paperWidth?: PaperWidth }).paperWidth;
     setSettings({
       ...settings,
       ...draft,
+      ...extra,
       ...(paper ? { printSize: printSizeFromPaper(paper) } : {}),
     });
   }

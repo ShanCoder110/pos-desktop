@@ -63,7 +63,7 @@ export function PrinterSection() {
       title="Printer"
       hint="Thermal till printer — Print / F9 goes straight to the system printer (no preview window)"
       dirty={dirty}
-      onSave={save}
+      onSave={() => save({ printerSetupDone: true })}
       onReset={reset}
     >
       <Field
@@ -210,8 +210,8 @@ export function PrinterSection() {
         label="Auto-print after sale"
       />
       <p className="settings-note">
-        Sale complete and Print / F9 use the printer saved here. A4 still uses the system print
-        dialog. Split long bills still follow the page sizes below.
+        Sale complete and Print / F9 send a silent print to the printer saved here. Split long bills
+        still follow the page sizes below.
       </p>
       <Toggle
         checked={draft.splitLongBill}

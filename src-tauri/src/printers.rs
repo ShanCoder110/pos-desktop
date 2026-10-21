@@ -1,7 +1,7 @@
 //! List OS printers and send silent ESC/POS jobs (receipt raster, test slip, cut).
 
 use image::imageops::FilterType;
-use image::{GenericImageView, ImageReader};
+use image::{DynamicImage, GenericImageView, ImageReader};
 use serde::Serialize;
 use std::io::Cursor;
 use std::process::Command;
@@ -133,14 +133,50 @@ fn paper_label(paper_width: &str) -> &'static str {
     }
 }
 
-/// ESC @ + GS v 0 raster (chunked) + ESC d 6 + GS V 0 full cut.
+/// ~8 mm at 203 dpi. Just enough for the auto-cutter to clear the last line.
+const CUTTER_FEED_DOTS: u8 = 64;
+
+fn pixel_is_ink(pixel: &image::Rgba<u8>) -> bool {
+    let alpha = pixel[3] as u16;
+    let lum = (pixel[0] as u16 * 3 + pixel[1] as u16 * 6 + pixel[2] as u16) / 10;
+    alpha > 40 && lum < 190
+}
+
+/// Drop blank rows above the first ink and below the last so the raster
+/// starts and ends on the receipt content.
+fn trim_vertical_whitespace(image: DynamicImage) -> DynamicImage {
+    let rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    if width == 0 || height == 0 {
+        return image;
+    }
+    let blank = |y: u32| (0..width).all(|x| !pixel_is_ink(rgba.get_pixel(x, y)));
+    let mut top = 0u32;
+    while top < height && blank(top) {
+        top += 1;
+    }
+    let mut bottom = height;
+    while bottom > top && blank(bottom - 1) {
+        bottom -= 1;
+    }
+    if top == 0 && bottom == height {
+        return image;
+    }
+    if bottom <= top {
+        return image;
+    }
+    image.crop_imm(0, top, width, bottom - top)
+}
+
+/// ESC @ + GS v 0 raster (chunked) + a short feed + GS V 0 full cut.
 fn png_to_escpos(png: &[u8], width_dots: u32) -> Result<Vec<u8>, String> {
     let reader = ImageReader::new(Cursor::new(png))
         .with_guessed_format()
         .map_err(|error| format!("Could not read receipt image: {error}"))?;
-    let image = reader
+    let decoded = reader
         .decode()
         .map_err(|error| format!("Could not decode receipt image: {error}"))?;
+    let image = trim_vertical_whitespace(decoded);
     let (src_w, src_h) = image.dimensions();
     if src_w == 0 || src_h == 0 {
         return Err("Receipt image is empty".into());
@@ -157,9 +193,7 @@ fn png_to_escpos(png: &[u8], width_dots: u32) -> Result<Vec<u8>, String> {
             for bit in 0..8 {
                 let x = (xb * 8 + bit) as u32;
                 let pixel = rgba.get_pixel(x, y);
-                let alpha = pixel[3] as u16;
-                let lum = (pixel[0] as u16 * 3 + pixel[1] as u16 * 6 + pixel[2] as u16) / 10;
-                if alpha > 40 && lum < 190 {
+                if pixel_is_ink(pixel) {
                     byte |= 0x80 >> bit;
                 }
             }
@@ -183,8 +217,8 @@ fn png_to_escpos(png: &[u8], width_dots: u32) -> Result<Vec<u8>, String> {
         out.extend_from_slice(&raster[start..end]);
         y += rows;
     }
-    // Feed then full cut — same bytes as the XP-Q200II cutter.
-    out.extend_from_slice(&[0x1B, 0x64, 0x06, 0x1D, 0x56, 0x00]);
+    // Short feed so the blade clears the last line without a tall blank tail.
+    out.extend_from_slice(&[0x1B, 0x4A, CUTTER_FEED_DOTS, 0x1D, 0x56, 0x00]);
     Ok(out)
 }
 
@@ -423,7 +457,32 @@ mod tests {
         assert!(payload
             .windows(4)
             .any(|bytes| bytes == [0x1D, 0x76, 0x30, 0x00]));
-        assert!(payload.ends_with(&[0x1B, 0x64, 0x06, 0x1D, 0x56, 0x00]));
+        assert!(payload.ends_with(&[0x1B, 0x4A, 64, 0x1D, 0x56, 0x00]));
         assert_eq!(dots_for_paper("MM_80"), 576);
+    }
+
+    #[test]
+    fn raster_drops_blank_rows_above_and_below_the_ink() {
+        let mut image = RgbaImage::new(16, 20);
+        for pixel in image.pixels_mut() {
+            *pixel = Rgba([255, 255, 255, 255]);
+        }
+        for y in 5..15 {
+            for x in 0..16 {
+                image.put_pixel(x, y, Rgba([0, 0, 0, 255]));
+            }
+        }
+        let mut png = Vec::new();
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+            .unwrap();
+        let payload = png_to_escpos(&png, 16).unwrap();
+        // GS v 0 header: rows are the two bytes after the width word.
+        let marker = payload
+            .windows(8)
+            .find(|bytes| bytes[..4] == [0x1D, 0x76, 0x30, 0x00])
+            .unwrap();
+        let rows = u16::from_le_bytes([marker[6], marker[7]]);
+        assert_eq!(rows, 10);
     }
 }

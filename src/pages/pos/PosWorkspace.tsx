@@ -386,6 +386,8 @@ export function PosWorkspace() {
   const [recentOpen, setRecentOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
   const [printDirect, setPrintDirect] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const printingRef = useRef(false);
   const [printLanguage, setPrintLanguage] = useState<ReceiptLanguage | undefined>();
   const [printRequestId, setPrintRequestId] = useState(0);
   const [receiptInvoiceNo, setReceiptInvoiceNo] = useState("");
@@ -1518,11 +1520,18 @@ export function PosWorkspace() {
     if (roundAmt > 0) showToast(`${money(roundAmt)} added to bill discount`);
   }
 
+  function setPrintBusy(busy: boolean) {
+    printingRef.current = busy;
+    setPrinting(busy);
+  }
+
   function openReceipt(
     invoiceNumber = receiptInvoiceNo,
     printNow = false,
     language?: ReceiptLanguage,
   ) {
+    if (printNow && printingRef.current) return;
+    if (printNow) setPrintBusy(true);
     setReceiptSnap({
       lines: cart.map((item) => ({
         id: item.id,
@@ -1729,6 +1738,7 @@ export function PosWorkspace() {
       F7: () => applyExact(),
       F8: () => document.getElementById("billDiscount")?.focus(),
       F9: () => {
+        if (printingRef.current) return;
         if (cart.length) openReceipt(receiptInvoiceNo, true, "EN");
         else showToast("Nothing to print");
       },
@@ -2908,24 +2918,28 @@ export function PosWorkspace() {
               </button>
               <button
                 type="button"
-                className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print-ur"
+                disabled={printing}
+                className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print-ur disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => {
                   // Force UR labels (product name stays English only when urduName is empty).
+                  if (printingRef.current) return;
                   if (cart.length) openReceipt(receiptInvoiceNo, true, "UR");
                   else showToast("Nothing to print");
                 }}
               >
-                پرنٹ اردو
+                {printing ? "Printing…" : "پرنٹ اردو"}
               </button>
               <button
                 type="button"
-                className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print"
+                disabled={printing}
+                className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => {
+                  if (printingRef.current) return;
                   if (cart.length) openReceipt(receiptInvoiceNo, true, "EN");
                   else showToast("Nothing to print");
                 }}
               >
-                Print · F9
+                {printing ? "Printing…" : "Print · F9"}
               </button>
             </div>
             <button
@@ -3240,11 +3254,13 @@ export function PosWorkspace() {
         key={`print-${printRequestId}-${printLanguage ?? receiptSnap?.language ?? "S"}`}
         open={printOpen}
         onClose={() => {
+          setPrintBusy(false);
           setPrintOpen(false);
           setPrintDirect(false);
           setPrintLanguage(undefined);
           setReceiptSnap(null);
         }}
+        onPrintingChange={setPrintBusy}
         customer={receiptSnap?.customer ?? displayCustomer}
         lines={receiptSnap?.lines ?? invoiceLines}
         total={receiptSnap?.total ?? t.total}

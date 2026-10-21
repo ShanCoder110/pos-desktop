@@ -12,6 +12,7 @@ export function Modal({
   footer,
   wide,
   size,
+  front,
   onClose,
 }: {
   open: boolean;
@@ -21,6 +22,8 @@ export function Modal({
   footer?: ReactNode;
   wide?: boolean;
   size?: "default" | "work";
+  /** Sit above the POS print overlay. */
+  front?: boolean;
   onClose: () => void;
 }) {
   if (!open || typeof document === "undefined") return null;
@@ -28,12 +31,16 @@ export function Modal({
   return createPortal(
     <>
       <div
-        className="ui-modal-back [position:fixed] [inset:0] [z-index:50] [background:color-mix(in_srgb,var(--ink)_40%,transparent)]"
+        className={cn(
+          "ui-modal-back [position:fixed] [inset:0] [background:color-mix(in_srgb,var(--ink)_40%,transparent)]",
+          front ? "[z-index:80]" : "[z-index:50]",
+        )}
         onClick={onClose}
       />
       <div
         className={cn(
-          "ui-modal [position:fixed] [z-index:51] [top:12vh] [left:50%] [width:min(520px,_calc(100%_-_32px))] [max-height:76vh] [display:flex] [flex-direction:column] [transform:translateX(-50%)] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:12px] [box-shadow:0_20px_40px_color-mix(in_srgb,var(--ink)_18%,transparent)]",
+          "ui-modal [position:fixed] [top:12vh] [left:50%] [width:min(520px,_calc(100%_-_32px))] [max-height:76vh] [display:flex] [flex-direction:column] [transform:translateX(-50%)] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:12px] [box-shadow:0_20px_40px_color-mix(in_srgb,var(--ink)_18%,transparent)]",
+          front ? "[z-index:81]" : "[z-index:51]",
           wide && "is-wide",
           size === "work" && "is-work",
         )}
