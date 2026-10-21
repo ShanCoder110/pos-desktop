@@ -19,30 +19,48 @@ export function Tooltip({
   children,
   placement = "top",
   className,
+  tipClassName,
   disabled = false,
+  hoverOnly = false,
 }: {
   content: ReactNode;
   children: ReactElement;
-  placement?: "top" | "bottom";
+  placement?: "top" | "bottom" | "right";
   className?: string;
+  tipClassName?: string;
   disabled?: boolean;
+  /** Hover only — no focus tab stop (safe inside buttons). */
+  hoverOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
   const mouse = useRef({ x: 0, y: 0 });
   const tipRef = useRef<HTMLDivElement | null>(null);
-  const enabled = !disabled && content != null && String(content).trim() !== "";
+  const hasContent =
+    content != null &&
+    !(typeof content === "string" && content.trim() === "") &&
+    !(typeof content === "number" && Number.isNaN(content));
+  const enabled = !disabled && hasContent;
 
   const place = useCallback(() => {
     const tip = tipRef.current;
     if (!tip) return null;
     const rect = tip.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
-    const top = placement === "top" ? mouse.current.y - rect.height - GAP : mouse.current.y + GAP;
-    const left = Math.max(
-      PAD,
-      Math.min(mouse.current.x - rect.width / 2, window.innerWidth - rect.width - PAD),
-    );
+    let top: number;
+    let left: number;
+    if (placement === "right") {
+      top = mouse.current.y - rect.height / 2;
+      left = mouse.current.x + GAP;
+    } else if (placement === "bottom") {
+      top = mouse.current.y + GAP;
+      left = mouse.current.x - rect.width / 2;
+    } else {
+      top = mouse.current.y - rect.height - GAP;
+      left = mouse.current.x - rect.width / 2;
+    }
+    top = Math.max(PAD, Math.min(top, window.innerHeight - rect.height - PAD));
+    left = Math.max(PAD, Math.min(left, window.innerWidth - rect.width - PAD));
     return { top, left };
   }, [placement]);
 
@@ -75,7 +93,10 @@ export function Tooltip({
   function show(e: React.MouseEvent | React.FocusEvent) {
     if (e.type === "focus") {
       const rect = e.currentTarget.getBoundingClientRect();
-      mouse.current = { x: rect.left + rect.width / 2, y: rect.top };
+      mouse.current =
+        placement === "right"
+          ? { x: rect.right, y: rect.top + rect.height / 2 }
+          : { x: rect.left + rect.width / 2, y: rect.top };
     } else {
       const me = e as React.MouseEvent;
       mouse.current = { x: me.clientX, y: me.clientY };
@@ -103,15 +124,15 @@ export function Tooltip({
           "ui-tooltip-trigger [display:inline-flex] [max-width:100%] [min-width:0]",
           className,
         )}
-        tabIndex={0}
+        tabIndex={hoverOnly ? undefined : 0}
         onMouseEnter={show}
         onMouseMove={(e) => {
           mouse.current = { x: e.clientX, y: e.clientY };
           if (open) requestAnimationFrame(update);
         }}
         onMouseLeave={() => setOpen(false)}
-        onFocus={show}
-        onBlur={() => setOpen(false)}
+        onFocus={hoverOnly ? undefined : show}
+        onBlur={hoverOnly ? undefined : () => setOpen(false)}
       >
         {children}
       </span>
@@ -121,7 +142,10 @@ export function Tooltip({
               ref={tipRef}
               role="tooltip"
               style={style}
-              className="ui-tooltip [max-width:min(280px,_calc(100vw_-_16px))] [padding:8px_10px] [border-radius:8px] [background:var(--header)] [color:#fff] [font-size:12px] [font-weight:600] [line-height:1.35] [box-shadow:0_8px_20px_rgba(15,_23,_42,_0.2)] [pointer-events:none] [white-space:normal]"
+              className={cn(
+                "ui-tooltip [max-width:min(420px,_calc(100vw_-_16px))] [padding:8px_10px] [border-radius:8px] [background:var(--header)] [color:#fff] [font-size:12px] [font-weight:600] [line-height:1.35] [box-shadow:0_8px_20px_rgba(15,_23,_42,_0.2)] [pointer-events:none] [white-space:normal]",
+                tipClassName,
+              )}
             >
               {content}
             </div>,

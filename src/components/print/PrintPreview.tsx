@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MessageCircle, Printer, X } from "lucide-react";
+import { MessageCircle, Printer, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Field, Modal, SelectInput, TextInput } from "@/components/common";
 import { InvoiceThermalReceipt } from "@/components/print/InvoiceThermalReceipt";
@@ -7,11 +7,13 @@ import { printSizeFromPaper, useSettings } from "@/shared/settings";
 import type { Customer, InvoiceLine, PaperWidth, ReceiptLanguage } from "@/shared/types";
 import {
   buildReceiptText,
+  printReceiptHtml,
   thermalLabel,
   thermalWidthPx,
   openWhatsAppReceipt,
 } from "@/utils/receiptShare";
 import { isReceiptUrdu, resolveReceiptLanguage } from "@/utils/receiptLanguage";
+import { receiptFontFamilyCss } from "@/shared/constants/receiptBranding";
 import { toaster } from "@/components/common/Toast";
 import {
   listSystemPrinters,
@@ -20,7 +22,7 @@ import {
   type ThermalPrintResult,
 } from "@/services/printers";
 import { jameelNooriFontFaceCss } from "@/utils/receiptPrintFonts";
-import { RECEIPT_THERMAL_CSS } from "@/utils/receiptThermalStyles";
+import { buildReceiptPrintHtml, RECEIPT_THERMAL_CSS } from "@/utils/receiptThermalStyles";
 import { shouldSplitThermalBill, splitBillPages } from "@/utils/splitBillPages";
 import { isTauri } from "@tauri-apps/api/core";
 import { toBlob } from "html-to-image";
@@ -104,10 +106,15 @@ export function PrintPreview({
   const [setupName, setSetupName] = useState("");
   const [setupPaper, setSetupPaper] = useState<PaperWidth>("MM_80");
   const [systemPrinters, setSystemPrinters] = useState<SystemPrinter[]>([]);
+  const [loadingPrinters, setLoadingPrinters] = useState(false);
+  const desktop = isTauri();
   const paper = settings.printerPaperWidth ?? settings.paperWidth;
   const thermal = settings.printSize === "thermal";
   const widthPx = thermal ? thermalWidthPx(paper) : 560;
+  const printWidth = thermal ? (paper === "MM_58" ? "54mm" : "72mm") : "210mm";
+  const printPageSize = thermal ? `${printWidth} auto` : "A4";
   const isUrdu = isReceiptUrdu(receiptLanguage);
+  const latinFontCss = receiptFontFamilyCss(settings.receiptFontFamily);
   const splitOn = shouldSplitThermalBill(splitOverride ?? settings.splitLongBill, paper);
   const pages = useMemo(
     () =>
@@ -150,21 +157,37 @@ export function PrintPreview({
     [settings, customer, lines, total, discount, paid, balanceBefore, balanceAfter, invoiceNumber],
   );
 
+  const printDialog = useCallback(
+    async (node: HTMLElement) => {
+      const html = buildReceiptPrintHtml({
+        bodyHtml: node.innerHTML,
+        urdu: isUrdu,
+        printWidth,
+        printPageSize,
+        latinFontCss,
+      });
+      await printReceiptHtml(html);
+    },
+    [isUrdu, latinFontCss, printPageSize, printWidth],
+  );
+
   const runPrintJob = useCallback(async () => {
     const node = slipRef.current;
     if (!node) return false;
     if (!slipMatchesLanguage(node, isUrdu)) return false;
 
     try {
-      const chosen = printerOverrideRef.current;
-      const printerName = (chosen?.name ?? settings.printerName)?.trim() ?? "";
-      const printPaper = chosen?.paper ?? paper;
+      // Browser / Vite: use the system print dialog. Desktop: silent ESC/POS.
       if (!isTauri()) {
-        toaster.error("Silent print only works in the desktop app.");
+        await printDialog(node);
         printerOverrideRef.current = null;
         if (directPrint) onCloseRef.current();
         return true;
       }
+
+      const chosen = printerOverrideRef.current;
+      const printerName = (chosen?.name ?? settings.printerName)?.trim() ?? "";
+      const printPaper = chosen?.paper ?? paper;
       if (!printerName) {
         toaster.error("Select a printer first.");
         printerOverrideRef.current = null;
@@ -208,7 +231,7 @@ export function PrintPreview({
       if (directPrint) onCloseRef.current();
       return true;
     }
-  }, [directPrint, isUrdu, paper, settings.copies, settings.printerName]);
+  }, [directPrint, isUrdu, paper, printDialog, settings.copies, settings.printerName]);
 
   const setBusy = useCallback(
     (busy: boolean) => {
@@ -244,30 +267,39 @@ export function PrintPreview({
     tryPrint();
   }, [directPrint, isUrdu, runPrintJob, setBusy]);
 
-  const openPrinterSetup = useCallback(() => {
-    const savedName = settings.printerName?.trim() ?? "";
-    setSetupName(savedName === "XP-80C" ? "" : savedName);
-    setSetupPaper(settings.printerPaperWidth ?? settings.paperWidth ?? "MM_80");
-    setSetupOpen(true);
-    void listSystemPrinters().then((rows) => {
+  const refreshSetupPrinters = useCallback(async () => {
+    setLoadingPrinters(true);
+    try {
+      const rows = await listSystemPrinters();
       setSystemPrinters(rows);
       setSetupName((current) => {
         if (current.trim() && current.trim() !== "XP-80C") return current;
         return rows.find((row) => row.isDefault)?.name ?? rows[0]?.name ?? "";
       });
-    });
-  }, [settings.paperWidth, settings.printerName, settings.printerPaperWidth]);
+    } finally {
+      setLoadingPrinters(false);
+    }
+  }, []);
+
+  const openPrinterSetup = useCallback(() => {
+    const savedName = settings.printerName?.trim() ?? "";
+    setSetupName(savedName === "XP-80C" ? "" : savedName);
+    setSetupPaper(settings.printerPaperWidth ?? settings.paperWidth ?? "MM_80");
+    setSetupOpen(true);
+    void refreshSetupPrinters();
+  }, [refreshSetupPrinters, settings.paperWidth, settings.printerName, settings.printerPaperWidth]);
 
   const handlePrint = useCallback(() => {
     if (printingLockRef.current || sendingRef.current) return true;
-    if (!settings.printerSetupDone) {
-      setBusy(true);
-      openPrinterSetup();
+    // Web: no silent printer setup — open the browser print dialog.
+    if (!desktop || settings.printerSetupDone) {
+      beginSend();
       return true;
     }
-    beginSend();
+    setBusy(true);
+    openPrinterSetup();
     return true;
-  }, [beginSend, openPrinterSetup, setBusy, settings.printerSetupDone]);
+  }, [beginSend, desktop, openPrinterSetup, setBusy, settings.printerSetupDone]);
 
   function confirmPrinterSetup() {
     const name = setupName.trim();
@@ -299,47 +331,74 @@ export function PrintPreview({
     <Modal
       open={setupOpen}
       front
+      compact
       title="Select printer"
-      subtitle="Choose the receipt printer. Save stores it for the next prints."
+      subtitle="Pick a connected receipt printer. This is saved for the next silent prints."
       onClose={cancelPrinterSetup}
       footer={
         <>
           <Button onClick={cancelPrinterSetup}>Cancel</Button>
-          <Button variant="primary" disabled={sendingRef.current} onClick={confirmPrinterSetup}>
-            Save
+          <Button
+            variant="primary"
+            disabled={sendingRef.current || !setupName.trim()}
+            onClick={confirmPrinterSetup}
+          >
+            Save and print
           </Button>
         </>
       }
     >
       <div className="grid gap-3">
-        <Field label="Printer">
-          <SelectInput
-            value={
-              systemPrinters.some((row) => row.name === setupName)
-                ? setupName
-                : setupName
-                  ? "__custom__"
-                  : ""
-            }
-            onChange={(event) => {
-              const value = event.target.value;
-              if (value === "__custom__") return;
-              setSetupName(value);
-            }}
-          >
-            <option value="">Select printer…</option>
-            {systemPrinters.map((row) => (
-              <option key={row.name} value={row.name}>
-                {row.name}
-                {row.isDefault ? " (system default)" : ""}
-              </option>
-            ))}
-            {setupName && !systemPrinters.some((row) => row.name === setupName) ? (
-              <option value="__custom__">{setupName}</option>
-            ) : null}
-          </SelectInput>
+        <Field
+          label="Connected printers"
+          hint={
+            loadingPrinters
+              ? "Loading printers from this computer…"
+              : systemPrinters.length
+                ? `${systemPrinters.length} printer${systemPrinters.length === 1 ? "" : "s"} found`
+                : "No printers found — plug in the till printer, then Refresh"
+          }
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <SelectInput
+              className="min-w-0 flex-1"
+              disabled={loadingPrinters}
+              value={
+                systemPrinters.some((row) => row.name === setupName)
+                  ? setupName
+                  : setupName
+                    ? "__custom__"
+                    : ""
+              }
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value === "__custom__") return;
+                setSetupName(value);
+              }}
+            >
+              <option value="">{loadingPrinters ? "Loading…" : "Select printer…"}</option>
+              {systemPrinters.map((row) => (
+                <option key={row.name} value={row.name}>
+                  {row.name}
+                  {row.isDefault ? " (system default)" : ""}
+                </option>
+              ))}
+              {setupName && !systemPrinters.some((row) => row.name === setupName) ? (
+                <option value="__custom__">{setupName}</option>
+              ) : null}
+            </SelectInput>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loadingPrinters}
+              icon={<RefreshCw size={14} />}
+              onClick={() => void refreshSetupPrinters()}
+            >
+              {loadingPrinters ? "…" : "Refresh"}
+            </Button>
+          </div>
         </Field>
-        <Field label="Printer name" hint="Exact name from the computer if it is not in the list">
+        <Field label="Printer name" hint="Exact OS name if it is missing from the list above">
           <TextInput
             value={setupName}
             onChange={(event) => setSetupName(event.target.value)}
@@ -365,7 +424,7 @@ export function PrintPreview({
     const jobKey = `${printRequestId}:${isUrdu ? "UR" : "EN"}`;
     if (handledPrintRequestRef.current === jobKey) return;
 
-    if (!settings.printerSetupDone) {
+    if (desktop && !settings.printerSetupDone) {
       handledPrintRequestRef.current = jobKey;
       openPrinterSetup();
       return;
@@ -386,7 +445,15 @@ export function PrintPreview({
       // to send, unless the send already started.
       if (!sendingRef.current) handledPrintRequestRef.current = "";
     };
-  }, [beginSend, isUrdu, open, openPrinterSetup, printRequestId, settings.printerSetupDone]);
+  }, [
+    beginSend,
+    desktop,
+    isUrdu,
+    open,
+    openPrinterSetup,
+    printRequestId,
+    settings.printerSetupDone,
+  ]);
 
   if (!open) return null;
 

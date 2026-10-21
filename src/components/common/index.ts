@@ -70,3 +70,4 @@ export { Tabs, TabSheet } from "@/components/common/Tabs";
 export type { TabItem } from "@/components/common/Tabs";
 export { ToastProvider, toaster, useToast } from "@/components/common/Toast";
 export { Tooltip, TruncatedTooltip } from "@/components/common/Tooltip";
+export { CmwrPriceTip, formatCmwrPrices, type CmwrPrices } from "@/components/common/CmwrPriceTip";

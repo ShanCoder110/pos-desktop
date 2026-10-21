@@ -13,6 +13,7 @@ export function Modal({
   wide,
   size,
   front,
+  compact,
   onClose,
 }: {
   open: boolean;
@@ -24,6 +25,8 @@ export function Modal({
   size?: "default" | "work";
   /** Sit above the POS print overlay. */
   front?: boolean;
+  /** Fit content height — no tall empty body. */
+  compact?: boolean;
   onClose: () => void;
 }) {
   if (!open || typeof document === "undefined") return null;
@@ -41,6 +44,7 @@ export function Modal({
         className={cn(
           "ui-modal [position:fixed] [top:12vh] [left:50%] [width:min(520px,_calc(100%_-_32px))] [max-height:76vh] [display:flex] [flex-direction:column] [transform:translateX(-50%)] [background:var(--paper)] [border:1px_solid_var(--line)] [border-radius:12px] [box-shadow:0_20px_40px_color-mix(in_srgb,var(--ink)_18%,transparent)]",
           front ? "[z-index:81]" : "[z-index:51]",
+          compact && "[max-height:none]",
           wide && "is-wide",
           size === "work" && "is-work",
         )}
@@ -48,11 +52,15 @@ export function Modal({
         aria-modal="true"
       >
         <div className="ui-modal-head [display:flex] [align-items:center] [justify-content:space-between] [gap:12px] [min-height:48px] [padding:0_16px] [border-bottom:1px_solid_var(--line)] [flex-shrink:0]">
-          <div className="ui-modal-head-copy [display:grid] [gap:6px] [min-width:0]">
+          <div className="ui-modal-head-copy [display:grid] [gap:2px] [min-width:0] [padding-block:10px]">
             <h2 className="ui-modal-title [font-size:14px] [font-weight:700] [color:var(--ink)]">
               {title}
             </h2>
-            {subtitle}
+            {subtitle ? (
+              <div className="ui-modal-sub [font-size:12px] [font-weight:500] [color:var(--muted)] [line-height:1.35]">
+                {subtitle}
+              </div>
+            ) : null}
           </div>
           <Button size="icon" variant="ghost" tabIndex={-1} onClick={onClose} aria-label="Close">
             <X size={16} />
@@ -60,7 +68,8 @@ export function Modal({
         </div>
         <div
           className={cn(
-            "ui-modal-body [overflow:auto] [padding:16px] [flex:1]",
+            "ui-modal-body [overflow:auto] [padding:16px]",
+            compact ? "[flex:0_0_auto]" : "[flex:1]",
             size === "work" && "is-fill",
           )}
         >

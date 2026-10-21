@@ -27,6 +27,7 @@ import {
   unitsForProduct,
 } from "@/utils/salePricing";
 import { PrintPreview } from "@/components/print/PrintPreview";
+import { CmwrPriceTip } from "@/components/common/CmwrPriceTip";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { toaster } from "@/components/common/Toast";
 import { CartUnitDropdown } from "@/pages/pos/CartUnitDropdown";
@@ -146,6 +147,18 @@ function num(v: string | number) {
   const n = typeof v === "number" ? v : parseFloat(v);
   return Number.isFinite(n) ? n : 0;
 }
+
+/** Put the caret after the value (left-aligned qty feels natural to edit at the end). */
+function focusCaretEnd(el: HTMLInputElement) {
+  const len = el.value.length;
+  window.requestAnimationFrame(() => {
+    try {
+      el.setSelectionRange(len, len);
+    } catch {
+      // Some browsers reject selection on type=number.
+    }
+  });
+}
 function money(n: number) {
   return moneyNum(n);
 }
@@ -189,18 +202,6 @@ function formatSellUnitLabel(unit: ProductSellUnit | undefined, fallback = "Unit
   return n > 1 ? `${name} ×${qtyStr(n)}` : name;
 }
 
-function formatCmwrPrices(unit: {
-  cost?: number;
-  min?: number;
-  wholesale?: number;
-  price?: number;
-}) {
-  const c = Number(unit.cost) || 0;
-  const m = Number(unit.min) || 0;
-  const w = Number(unit.wholesale) || 0;
-  const r = Number(unit.price) || 0;
-  return `C ${moneyNum(c)} · M ${moneyNum(m)} · W ${moneyNum(w)} · R ${moneyNum(r)}`;
-}
 function packOf(p: Product) {
   return p.packQty && p.packQty > 1 ? p.packQty : 0;
 }
@@ -1495,15 +1496,9 @@ export function PosWorkspace() {
   }
 
   function setPay(method: PayMethod) {
+    // Only switch the tender type — do not auto-fill paid amounts.
+    // Cashier fills Cash / Online / Split, or uses Exact · F7.
     setPayMethod(method);
-    if (method === "online") {
-      setOnlineAmt(t.total || onlineAmt);
-      setCashAmt(0);
-    }
-    if (method === "split") {
-      setCashAmt(0);
-      setOnlineAmt(0);
-    }
   }
 
   function applyRound(unit: number) {
@@ -1829,14 +1824,12 @@ export function PosWorkspace() {
           unitLabel: formatSellUnitLabel(unit, prettyUnit(product.unit)),
           availableLabel: `${qtyStr(available)} ${formatSellUnitLabel(unit, product.unit)}`,
           priceLabel: money(listPrice(product, priceMode, unit?.id)),
-          tierLabel: formatCmwrPrices(
-            unit ?? {
-              cost: product.cost,
-              min: product.min,
-              wholesale: product.wholesale,
-              price: product.retail,
-            },
-          ),
+          tierPrices: unit ?? {
+            cost: product.cost,
+            min: product.min,
+            wholesale: product.wholesale,
+            price: product.retail,
+          },
           stockTitle: posStockLabel(product, sessionBranchId),
           low: lowStock(product, left),
           out: available <= 0,
@@ -2122,6 +2115,10 @@ export function PosWorkspace() {
                       (product ? resolveSellUnit(product, item.productUnitId) : undefined);
                     const isPack = item.sellUnit !== item.baseUnit && item.packSize > 1;
                     const stockWarn = left <= 0 || (product ? lowStock(product, left) : false);
+                    const priceDraft = priceDrafts[item.id];
+                    const liveUnitPrice =
+                      priceDraft !== undefined ? Math.max(0, num(priceDraft)) : item.unitPrice;
+                    const liveMinWarn = liveUnitPrice < item.minPrice - 0.0001;
                     return (
                       <tr
                         key={item.id}
@@ -2129,7 +2126,7 @@ export function PosWorkspace() {
                           cartRowRefs.current[i] = element;
                         }}
                         tabIndex={i === selected ? 0 : -1}
-                        className={`${i === selected ? "is-selected" : ""} ${item.minWarn ? "is-min-price" : ""} ${item.lineDisc > 0.001 ? "has-disc" : ""} ${left < -0.0001 ? "is-over" : ""}`}
+                        className={`${i === selected ? "is-selected" : ""} ${liveMinWarn ? "is-min-price" : ""} ${item.lineDisc > 0.001 ? "has-disc" : ""} ${left < -0.0001 ? "is-over" : ""}`}
                         onClick={() => setSelected(i)}
                         onFocus={() => setSelected(i)}
                         onKeyDown={(event) => {
@@ -2154,7 +2151,21 @@ export function PosWorkspace() {
                         </td>
                         <td className="c-item [width:auto] [text-align:left]">
                           <span className="item-name [font-weight:600] [display:flex] [align-items:center] [gap:6px] [min-width:0]">
-                            <span className="name-text">{item.name}</span>
+                            <CmwrPriceTip
+                              unit={
+                                activeUnit ??
+                                (product
+                                  ? {
+                                      cost: product.cost,
+                                      min: product.min,
+                                      wholesale: product.wholesale,
+                                      price: product.retail,
+                                    }
+                                  : null)
+                              }
+                            >
+                              <span className="name-text">{item.name}</span>
+                            </CmwrPriceTip>
                           </span>
                           <span className="item-sku [font-size:11px] [color:var(--muted)] [font-family:var(--mono)] [display:block]">
                             {item.sku} · {qtyStr(item.qty)}{" "}
@@ -2248,12 +2259,14 @@ export function PosWorkspace() {
                               −
                             </button>
                             <input
-                              type="number"
-                              min={1}
-                              max={maxCartQty(item)}
-                              step="any"
+                              type="text"
+                              inputMode="decimal"
                               value={qtyDrafts[item.id] ?? qtyStr(item.qty)}
-                              onClick={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                focusCaretEnd(e.currentTarget);
+                              }}
+                              onFocus={(e) => focusCaretEnd(e.currentTarget)}
                               onChange={(e) => setCartQty(item.id, e.target.value)}
                               onBlur={() => commitCartQty(item.id)}
                               onKeyDown={(e) => {
@@ -2276,18 +2289,18 @@ export function PosWorkspace() {
                           </div>
                         </td>
                         <td
-                          className={`c-price [width:126px] [text-align:right] ${item.minWarn ? "is-min" : ""}`}
+                          className={`c-price [width:126px] [text-align:right] ${liveMinWarn ? "is-min" : ""}`}
                         >
                           <div className="price-cell [position:relative] [height:32px]">
                             <div className="price-wrap [display:flex] [align-items:center] [justify-content:flex-end] [gap:2px] [height:32px]">
                               <span className="price-warn [width:16px] [height:16px] [flex-shrink:0] [display:inline-flex] [align-items:center] [justify-content:center]">
-                                {item.minWarn ? WARN_ICO : null}
+                                {liveMinWarn ? WARN_ICO : null}
                               </span>
                               <input
                                 type="number"
                                 min={0}
                                 step="0.01"
-                                value={priceDrafts[item.id] ?? String(item.unitPrice)}
+                                value={priceDraft ?? String(item.unitPrice)}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   e.currentTarget.select();
@@ -2311,7 +2324,7 @@ export function PosWorkspace() {
                             </div>
                             <span
                               className="price-min [position:absolute] [right:0] [top:calc(100%_+_3px)] [font-family:var(--mono)] [font-size:10px] [font-weight:700] [color:#c2410c] [line-height:1.2] [white-space:nowrap] [pointer-events:none]"
-                              hidden={!item.minWarn}
+                              hidden={!liveMinWarn}
                             >
                               Min {money(item.minPrice)}
                             </span>

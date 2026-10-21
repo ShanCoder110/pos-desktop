@@ -40,6 +40,8 @@ pub fn list_system_printers() -> Result<Vec<SystemPrinter>, String> {
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn list_cups_printers() -> Result<Vec<SystemPrinter>, String> {
+    use std::collections::BTreeMap;
+
     let default_name = Command::new("lpstat")
         .arg("-d")
         .output()
@@ -52,26 +54,53 @@ fn list_cups_printers() -> Result<Vec<SystemPrinter>, String> {
                 .filter(|value| !value.is_empty())
         });
 
-    let output = Command::new("lpstat")
-        .arg("-a")
-        .output()
-        .map_err(|error| format!("Could not list printers: {error}"))?;
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut printers = Vec::new();
-    for line in text.lines() {
-        let name = line.split_whitespace().next().unwrap_or("").trim();
-        if name.is_empty() {
-            continue;
+    // Merge several lpstat views — some printers only show in -e / -p, not -a.
+    let mut names = BTreeMap::<String, ()>::new();
+    let push_name = |map: &mut BTreeMap<String, ()>, raw: &str| {
+        let name = raw.trim();
+        if !name.is_empty() {
+            map.insert(name.to_owned(), ());
         }
-        printers.push(SystemPrinter {
-            is_default: default_name.as_deref() == Some(name),
-            name: name.to_owned(),
-        });
+    };
+
+    if let Ok(output) = Command::new("lpstat").arg("-e").output() {
+        if output.status.success() {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                push_name(&mut names, line);
+            }
+        }
     }
-    Ok(printers)
+
+    if let Ok(output) = Command::new("lpstat").arg("-p").output() {
+        if output.status.success() {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("printer ") {
+                    if let Some(name) = rest.split_whitespace().next() {
+                        push_name(&mut names, name);
+                    }
+                }
+            }
+        }
+    }
+
+    if let Ok(output) = Command::new("lpstat").arg("-a").output() {
+        if output.status.success() {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                if let Some(name) = line.split_whitespace().next() {
+                    push_name(&mut names, name);
+                }
+            }
+        }
+    }
+
+    Ok(names
+        .into_keys()
+        .map(|name| SystemPrinter {
+            is_default: default_name.as_deref() == Some(name.as_str()),
+            name,
+        })
+        .collect())
 }
 
 #[cfg(target_os = "windows")]

@@ -1187,7 +1187,8 @@ input[type="number"]::-webkit-outer-spin-button {
   min-width: 44px;
   max-width: 44px;
   height: 28px;
-  padding: 0 2px;
+  padding: 0 4px;
+  text-align: left;
 }
 .item-name .name-text {
   min-width: 0;

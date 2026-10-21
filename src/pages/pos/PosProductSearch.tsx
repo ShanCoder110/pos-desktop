@@ -1,4 +1,5 @@
 import type { KeyboardEvent, RefObject } from "react";
+import { CmwrPriceTip, type CmwrPrices } from "@/components/common/CmwrPriceTip";
 import type { Product } from "@/shared/types";
 
 export type PosSearchResult = {
@@ -6,8 +7,8 @@ export type PosSearchResult = {
   unitLabel: string;
   availableLabel: string;
   priceLabel: string;
-  /** Cost · Min · Wholesale · Retail (small line under price). */
-  tierLabel?: string;
+  /** Cost · Min · Wholesale · Retail — shown on product-name hover. */
+  tierPrices?: CmwrPrices;
   stockTitle: string;
   low: boolean;
   out: boolean;
@@ -210,10 +211,12 @@ export function PosProductSearch({
                   : result.product.sku}
               </span>
               <span className="name">
-                <span className="name-text">
-                  {result.product.name}
-                  <small> · {result.unitLabel}</small>
-                </span>
+                <CmwrPriceTip unit={result.tierPrices} hoverOnly className="[max-width:100%]">
+                  <span className="name-text">
+                    {result.product.name}
+                    <small> · {result.unitLabel}</small>
+                  </span>
+                </CmwrPriceTip>
               </span>
               <span
                 className={`stock ${result.low ? "is-low" : ""} ${result.out ? "is-over" : ""}`}
@@ -231,9 +234,6 @@ export function PosProductSearch({
               </span>
               <span className="price text-right">
                 <strong className="price-main">{result.priceLabel}</strong>
-                {result.tierLabel ? (
-                  <small className="price-tiers">{result.tierLabel}</small>
-                ) : null}
               </span>
             </button>
           ))}
