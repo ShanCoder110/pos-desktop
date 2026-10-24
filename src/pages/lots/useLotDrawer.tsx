@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Drawer, toaster } from "@/components/common";
 import { LotForm } from "@/pages/lots/LotForm";
 import { ProductForm } from "@/pages/products/ProductForm";
@@ -82,6 +82,7 @@ export function useLotDrawer() {
   const [supplierRows, setSupplierRows] = useState<SupplierRow[]>([]);
   const [apiSupplierIds, setApiSupplierIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState({ suppliers: true, saving: false, nested: false });
+  const savingRef = useRef(false);
   const [nested, setNested] = useState<"supplier" | "product" | null>(null);
   const [nestedSupplier, setNestedSupplier] = useState<SupplierRow | null>(null);
   const [nestedProduct, setNestedProduct] = useState<Product | null>(null);
@@ -93,6 +94,7 @@ export function useLotDrawer() {
   }
 
   function closeLotDrawer() {
+    if (savingRef.current) return;
     closeNested();
     setEdit(null);
   }
@@ -312,6 +314,7 @@ export function useLotDrawer() {
   async function persistSellUnits(productId: string, sellUnits: ProductSellUnit[]) {
     const product = products.find((row) => row.id === productId);
     if (!product) return;
+    if (JSON.stringify(productSellUnits(product)) === JSON.stringify(sellUnits)) return;
     const category = resolveCategoryId(product, categories);
     if (!category) {
       toaster.error(PRODUCT_COPY.categoryRequired);
@@ -364,10 +367,11 @@ export function useLotDrawer() {
   }
 
   async function saveLot(lot: ProductLotRow, sellUnits?: ProductSellUnit[]) {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setLoading((current) => ({ ...current, saving: true }));
     const exists = lots.some((row) => row.id === lot.id);
     if (!exists) {
-      if (loading.saving) return;
-      setLoading((current) => ({ ...current, saving: true }));
       try {
         let supplierId = lot.supplierId;
         if (supplierId && !apiSupplierIds.has(supplierId)) {
@@ -414,18 +418,18 @@ export function useLotDrawer() {
             ? linkedPoToast(created.purchaseOrderNumber, created.purchaseOrderStatus)
             : "Lot added",
         );
+        savingRef.current = false;
         closeLotDrawer();
         void refreshAffectedProduct(lot.productId);
       } catch (error) {
         toaster.error(error instanceof Error ? error.message : "Could not receive lot");
       } finally {
+        savingRef.current = false;
         setLoading((current) => ({ ...current, saving: false }));
       }
       return;
     }
 
-    if (loading.saving) return;
-    setLoading((current) => ({ ...current, saving: true }));
     const damagedQuantity = Math.min(Math.max(0, lot.damagedQuantity), lot.originalQuantity);
     const next = {
       ...lot,
@@ -469,11 +473,13 @@ export function useLotDrawer() {
       setLots((current) => current.map((row) => (row.id === updatedLot.id ? updatedLot : row)));
       bumpListsEpoch();
       toaster.success("Lot updated");
+      savingRef.current = false;
       closeLotDrawer();
       void refreshAffectedProduct(next.productId);
     } catch (error) {
       toaster.error(shortError(error, "Could not update lot"));
     } finally {
+      savingRef.current = false;
       setLoading((current) => ({ ...current, saving: false }));
     }
   }
@@ -497,6 +503,7 @@ export function useLotDrawer() {
         size="xl"
         form
         dim={false}
+        closeDisabled={loading.saving}
         title={edit && lots.some((row) => row.id === edit.id) ? "Edit lot" : "Add lot"}
         onClose={closeLotDrawer}
       >
@@ -520,6 +527,7 @@ export function useLotDrawer() {
             }}
             suspendShortcuts={Boolean(nested)}
             creatingSupplier={loading.nested}
+            saving={loading.saving}
             onChange={setEdit}
             onSave={saveLot}
             onClose={closeLotDrawer}

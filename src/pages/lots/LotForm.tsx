@@ -150,6 +150,7 @@ export function LotForm({
   onAddProductUnit,
   suspendShortcuts = false,
   creatingSupplier = false,
+  saving = false,
   onChange,
   onSave,
   onClose,
@@ -166,6 +167,7 @@ export function LotForm({
   onAddProductUnit?: (productId: string, unit: ProductSellUnit) => Promise<void>;
   suspendShortcuts?: boolean;
   creatingSupplier?: boolean;
+  saving?: boolean;
   onChange: (lot: ProductLotRow) => void;
   onSave: (lot: ProductLotRow, sellUnits?: ProductSellUnit[]) => void;
   onClose: () => void;
@@ -564,7 +566,7 @@ export function LotForm({
   saveRef.current = save;
 
   useEffect(() => {
-    if (suspendShortcuts) return;
+    if (suspendShortcuts || saving) return;
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement;
       const openPicker = target.closest(
@@ -602,7 +604,7 @@ export function LotForm({
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [suspendShortcuts, onClose]);
+  }, [suspendShortcuts, saving, onClose]);
 
   const supplierOptions = suppliers
     .filter((supplier) => supplier.isActive)
@@ -615,8 +617,12 @@ export function LotForm({
     <div
       ref={rootRef}
       className="lot-form flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
+      aria-busy={saving}
     >
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-4">
+      <div
+        className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-4"
+        inert={saving}
+      >
         <Tabs
           variant="line"
           ariaLabel="Lot sections"
@@ -642,7 +648,7 @@ export function LotForm({
         />
       </div>
 
-      <div className="lot-form-pane drawer-form min-h-0 flex-1 px-4 py-3 pb-6">
+      <div className="lot-form-pane drawer-form min-h-0 flex-1 px-4 py-3 pb-6" inert={saving}>
         {tab === "lot" ? (
           <>
             <FormSection
@@ -933,6 +939,7 @@ export function LotForm({
             <Field label="Paid now">
               <MoneyInput
                 value={lot.paidNow ? String(lot.paidNow) : ""}
+                disabled={saving}
                 onChange={(event) => {
                   const total = lot.originalQuantity * lot.purchasePrice;
                   const paid = Math.max(0, Number(event.target.value) || 0);
@@ -945,6 +952,7 @@ export function LotForm({
                 value={String(
                   Math.max(0, lot.originalQuantity * lot.purchasePrice - (lot.paidNow ?? 0)),
                 )}
+                disabled={saving}
                 onChange={(event) => {
                   const total = lot.originalQuantity * lot.purchasePrice;
                   const remainder = Math.max(0, Number(event.target.value) || 0);
@@ -954,14 +962,16 @@ export function LotForm({
             </Field>
           </div>
         ) : null}
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
         <Button
           className="lot-save"
           variant="primary"
-          disabled={branchRows.length > 0 && Math.abs(unallocated) > 1e-6}
+          disabled={saving || (branchRows.length > 0 && Math.abs(unallocated) > 1e-6)}
           onClick={save}
         >
-          {isNew ? "Add lot" : "Save lot"}
+          {saving ? "Saving…" : isNew ? "Add lot" : "Save lot"}
           <kbd className="ui-kbd">F12</kbd>
         </Button>
       </footer>
