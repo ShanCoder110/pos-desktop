@@ -9,7 +9,20 @@ import type {
 import { API_ROUTES } from "@/shared/constants/api";
 import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { apiRequest, queryString, type PaginatedResponse } from "@/services/api";
+import { cachedLocalRead } from "@/services/readCache";
 import { listMasterRecords, type MasterRecord } from "@/services/masters";
+
+export interface CreditBookSummary {
+  owedToShop: number;
+  owingAccounts: number;
+  profitOnHold: number;
+  advanceHeld: number;
+  settled: number;
+}
+
+export function getCreditBookSummary(signal?: AbortSignal) {
+  return apiRequest<CreditBookSummary>(API_ROUTES.creditBookSummary, { signal });
+}
 
 export interface CustomerLedgerEntryResponse {
   id: string;
@@ -285,10 +298,14 @@ export function postReturn(payload: {
 }
 
 export async function listAllReturns(signal?: AbortSignal): Promise<ReturnRow[]> {
+  return cachedLocalRead("returns:all", fetchAllReturns, signal);
+}
+
+async function fetchAllReturns(): Promise<ReturnRow[]> {
   const rows: ReturnRow[] = [];
   let page = 1;
   for (;;) {
-    const response = await listReturns({ page, perPage: MAX_PAGE_SIZE }, signal);
+    const response = await listReturns({ page, perPage: MAX_PAGE_SIZE });
     rows.push(...response.data.map(mapReturn));
     if (!response.meta.hasNextPage) return rows;
     page += 1;

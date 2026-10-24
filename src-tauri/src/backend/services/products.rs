@@ -46,6 +46,24 @@ impl ProductService {
         })
     }
 
+    pub async fn list_bulk(
+        database: &DatabaseConnection,
+        mut query: ProductListQuery,
+    ) -> Result<Paginated<ProductResponse>, AppError> {
+        query.page = query.page.normalized();
+        query.page.page = 1;
+        query.page.per_page = 5_000;
+        if query.page.sort_by.is_none() {
+            query.page.sort_by = Some("name".to_owned());
+            query.page.sort_direction = Some(crate::backend::dto::SortDirection::Asc);
+        }
+        let (data, total) = ProductRepository::list(database, &query).await?;
+        Ok(Paginated {
+            data,
+            meta: PaginationMeta::new(total, 1, query.page.per_page),
+        })
+    }
+
     pub async fn search(
         database: &DatabaseConnection,
         query: &str,
@@ -1108,6 +1126,7 @@ mod tests {
             opening_stocks: vec![],
         };
 
+        let mut second_request = request.clone();
         let product = ProductService::create(&database, &context, request)
             .await
             .expect("create product transaction");
@@ -1116,6 +1135,81 @@ mod tests {
         assert_eq!(product.stock, 5.0);
         assert_eq!(product.cost, 10.0);
         assert_eq!(product.sell_units.len(), 1);
+        second_request.name = "Adapter".into();
+        second_request.sku = Some("CLIENT-SKU-2".into());
+        second_request.sell_units[0].price = Decimal::new(30, 0);
+        second_request.opening_stock.as_mut().unwrap().quantity = Decimal::new(2, 0);
+        let second = ProductService::create(&database, &context, second_request)
+            .await
+            .expect("create second product");
+        for (sort_by, direction, expected_id) in [
+            ("name", crate::backend::dto::SortDirection::Asc, &second.id),
+            (
+                "name",
+                crate::backend::dto::SortDirection::Desc,
+                &product.id,
+            ),
+            (
+                "productNo",
+                crate::backend::dto::SortDirection::Desc,
+                &second.id,
+            ),
+            (
+                "retail",
+                crate::backend::dto::SortDirection::Desc,
+                &second.id,
+            ),
+            (
+                "stock",
+                crate::backend::dto::SortDirection::Desc,
+                &product.id,
+            ),
+        ] {
+            let result = ProductService::list(
+                &database,
+                ProductListQuery {
+                    page: PageQuery {
+                        per_page: 1,
+                        sort_by: Some(sort_by.into()),
+                        sort_direction: Some(direction),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("sort products");
+            assert_eq!(result.meta.total_items, 2);
+            assert_eq!(&result.data[0].id, expected_id, "sort by {sort_by}");
+        }
+        for sort_by in [
+            "urduName",
+            "sku",
+            "category",
+            "supplier",
+            "cost",
+            "min",
+            "wholesale",
+            "margin",
+            "sales",
+            "minStock",
+            "recommended",
+            "lastCost",
+            "status",
+        ] {
+            ProductService::list(
+                &database,
+                ProductListQuery {
+                    page: PageQuery {
+                        sort_by: Some(sort_by.into()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_or_else(|error| panic!("sort by {sort_by}: {error}"));
+        }
         let _ = Database::connect("sqlite::memory:").await;
     }
 

@@ -80,15 +80,34 @@ impl ProductRepository {
         .map(|row| std::cmp::max(row.count, 0) as u64)
         .unwrap_or(0);
 
+        const BASE_MIN: &str = "COALESCE((SELECT pu.minimum_price FROM product_units pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.deleted_at IS NULL LIMIT 1), 0)";
+        const BASE_WHOLESALE: &str = "COALESCE((SELECT pu.wholesale_price FROM product_units pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.deleted_at IS NULL LIMIT 1), 0)";
+        const BASE_RETAIL: &str = "COALESCE((SELECT pu.retail_price FROM product_units pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.deleted_at IS NULL LIMIT 1), 0)";
         let sort = match query.page.sort_by.as_deref() {
-            Some("name") => "p.name",
+            Some("name") => "p.name COLLATE NOCASE",
             Some("productNo") | Some("product_no") => "p.product_no",
-            Some("sku") => "p.sku",
+            Some("urduName") => "p.urdu_name",
+            Some("sku") => "p.sku COLLATE NOCASE",
+            Some("category") => "c.name COLLATE NOCASE",
+            Some("supplier") => "(SELECT s.name FROM product_lots pl JOIN suppliers s ON s.id = pl.supplier_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND pl.remaining_base_quantity > 0 ORDER BY pl.received_date ASC, pl.created_at ASC LIMIT 1) COLLATE NOCASE",
             Some("stock") => "stock",
-            Some("cost") => "current_cost",
+            Some("cost") | Some("lastCost") => "current_cost",
+            Some("min") => BASE_MIN,
+            Some("wholesale") => BASE_WHOLESALE,
+            Some("retail") => BASE_RETAIL,
+            Some("margin") => "CASE WHEN COALESCE((SELECT pu.retail_price FROM product_units pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.deleted_at IS NULL LIMIT 1), 0) > 0 THEN (1 - current_cost / (SELECT pu.retail_price FROM product_units pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.deleted_at IS NULL LIMIT 1)) * 100 ELSE 0 END",
+            Some("sales") => "COALESCE(product_sales.sales, 0)",
+            Some("minStock") => "p.minimum_stock",
+            Some("recommended") => "CASE WHEN 2 * p.minimum_stock > stock THEN 2 * p.minimum_stock - stock ELSE 0 END",
+            Some("status") => "CASE WHEN stock <= 0 THEN 0 WHEN stock <= p.minimum_stock THEN 1 ELSE 2 END",
             _ => "p.created_at",
         };
         let direction = query.page.sort_direction.unwrap_or_default().sql();
+        let sales_join = if query.page.sort_by.as_deref() == Some("sales") {
+            " LEFT JOIN (SELECT product_id, SUM(line_total) AS sales FROM (SELECT ii.product_id, ii.line_total FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE i.status = 'COMPLETED' AND i.deleted_at IS NULL UNION ALL SELECT rp.product_id, rp.line_total FROM repair_parts rp JOIN repair_jobs rj ON rj.id = rp.repair_job_id) GROUP BY product_id) product_sales ON product_sales.product_id = p.id"
+        } else {
+            ""
+        };
         // When searching: names/IDs that start with the query rank above substring hits.
         let (order_sql, mut order_values) = if let Some(search) = query
             .page
@@ -123,7 +142,9 @@ impl ProductRepository {
             (format!("{sort} {direction}, p.id ASC"), Vec::new())
         };
         let (projection, mut projection_values) = projection_sql(branch_id);
-        let sql = format!("{projection} WHERE {conditions} ORDER BY {order_sql} LIMIT ? OFFSET ?");
+        let sql = format!(
+            "{projection}{sales_join} WHERE {conditions} ORDER BY {order_sql} LIMIT ? OFFSET ?"
+        );
         projection_values.append(&mut values);
         projection_values.append(&mut order_values);
         projection_values.push((query.page.per_page as i64).into());

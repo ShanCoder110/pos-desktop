@@ -27,6 +27,7 @@ mod m20261017_000024_products_sku_lower_unique;
 mod m20261018_000025_product_urdu_name;
 mod m20261018_000026_product_no;
 mod m20261021_000027_lot_sell_prices;
+mod m20261024_000028_query_indexes;
 
 pub struct Migrator;
 
@@ -61,6 +62,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261018_000025_product_urdu_name::Migration),
             Box::new(m20261018_000026_product_no::Migration),
             Box::new(m20261021_000027_lot_sell_prices::Migration),
+            Box::new(m20261024_000028_query_indexes::Migration),
         ]
     }
 }

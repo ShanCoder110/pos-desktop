@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useDebounce } from "@/hooks/useDebounce";
 import {
   BookOpen,
   CircleDot,
@@ -672,7 +673,9 @@ export function CustomersPage() {
   });
   const [kpiPicked, setKpiPicked] = useState(false);
 
-  const filters = useMemo(() => customerQuery(search, chips), [chips, search]);
+  const debouncedSearch = useDebounce(search);
+  const debouncedLedgerSearch = useDebounce(ledgerSearch);
+  const filters = useMemo(() => customerQuery(debouncedSearch, chips), [chips, debouncedSearch]);
   const canAdjust = customerCanAdjust(viewerRole);
   const statusChips = chipValuesForField(chips, "status");
   const balanceChips = chipValuesForField(chips, "balance");
@@ -744,7 +747,7 @@ export function CustomersPage() {
     const debit = Number(chipValuesForField(ledgerChips, "debit")[0]);
     const credit = Number(chipValuesForField(ledgerChips, "credit")[0]);
     const params = {
-      search: ledgerSearch,
+      search: debouncedLedgerSearch,
       customer: chipCsv(ledgerChips, "customer"),
       entryType: chipCsv(ledgerChips, "entryType"),
       notes: chipCsv(ledgerChips, "notes"),
@@ -789,7 +792,7 @@ export function CustomersPage() {
     ledgerChips,
     ledgerPage,
     ledgerPageSize,
-    ledgerSearch,
+    debouncedLedgerSearch,
     reloadKey,
     tab,
   ]);

@@ -181,6 +181,8 @@ pub async fn revise_invoice(
             return Err(AppError::Forbidden(ERROR_BELOW_MINIMUM));
         }
         let authorized_by = parse_optional_uuid(item.authorized_by.as_deref(), "authorizedBy")?;
+        let preferred_lot_id =
+            parse_optional_uuid(item.product_lot_id.as_deref(), "items.productLotId")?;
         subtotal += line_total;
         demands.push(StockDemand {
             product_id,
@@ -194,6 +196,7 @@ pub async fn revise_invoice(
         prepared_items.push(PreparedItem {
             product_id,
             product_unit_id,
+            preferred_lot_id,
             product_name: row.product_name,
             sku: row.sku,
             unit_name: row.unit_display_name,
@@ -293,6 +296,7 @@ pub async fn revise_invoice(
                 selling_branch_id: context.branch_id,
                 reference_id: invoice_id,
                 product_id: prepared.product_id,
+                preferred_lot_id: prepared.preferred_lot_id,
                 needed: prepared.base_quantity,
                 unit_name: &prepared.unit_name,
                 displayed: prepared.displayed,
@@ -502,6 +506,15 @@ async fn revise_request_is_noop(
     invoice_id: Uuid,
     request: &CompleteSaleRequest,
 ) -> Result<bool, AppError> {
+    // A lot choice is not part of invoice_items; honor an explicit choice even
+    // when the visible item prices and quantities match the original invoice.
+    if request
+        .items
+        .iter()
+        .any(|item| item.product_lot_id.is_some())
+    {
+        return Ok(false);
+    }
     let request_customer = parse_optional_uuid(request.customer_id.as_deref(), "customerId")?;
     if request_customer != header.customer_id {
         return Ok(false);

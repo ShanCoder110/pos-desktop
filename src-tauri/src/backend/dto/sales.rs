@@ -29,6 +29,7 @@ pub struct CompleteSaleRequest {
 pub struct SaleItemInput {
     pub product_id: String,
     pub product_unit_id: String,
+    pub product_lot_id: Option<String>,
     #[validate(custom(function = "positive_decimal"))]
     pub quantity: Decimal,
     #[validate(custom(function = "non_negative_decimal"))]
@@ -71,6 +72,8 @@ pub struct InvoiceListQuery {
     pub status: Option<String>,
     #[serde(alias = "payment_status")]
     pub payment_status: Option<String>,
+    #[serde(alias = "include_details")]
+    pub include_details: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize)]

@@ -59,12 +59,25 @@ export function listenerCommand(pid) {
   if (!pid) return "";
   try {
     if (platform() === "win32") {
-      const out = execFileSync(
-        "cmd.exe",
-        ["/c", `wmic process where processid=${pid} get Name,CommandLine /FORMAT:LIST`],
-        { encoding: "utf8" },
-      );
-      return out.replace(/\r/g, "").trim();
+      try {
+        const out = execFileSync(
+          "cmd.exe",
+          ["/c", `wmic process where processid=${pid} get Name,CommandLine /FORMAT:LIST`],
+          { encoding: "utf8" },
+        );
+        return out.replace(/\r/g, "").trim();
+      } catch {
+        // WMIC is optional on newer Windows installations.
+        return execFileSync(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-Command",
+            `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CommandLine`,
+          ],
+          { encoding: "utf8" },
+        ).trim();
+      }
     }
     return execFileSync("ps", ["-p", String(pid), "-o", "command="], {
       encoding: "utf8",
@@ -93,6 +106,12 @@ export function isDesktopDukanListener(pid) {
     /dukan\.app\b/.test(cmd) ||
     /[/\\]applications[/\\]dukan/.test(cmd)
   );
+}
+
+/** The standalone Rust API started from this checkout for local development. */
+export function isDevApiListener(pid) {
+  const cmd = listenerCommand(pid).toLowerCase();
+  return /(?:^|[/\\])target[/\\](?:debug|release)[/\\]api(?:\.exe)?(?:\s|$)/.test(cmd);
 }
 
 /** Installed/desktop Dukan is listening on the Vite loopback port. */

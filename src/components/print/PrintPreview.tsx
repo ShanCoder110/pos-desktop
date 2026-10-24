@@ -46,6 +46,28 @@ function slipMatchesLanguage(node: HTMLElement, urdu: boolean) {
   return marker === "EN";
 }
 
+async function waitForReceiptAssets(node: HTMLElement) {
+  await document.fonts.ready;
+  await Promise.all(
+    [...node.querySelectorAll("img")].map(async (image) => {
+      if (!image.complete) {
+        await new Promise<void>((resolve) => {
+          const timeout = window.setTimeout(resolve, 3000);
+          const finish = () => {
+            window.clearTimeout(timeout);
+            resolve();
+          };
+          image.addEventListener("load", finish, { once: true });
+          image.addEventListener("error", finish, { once: true });
+        });
+      }
+      if (image.naturalWidth > 0 && image.decode) {
+        await image.decode().catch(() => undefined);
+      }
+    }),
+  );
+}
+
 export function PrintPreview({
   open,
   onClose,
@@ -197,6 +219,7 @@ export function PrintPreview({
 
       const pageNodes = [...node.querySelectorAll<HTMLElement>(".slip-page")];
       if (!pageNodes.length) return false;
+      await waitForReceiptAssets(node);
       const copies = Math.max(1, Math.min(9, Number(settings.copies) || 1));
       for (let copy = 0; copy < copies; copy += 1) {
         for (const page of pageNodes) {
@@ -204,6 +227,7 @@ export function PrintPreview({
             pixelRatio: 2,
             backgroundColor: "#ffffff",
             cacheBust: true,
+            style: { boxShadow: "none", overflow: "visible" },
           });
           if (!blob) {
             toaster.error("Could not capture the receipt.");

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useDebounce } from "@/hooks/useDebounce";
 import {
   BookOpen,
   MapPin,
@@ -312,7 +313,12 @@ export function EmployeesPage() {
     rangeForPeriod(DEFAULT_LEDGER_DATE_PERIOD),
   );
 
-  const filters = useMemo(() => staffQuery(search, chips, branches), [branches, chips, search]);
+  const debouncedSearch = useDebounce(search);
+  const debouncedLedgerSearch = useDebounce(ledgerSearch);
+  const filters = useMemo(
+    () => staffQuery(debouncedSearch, chips, branches),
+    [branches, chips, debouncedSearch],
+  );
   const filterFields = useMemo(
     () => employeeFilterFields(branches.map((branch) => branch.name)),
     [branches],
@@ -397,7 +403,7 @@ export function EmployeesPage() {
     const userChips = chipValuesForField(ledgerChips, "user");
     const entryTypeChips = chipValuesForField(ledgerChips, "entryType");
     const params = {
-      search: ledgerSearch.trim() || undefined,
+      search: debouncedLedgerSearch.trim() || undefined,
       user: userChips.length === 1 ? userChips[0] : undefined,
       entryType: entryTypeChips.length === 1 ? entryTypeChips[0] : undefined,
       notes: chipValuesForField(ledgerChips, "notes")[0] || undefined,
@@ -439,7 +445,7 @@ export function EmployeesPage() {
     ledgerDateRange.to,
     ledgerPage,
     ledgerPageSize,
-    ledgerSearch,
+    debouncedLedgerSearch,
     reloadKey,
     tab,
   ]);

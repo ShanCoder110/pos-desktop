@@ -247,7 +247,11 @@ export function InvoiceThermalReceipt({
               {tagline ? (
                 <div className={`receipt-tagline-block--${settings.receiptTaglineAlign}`}>
                   <p
-                    className={["receipt-tagline", receiptUrduClass(tagline)]
+                    className={[
+                      "receipt-tagline",
+                      `receipt-tagline--${settings.receiptTaglineSize}`,
+                      receiptUrduClass(tagline),
+                    ]
                       .filter(Boolean)
                       .join(" ")}
                   >
@@ -258,7 +262,11 @@ export function InvoiceThermalReceipt({
               {contact ? (
                 <div className={`receipt-contact-block--${settings.receiptContactAlign}`}>
                   <p
-                    className={["receipt-contact-line", receiptUrduClass(contact)]
+                    className={[
+                      "receipt-contact-line",
+                      `receipt-contact-line--${settings.receiptContactSize}`,
+                      receiptUrduClass(contact),
+                    ]
                       .filter(Boolean)
                       .join(" ")}
                   >
@@ -268,7 +276,11 @@ export function InvoiceThermalReceipt({
               ) : null}
               {settings.address ? (
                 <p
-                  className={["receipt-shop-info", receiptUrduClass(settings.address)]
+                  className={[
+                    "receipt-shop-info",
+                    `receipt-shop-info--${settings.receiptAddressSize}`,
+                    receiptUrduClass(settings.address),
+                  ]
                     .filter(Boolean)
                     .join(" ")}
                 >
@@ -396,8 +408,6 @@ export function InvoiceThermalReceipt({
           </div>
         ) : null}
 
-        {showTotalsFooter && showPreviousBalance ? <div className="receipt-divider-solid" /> : null}
-
         {isSplit ? (
           <div className="receipt-grand-total-row">
             <span>
@@ -438,11 +448,10 @@ export function InvoiceThermalReceipt({
             </div>
 
             {showRemaining ? (
-              <>
-                <div className="receipt-divider" />
+              <div className="receipt-settlement">
                 <div className="receipt-totals">
                   {(customer.isWalking ? due > 0.009 : true) ? (
-                    <div className="receipt-grand-total-row">
+                    <div className="receipt-grand-total-row receipt-remaining-row">
                       <span>{labels.remaining}</span>
                       <span>Rs. {formatRs(Math.abs(remainingAmount))}</span>
                     </div>
@@ -454,10 +463,10 @@ export function InvoiceThermalReceipt({
                     </div>
                   ) : null}
                 </div>
-              </>
+              </div>
             ) : null}
 
-            <div className="receipt-divider" />
+            <div className="receipt-divider-thick receipt-footer-divider" />
 
             <div className="receipt-footer">
               {promo ? (

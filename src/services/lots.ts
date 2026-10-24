@@ -2,6 +2,7 @@ import type { ProductLotRow } from "@/shared/domain/types";
 import { API_ROUTES } from "@/shared/constants/api";
 import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { apiRequest, queryString, type PaginatedResponse } from "@/services/api";
+import { cachedLocalRead } from "@/services/readCache";
 
 export interface LotResponse {
   id: string;
@@ -139,10 +140,16 @@ export async function listAllLots(
   params: Omit<LotListParams, "page" | "perPage"> = {},
   signal?: AbortSignal,
 ): Promise<ProductLotRow[]> {
+  return cachedLocalRead(`lots:${queryString(params)}`, () => fetchAllLots(params), signal);
+}
+
+async function fetchAllLots(
+  params: Omit<LotListParams, "page" | "perPage">,
+): Promise<ProductLotRow[]> {
   const lots: ProductLotRow[] = [];
   let page = 1;
   for (;;) {
-    const response = await listLots({ ...params, page, perPage: MAX_PAGE_SIZE }, signal);
+    const response = await listLots({ ...params, page, perPage: MAX_PAGE_SIZE });
     lots.push(...response.data.map(mapLotResponse));
     if (!response.meta.hasNextPage) return lots;
     page += 1;

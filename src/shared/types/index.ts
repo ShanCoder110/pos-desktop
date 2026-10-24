@@ -54,7 +54,10 @@ export interface ShopSettings {
   receiptShopNameSize: ReceiptTextSize;
   receiptShopNameBold: boolean;
   receiptTaglineAlign: ReceiptTextAlign;
+  receiptTaglineSize: ReceiptTextSize;
   receiptContactAlign: ReceiptTextAlign;
+  receiptContactSize: ReceiptTextSize;
+  receiptAddressSize: ReceiptTextSize;
   receiptFooterSize: ReceiptTextSize;
   receiptFooterBold: boolean;
   receiptPromoAlign: ReceiptTextAlign;

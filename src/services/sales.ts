@@ -7,6 +7,7 @@ import type {
 import { API_ROUTES } from "@/shared/constants/api";
 import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { apiRequest, queryString, type PaginatedResponse } from "@/services/api";
+import { cachedLocalRead } from "@/services/readCache";
 
 export interface InvoiceItemResponse {
   id: string;
@@ -76,6 +77,7 @@ export interface CompleteSalePayload {
   items: {
     productId: string;
     productUnitId: string;
+    productLotId?: string;
     quantity: number;
     unitPrice: number;
     priceMode?: string;
@@ -165,6 +167,7 @@ export function listInvoices(
     customerId?: string;
     status?: string;
     paymentStatus?: string;
+    includeDetails?: boolean;
   } = {},
   signal?: AbortSignal,
 ) {
@@ -177,11 +180,20 @@ export function listInvoices(
 export async function listAllInvoices(
   signal?: AbortSignal,
   branchId?: string,
+  includeDetails = true,
 ): Promise<InvoiceRow[]> {
+  return cachedLocalRead(
+    `invoices:${branchId ?? "all"}:${includeDetails ? "details" : "headers"}`,
+    () => fetchAllInvoices(branchId, includeDetails),
+    signal,
+  );
+}
+
+async function fetchAllInvoices(branchId?: string, includeDetails = true): Promise<InvoiceRow[]> {
   const rows: InvoiceRow[] = [];
   let page = 1;
   for (;;) {
-    const response = await listInvoices({ page, perPage: MAX_PAGE_SIZE, branchId }, signal);
+    const response = await listInvoices({ page, perPage: MAX_PAGE_SIZE, branchId, includeDetails });
     rows.push(...response.data.map(mapInvoice));
     if (!response.meta.hasNextPage) return rows;
     page += 1;

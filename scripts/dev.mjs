@@ -35,7 +35,9 @@ process.on("SIGTERM", () => {
   process.exit(0);
 });
 
-const { child: apiChild, reused } = await startLocalApi();
+// A fresh dev launch must rebuild Rust changes instead of silently reusing
+// an older API process left running on the same port.
+const { child: apiChild, reused } = await startLocalApi({ reuseExisting: false });
 track(apiChild);
 
 if (apiChild) {

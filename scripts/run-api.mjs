@@ -10,6 +10,8 @@ import {
   freePort,
   isApiHealthy,
   isDesktopAppOnApiPort,
+  isDevApiListener,
+  listenerPid,
   waitForApiHealthy,
 } from "./local-ports.mjs";
 
@@ -26,15 +28,23 @@ function exitDesktopConflict() {
   process.exit(1);
 }
 
-export async function startLocalApi({ inheritStdio = true } = {}) {
+export async function startLocalApi({ inheritStdio = true, reuseExisting = true } = {}) {
   // Never reuse packaged Dukan — healthy /health but wrong SQLite path.
   if (isDesktopAppOnApiPort()) {
     exitDesktopConflict();
   }
 
   if (await isApiHealthy()) {
-    console.log(`[dev] API already healthy on :${API_PORT} — reusing`);
-    return { child: null, reused: true };
+    if (reuseExisting) {
+      console.log(`[dev] API already healthy on :${API_PORT} — reusing`);
+      return { child: null, reused: true };
+    }
+    const pid = listenerPid(API_PORT);
+    if (!isDevApiListener(pid)) {
+      throw new Error(
+        `API on :${API_PORT} is not the local development binary; stop it before restarting`,
+      );
+    }
   }
 
   const freed = await freePort(API_PORT, "API");

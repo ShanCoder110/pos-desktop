@@ -1,6 +1,7 @@
 import { API_ROUTES } from "@/shared/constants/api";
 import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { apiRequest, queryString, type PaginatedResponse } from "@/services/api";
+import { cachedLocalRead } from "@/services/readCache";
 
 export interface SupplierLedgerEntry {
   id: string;
@@ -120,10 +121,20 @@ export async function listAllPurchaseOrders(
   params: Omit<Parameters<typeof listPurchaseOrders>[0], "page" | "perPage"> = {},
   signal?: AbortSignal,
 ) {
+  return cachedLocalRead(
+    `purchase-orders:${queryString(params)}`,
+    () => fetchAllPurchaseOrders(params),
+    signal,
+  );
+}
+
+async function fetchAllPurchaseOrders(
+  params: Omit<Parameters<typeof listPurchaseOrders>[0], "page" | "perPage">,
+) {
   const rows: PurchaseOrder[] = [];
   let page = 1;
   for (;;) {
-    const response = await listPurchaseOrders({ ...params, page, perPage: MAX_PAGE_SIZE }, signal);
+    const response = await listPurchaseOrders({ ...params, page, perPage: MAX_PAGE_SIZE });
     rows.push(...response.data);
     if (!response.meta.hasNextPage) return rows;
     page += 1;

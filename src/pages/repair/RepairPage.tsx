@@ -95,19 +95,22 @@ export function RepairPage() {
   const [shopAddress, setShopAddress] = useState("");
   const [savingShop, setSavingShop] = useState(false);
 
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    const [nextProducts, nextLots, nextBranches, nextTransfers] = await Promise.all([
-      listAllProducts(signal),
-      listAllLots({}, signal),
-      listAllBranches(signal),
-      listAllTransfers({}, signal),
-    ]);
-    setProducts(nextProducts);
-    setLots(nextLots);
-    setBranches(nextBranches);
-    setTransfers(nextTransfers);
-    return nextBranches;
-  }, []);
+  const refresh = useCallback(
+    async (signal?: AbortSignal) => {
+      const [nextProducts, nextLots, nextBranches, nextTransfers] = await Promise.all([
+        repairShopId ? listAllProducts(signal) : Promise.resolve(null),
+        listAllLots({}, signal),
+        listAllBranches(signal),
+        repairShopId ? listAllTransfers({}, signal) : Promise.resolve(null),
+      ]);
+      if (nextProducts) setProducts(nextProducts);
+      setLots(nextLots);
+      setBranches(nextBranches);
+      if (nextTransfers) setTransfers(nextTransfers);
+      return nextBranches;
+    },
+    [repairShopId],
+  );
 
   useEffect(() => {
     const controller = new AbortController();

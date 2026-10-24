@@ -47,6 +47,7 @@ import {
 import { LinkedUnitBoxes, UnitQtyFields } from "@/pages/products/LotFields";
 import { ensureSession } from "@/services/auth";
 import { updateLot } from "@/services/lots";
+import { getProduct } from "@/services/products";
 import { listAllBranches } from "@/services/org";
 import {
   applyDerivedPrices,
@@ -214,10 +215,13 @@ export function ProductForm({
   const {
     lots,
     setLots,
+    setProducts,
     categories: hubCategories,
+    setCategories: setHubCategories,
     units: hubUnits,
+    setUnits: setHubUnits,
     suppliers: hubSuppliers,
-    refreshHub,
+    setSuppliers: setHubSuppliers,
   } = useProductsHub();
   const [localCategories, setLocalCategories] = useState<{ id: string; name: string }[]>([]);
   const [localUnits, setLocalUnits] = useState<{ id: string; name: string; symbol: string }[]>([]);
@@ -286,22 +290,51 @@ export function ProductForm({
     if (hubCategories.length && hubUnits.length && hubSuppliers.length) return;
     const controller = new AbortController();
     void Promise.all([
-      listMasterRecords("categories", { perPage: MAX_PAGE_SIZE, isActive: true }, controller.signal)
-        .then((r) => setLocalCategories(r.data.map(({ id, name }) => ({ id, name }))))
-        .catch(() => undefined),
-      listMasterRecords("units", { perPage: MAX_PAGE_SIZE, isActive: true }, controller.signal)
-        .then((r) =>
-          setLocalUnits(r.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" }))),
-        )
-        .catch(() => undefined),
-      listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, controller.signal)
-        .then((r) =>
-          setLocalSuppliers(r.data.map(({ id, name, isActive }) => ({ id, name, isActive }))),
-        )
-        .catch(() => undefined),
+      !hubCategories.length
+        ? listMasterRecords(
+            "categories",
+            { perPage: MAX_PAGE_SIZE, isActive: true },
+            controller.signal,
+          )
+            .then((r) => {
+              const rows = r.data.map(({ id, name }) => ({ id, name }));
+              setLocalCategories(rows);
+              setHubCategories(rows);
+            })
+            .catch(() => undefined)
+        : Promise.resolve(),
+      !hubUnits.length
+        ? listMasterRecords("units", { perPage: MAX_PAGE_SIZE, isActive: true }, controller.signal)
+            .then((r) => {
+              const rows = r.data.map(({ id, name, symbol }) => ({
+                id,
+                name,
+                symbol: symbol ?? "",
+              }));
+              setLocalUnits(rows);
+              setHubUnits(rows);
+            })
+            .catch(() => undefined)
+        : Promise.resolve(),
+      !hubSuppliers.length
+        ? listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, controller.signal)
+            .then((r) => {
+              const rows = r.data.map(({ id, name, isActive }) => ({ id, name, isActive }));
+              setLocalSuppliers(rows);
+              setHubSuppliers(rows);
+            })
+            .catch(() => undefined)
+        : Promise.resolve(),
     ]);
     return () => controller.abort();
-  }, [hubCategories.length, hubUnits.length, hubSuppliers.length]);
+  }, [
+    hubCategories.length,
+    hubUnits.length,
+    hubSuppliers.length,
+    setHubCategories,
+    setHubUnits,
+    setHubSuppliers,
+  ]);
 
   const [lotDraft, setLotDraft] = useState(() => lots.filter((l) => l.productId === product.id));
   const [priceLotId, setPriceLotId] = useState("");
@@ -555,7 +588,11 @@ export function ProductForm({
           ? current
           : [...current, { id: created.id, name: created.name }],
       );
-      await refreshHub(undefined, { quiet: true });
+      setHubCategories((current) =>
+        current.some((row) => row.id === created.id)
+          ? current
+          : [...current, { id: created.id, name: created.name }],
+      );
       patch({ category: created.name, categoryId: created.id });
       toaster.success("Category added");
     } catch (error) {
@@ -594,7 +631,11 @@ export function ProductForm({
           ? current
           : [...current, { id: created.id, name: created.name, isActive: created.isActive }],
       );
-      await refreshHub(undefined, { quiet: true });
+      setHubSuppliers((current) =>
+        current.some((row) => row.id === created.id)
+          ? current
+          : [...current, { id: created.id, name: created.name, isActive: created.isActive }],
+      );
       if (selectForLotId) {
         setLotDraft((prev) =>
           prev.map((row) => (row.id === selectForLotId ? { ...row, supplierId: created.id } : row)),
@@ -629,6 +670,9 @@ export function ProductForm({
       setLocalUnits((current) =>
         current.some((row) => row.id === nextUnit.id) ? current : [...current, nextUnit],
       );
+      setHubUnits((current) =>
+        current.some((row) => row.id === nextUnit.id) ? current : [...current, nextUnit],
+      );
 
       const currentUnits = qtyUnits(defaultSellUnits(productRef.current));
       const target = targetUnitId
@@ -652,7 +696,6 @@ export function ProductForm({
         );
         patch({ sellUnits: deriveAll(updated) });
       }
-      await refreshHub(undefined, { quiet: true });
       toaster.success("Unit added");
     } catch (error) {
       toaster.error(shortError(error, "Could not add unit"));
@@ -1052,7 +1095,14 @@ export function ProductForm({
             expiryDate: lot.expiryDate ? lot.expiryDate.slice(0, 10) : null,
           });
         }
-        if (adjusted.length) await refreshHub(undefined, { quiet: true });
+        if (adjusted.length) {
+          // Lot edits affect stock and price projections. Refresh only this
+          // product instead of reloading the entire catalog after every save.
+          const updatedProduct = await getProduct(product.id);
+          setProducts((current) =>
+            current.map((row) => (row.id === updatedProduct.id ? updatedProduct : row)),
+          );
+        }
       } catch (error) {
         toaster.error(shortError(error, PRODUCT_COPY.saveFailed));
         return;
@@ -1060,6 +1110,7 @@ export function ProductForm({
       setLots((prev) => [...prev.filter((l) => l.productId !== product.id), ...lotDraft]);
     }
     if (keepAdding && isNew) {
+      toaster.success(next.productNo ? `Product added · ID ${next.productNo}` : "Product added");
       setFlash(true);
       setError(null);
       setShowValidation(false);
@@ -1067,7 +1118,13 @@ export function ProductForm({
       onChange(blankProduct());
       return;
     }
-    toaster.success(isNew ? "Product added" : "Product saved");
+    toaster.success(
+      isNew && next.productNo
+        ? `Product added · ID ${next.productNo}`
+        : isNew
+          ? "Product added"
+          : "Product saved",
+    );
     onClose();
   }
 
@@ -1269,27 +1326,18 @@ export function ProductForm({
                 onChange={(e) => patch({ urduName: e.target.value })}
               />
             </Field>
-            <Field
-              label="Product ID"
-              hint={
-                isNew
-                  ? "Assigned automatically on save (1, 2, 3…). Search with this ID in POS and credit."
-                  : "Shop search number. Not editable."
-              }
-            >
-              <TextInput
-                data-field="productNo"
-                readOnly
-                disabled
-                value={
-                  isNew
-                    ? "Auto"
-                    : product.productNo && product.productNo > 0
-                      ? String(product.productNo)
-                      : "—"
-                }
-              />
-            </Field>
+            {!isNew ? (
+              <Field label="Product ID" hint="Shop search number. Not editable.">
+                <TextInput
+                  data-field="productNo"
+                  readOnly
+                  disabled
+                  value={
+                    product.productNo && product.productNo > 0 ? String(product.productNo) : "—"
+                  }
+                />
+              </Field>
+            ) : null}
             <Field
               label="SKU"
               hint={

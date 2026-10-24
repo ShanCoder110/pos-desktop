@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, FileSpreadsheet, FileText } from "lucide-react";
-import { Button, Popover } from "@/components/common";
+import { Button } from "@/components/common/Button";
+import { Popover } from "@/components/common/Popover";
 import { PRODUCT_COPY } from "@/shared/constants/products";
 import { exportTableCsv, exportTableExcel, type TableExportColumn } from "@/utils/exportFile";
 

@@ -7,7 +7,12 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { formatStockQty, normalizeSellUnits, productSellUnits } from "@/pages/products/productQty";
+import {
+  formatStockQty,
+  normalizeSellUnits,
+  priceFromStock,
+  productSellUnits,
+} from "@/pages/products/productQty";
 import {
   balanceAfterSale,
   posBalanceToLedger,
@@ -72,6 +77,8 @@ import { consumeLots } from "@/utils/lots";
 import { buildReceiptText, openWhatsAppReceipt } from "@/utils/receiptShare";
 import { ensureCashSession, ensureSession } from "@/services/auth";
 import { listAllProducts, searchAllProducts } from "@/services/products";
+import { listAllLots } from "@/services/lots";
+import type { ProductLotRow } from "@/shared/domain/types";
 import { createMasterRecord, listAllMasterRecords } from "@/services/masters";
 import { listCustomersWithBalances } from "@/services/credit";
 import {
@@ -93,6 +100,12 @@ type CartLine = {
   id: string;
   productId: string;
   productUnitId: string;
+  productLotId?: string;
+  lotNumber?: string;
+  lotSupplierName?: string;
+  lotRemaining?: number;
+  lotRetailPrice?: number;
+  lotWholesalePrice?: number;
   name: string;
   urduName?: string;
   sku: string;
@@ -125,6 +138,18 @@ type HeldPayload = {
 };
 
 type PosHeldBill = HeldBill & { payload: HeldPayload };
+
+type ReceiptSnapshot = {
+  lines: InvoiceLine[];
+  total: number;
+  discount: number;
+  paid: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  customer: Customer;
+  invoiceNumber?: string;
+  language?: ReceiptLanguage;
+};
 
 const BANKS = ["EasyPaisa", "JazzCash", "NayaPay", "HBL Konnect", "Bank Transfer"];
 const WARN_ICO = (
@@ -200,6 +225,15 @@ function formatSellUnitLabel(unit: ProductSellUnit | undefined, fallback = "Unit
   const name = unit.name || unit.symbol || fallback;
   const n = stockPerUnit(unit);
   return n > 1 ? `${name} ×${qtyStr(n)}` : name;
+}
+
+function cartLotPrice(line: CartLine, product: Product, unitId: string, mode: PriceMode) {
+  const unit = resolveSellUnit(product, unitId);
+  const stockPrice =
+    mode === "wholesale" ? line.lotWholesalePrice || line.lotRetailPrice : line.lotRetailPrice;
+  return unit && stockPrice
+    ? priceFromStock(sellUnitsFor(product), product.unit, stockPrice, unit)
+    : cartLineTierPrices(product, unitId, mode).listPrice;
 }
 
 function packOf(p: Product) {
@@ -392,17 +426,8 @@ export function PosWorkspace() {
   const [printLanguage, setPrintLanguage] = useState<ReceiptLanguage | undefined>();
   const [printRequestId, setPrintRequestId] = useState(0);
   const [receiptInvoiceNo, setReceiptInvoiceNo] = useState("");
-  const [receiptSnap, setReceiptSnap] = useState<{
-    lines: InvoiceLine[];
-    total: number;
-    discount: number;
-    paid: number;
-    balanceBefore: number;
-    balanceAfter: number;
-    customer: Customer;
-    invoiceNumber?: string;
-    language?: ReceiptLanguage;
-  } | null>(null);
+  const [receiptSnap, setReceiptSnap] = useState<ReceiptSnapshot | null>(null);
+  const [lastCompletedReceipt, setLastCompletedReceipt] = useState<ReceiptSnapshot | null>(null);
   const [splitPrint, setSplitPrint] = useState(() => settings.splitLongBill);
 
   useEffect(() => {
@@ -410,6 +435,9 @@ export function PosWorkspace() {
   }, [settings.splitLongBill]);
   const [clock, setClock] = useState(clockNow);
   const [askSupplier, setAskSupplier] = useState(false);
+  const [supplierLots, setSupplierLots] = useState<ProductLotRow[]>([]);
+  const [supplierNames, setSupplierNames] = useState<Record<string, string>>({});
+  const [loadingSupplierLots, setLoadingSupplierLots] = useState(false);
   const [sessionUserId, setSessionUserId] = useState("");
   const [sessionBranchId, setSessionBranchId] = useState("");
   const sessionBranchIdRef = useRef("");
@@ -489,8 +517,11 @@ export function PosWorkspace() {
       if (!session) throw new Error("Could not start POS session");
       setSessionUserId(session.user.id);
       setSessionBranchId(session.branchId);
-      await ensureCashSession(controller.signal);
-      const [productRows, customerRows, holdRows, invoiceRows, categoryRows] = await Promise.all([
+      const [, productRows, customerRows, holdRows, invoiceRows, categoryRows] = await Promise.all([
+        // Cash-session setup is independent of the POS reference data. Start it
+        // now, then await it with the other requests below instead of adding a
+        // full network round-trip before the page can render.
+        ensureCashSession(controller.signal).then(() => undefined),
         listAllProducts(controller.signal, session.branchId).catch(() => [] as Product[]),
         listCustomersWithBalances(controller.signal)
           .then((records) =>
@@ -1043,7 +1074,8 @@ export function PosWorkspace() {
     window.requestAnimationFrame(() => focusPendingUnitButton());
   }, [focusPendingUnitButton, pendingProductUnitId, unitFocused, pending]);
 
-  function addPendingToCart(supplierId?: string) {
+  async function addPendingToCart(productLotId?: string) {
+    if (loadingSupplierLots) return;
     if (!pending) {
       showToast("Select a product first");
       return;
@@ -1068,11 +1100,43 @@ export function PosWorkspace() {
       showToast(`Only ${left} ${prettyUnit(pending.unit)} left`);
       return;
     }
-    if (settings.stockPick === "ask" && !supplierId) {
-      setAskSupplier(true);
-      return;
+    let selectedLot = supplierLots.find((row) => row.id === productLotId);
+    if (settings.stockPick === "ask" && !productLotId) {
+      setLoadingSupplierLots(true);
+      try {
+        const [lots, suppliers] = await Promise.all([
+          listAllLots({ productId: pending.id }),
+          listAllMasterRecords("suppliers"),
+        ]);
+        const available = lots.filter((row) => row.remainingQuantity > 0);
+        setSupplierLots(available);
+        setSupplierNames(Object.fromEntries(suppliers.map((row) => [row.id, row.name])));
+        if (available.length > 1) {
+          setAskSupplier(true);
+          return;
+        }
+        selectedLot = available[0];
+      } catch (error) {
+        showToast(
+          errorToastMessage(error, "Could not load supplier lots") ||
+            "Could not load supplier lots",
+        );
+        return;
+      } finally {
+        setLoadingSupplierLots(false);
+      }
     }
-    const lot = consumeLots(pending, baseQty, settings.stockPick, supplierId);
+    if (selectedLot) {
+      const reserved = cart
+        .filter((line) => line.productLotId === selectedLot.id)
+        .reduce((sum, line) => sum + line.baseQty, 0);
+      const lotLeft = Math.max(0, selectedLot.remainingQuantity - reserved);
+      if (baseQty > lotLeft + 0.0001) {
+        showToast(`Only ${qtyStr(lotLeft)} ${prettyUnit(pending.unit)} left in this lot`);
+        return;
+      }
+    }
+    const lot = consumeLots(pending, baseQty, settings.stockPick, selectedLot?.supplierId);
     if ("error" in lot) {
       showToast(lot.error);
       return;
@@ -1084,6 +1148,18 @@ export function PosWorkspace() {
       usedRetailFallback,
     } = cartLineTierPrices(pending, productUnit.id, priceMode);
     if (usedRetailFallback) showToast("Retail used — wholesale unset");
+    const lotUnits = sellUnitsFor(pending);
+    const lotRetail = selectedLot?.retailPrice
+      ? priceFromStock(lotUnits, pending.unit, selectedLot.retailPrice, productUnit)
+      : 0;
+    const lotWholesale = selectedLot?.wholesalePrice
+      ? priceFromStock(lotUnits, pending.unit, selectedLot.wholesalePrice, productUnit)
+      : 0;
+    const chosenPrice = selectedLot
+      ? priceMode === "wholesale"
+        ? lotWholesale || lotRetail || sellPrice
+        : lotRetail || sellPrice
+      : sellPrice;
     const minSell = tierMin || lot.minFloor;
     const sellU = productUnit.name || productUnit.symbol || pending.unit;
     const packN = stockPerUnit(productUnit);
@@ -1093,6 +1169,7 @@ export function PosWorkspace() {
         (i) =>
           i.productId === pending.id &&
           i.productUnitId === productUnit.id &&
+          i.productLotId === selectedLot?.id &&
           i.priceMode === priceMode,
       );
       if (existing) {
@@ -1104,7 +1181,9 @@ export function PosWorkspace() {
             ? recompute({
                 ...i,
                 qty,
-                lotsNote: lot.lotsNote,
+                lotsNote: selectedLot
+                  ? `${selectedLot.lotNumber} · ${supplierNames[selectedLot.supplierId] || "Supplier lot"}`
+                  : lot.lotsNote,
               })
             : i,
         );
@@ -1113,6 +1192,14 @@ export function PosWorkspace() {
         id: uid(),
         productId: pending.id,
         productUnitId: productUnit.id,
+        productLotId: selectedLot?.id,
+        lotNumber: selectedLot?.lotNumber,
+        lotSupplierName: selectedLot
+          ? supplierNames[selectedLot.supplierId] || "No supplier"
+          : undefined,
+        lotRemaining: selectedLot?.remainingQuantity,
+        lotRetailPrice: selectedLot?.retailPrice,
+        lotWholesalePrice: selectedLot?.wholesalePrice,
         name: pending.name,
         urduName: pending.urduName?.trim() || undefined,
         sku: pending.productNo && pending.productNo > 0 ? String(pending.productNo) : pending.sku,
@@ -1121,13 +1208,15 @@ export function PosWorkspace() {
         packSize: packN || 1,
         priceMode,
         minPrice: minSell,
-        listPrice: sellPrice,
-        unitPrice: sellPrice,
+        listPrice: chosenPrice,
+        unitPrice: chosenPrice,
         qty: entered,
         baseQty,
         lineDisc: 0,
         amount: 0,
-        lotsNote: lot.lotsNote,
+        lotsNote: selectedLot
+          ? `${selectedLot.lotNumber} · ${supplierNames[selectedLot.supplierId] || "Supplier lot"}`
+          : lot.lotsNote,
         minWarn: false,
       });
       return [...prev, line];
@@ -1196,7 +1285,14 @@ export function PosWorkspace() {
 
   function maxCartQty(item: CartLine) {
     const product = products.find((p) => p.id === item.productId);
-    const left = cartStock(item.productId, item.id);
+    const otherLotHeld = item.productLotId
+      ? cart
+          .filter((line) => line.id !== item.id && line.productLotId === item.productLotId)
+          .reduce((sum, line) => sum + line.baseQty, 0)
+      : 0;
+    const lotLeft =
+      item.lotRemaining == null ? Infinity : Math.max(0, item.lotRemaining - otherLotHeld);
+    const left = Math.min(cartStock(item.productId, item.id), lotLeft);
     if (!product) return Math.max(0, left);
     return availableInUnit(resolveSellUnit(product, item.productUnitId), left);
   }
@@ -1287,6 +1383,8 @@ export function PosWorkspace() {
         return recompute({
           ...item,
           ...converted,
+          listPrice: cartLotPrice(item, p, productUnitId, item.priceMode),
+          unitPrice: cartLotPrice(item, p, productUnitId, item.priceMode),
           lineDisc: 0,
         });
       }),
@@ -1312,8 +1410,8 @@ export function PosWorkspace() {
         return recompute({
           ...item,
           priceMode: nextMode,
-          listPrice: sell,
-          unitPrice: sell,
+          listPrice: item.productLotId ? cartLotPrice(item, p, item.productUnitId, nextMode) : sell,
+          unitPrice: item.productLotId ? cartLotPrice(item, p, item.productUnitId, nextMode) : sell,
           minPrice: minSell,
           lineDisc: 0,
         });
@@ -1337,8 +1435,8 @@ export function PosWorkspace() {
         return recompute({
           ...item,
           priceMode: next,
-          listPrice: sell,
-          unitPrice: sell,
+          listPrice: item.productLotId ? cartLotPrice(item, p, item.productUnitId, next) : sell,
+          unitPrice: item.productLotId ? cartLotPrice(item, p, item.productUnitId, next) : sell,
           minPrice: minSell,
           lineDisc: 0,
         });
@@ -1386,6 +1484,7 @@ export function PosWorkspace() {
 
   function newBill(silent = false) {
     setCart([]);
+    setReceiptInvoiceNo("");
     setSelected(-1);
     setPending(null);
     setBillDiscount(0);
@@ -1520,14 +1619,11 @@ export function PosWorkspace() {
     setPrinting(busy);
   }
 
-  function openReceipt(
-    invoiceNumber = receiptInvoiceNo,
-    printNow = false,
+  function makeReceiptSnapshot(
+    invoiceNumber?: string,
     language?: ReceiptLanguage,
-  ) {
-    if (printNow && printingRef.current) return;
-    if (printNow) setPrintBusy(true);
-    setReceiptSnap({
+  ): ReceiptSnapshot {
+    return {
       lines: cart.map((item) => ({
         id: item.id,
         productId: item.productId,
@@ -1551,12 +1647,33 @@ export function PosWorkspace() {
       customer: displayCustomer,
       invoiceNumber: invoiceNumber || undefined,
       language,
-    });
-    if (invoiceNumber) setReceiptInvoiceNo(invoiceNumber);
+    };
+  }
+
+  function openReceipt(
+    invoiceNumber = receiptInvoiceNo,
+    printNow = false,
+    language?: ReceiptLanguage,
+    savedReceipt?: ReceiptSnapshot,
+  ) {
+    if (printNow && printingRef.current) return;
+    if (printNow) setPrintBusy(true);
+    setReceiptSnap(
+      savedReceipt ? { ...savedReceipt, language } : makeReceiptSnapshot(invoiceNumber, language),
+    );
+    if (invoiceNumber && !savedReceipt) setReceiptInvoiceNo(invoiceNumber);
     setPrintLanguage(language);
     setPrintDirect(printNow);
     setPrintOpen(true);
     if (printNow) setPrintRequestId((request) => request + 1);
+  }
+
+  function printReceipt(language: ReceiptLanguage) {
+    if (printingRef.current) return;
+    if (cart.length) openReceipt(receiptInvoiceNo, true, language);
+    else if (lastCompletedReceipt) {
+      openReceipt(lastCompletedReceipt.invoiceNumber, true, language, lastCompletedReceipt);
+    } else showToast("Nothing to print");
   }
 
   async function completeSale() {
@@ -1620,6 +1737,7 @@ export function PosWorkspace() {
         items: cart.map((item) => ({
           productId: item.productId,
           productUnitId: item.productUnitId,
+          productLotId: item.productLotId,
           quantity: item.qty,
           unitPrice: item.unitPrice,
           priceMode: item.priceMode.toUpperCase(),
@@ -1665,15 +1783,12 @@ export function PosWorkspace() {
         .catch(() => undefined);
       // Refetch live stock after every completed sale/revise (no optimistic cache).
       void reloadProducts().catch(() => undefined);
-      setReceiptInvoiceNo(invoice.invoiceNumber);
+      setLastCompletedReceipt(makeReceiptSnapshot(invoice.invoiceNumber));
       showToast(
         wasEditing
           ? `Invoice ${invoice.invoiceNumber} updated`
           : `Sale ${invoice.invoiceNumber} complete`,
       );
-      if (settings.autoPrint) {
-        openReceipt(invoice.invoiceNumber, true, settings.receiptLanguage);
-      }
       newBill(true);
     } catch (error) {
       const message = errorToastMessage(error, "Could not complete sale");
@@ -1733,9 +1848,7 @@ export function PosWorkspace() {
       F7: () => applyExact(),
       F8: () => document.getElementById("billDiscount")?.focus(),
       F9: () => {
-        if (printingRef.current) return;
-        if (cart.length) openReceipt(receiptInvoiceNo, true, "EN");
-        else showToast("Nothing to print");
+        printReceipt("EN");
       },
       F10: () => {
         setSplitPrint((v) => {
@@ -2035,7 +2148,7 @@ export function PosWorkspace() {
                   focusSearch(false);
                 }
               }}
-              onAdd={() => addPendingToCart()}
+              onAdd={() => void addPendingToCart()}
             />
           </div>
 
@@ -2174,6 +2287,11 @@ export function PosWorkspace() {
                               ? ` = ${qtyStr(item.baseQty)} ${prettyUnit(item.baseUnit)}`
                               : ""}
                           </span>
+                          {item.productLotId ? (
+                            <span className="block text-[11px] text-muted">
+                              {item.lotSupplierName || "Supplier lot"} · {item.lotNumber}
+                            </span>
+                          ) : null}
                           <span
                             className="line-units line-price [display:inline-flex] [gap:3px] [margin-top:4px] [margin-right:6px]"
                             role="group"
@@ -2935,9 +3053,7 @@ export function PosWorkspace() {
                 className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print-ur disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => {
                   // Force UR labels (product name stays English only when urduName is empty).
-                  if (printingRef.current) return;
-                  if (cart.length) openReceipt(receiptInvoiceNo, true, "UR");
-                  else showToast("Nothing to print");
+                  printReceipt("UR");
                 }}
               >
                 {printing ? "Printing…" : "پرنٹ اردو"}
@@ -2947,9 +3063,7 @@ export function PosWorkspace() {
                 disabled={printing}
                 className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => {
-                  if (printingRef.current) return;
-                  if (cart.length) openReceipt(receiptInvoiceNo, true, "EN");
-                  else showToast("Nothing to print");
+                  printReceipt("EN");
                 }}
               >
                 {printing ? "Printing…" : "Print · F9"}
@@ -3152,22 +3266,61 @@ export function PosWorkspace() {
                   ×
                 </button>
               </div>
-              <p>Settings require choosing a supplier for this sale.</p>
-              <div className="modal-actions [display:flex] [justify-content:flex-end] [gap:6px] [margin-top:12px]">
-                <button
-                  type="button"
-                  className="btn-ghost [border:1px_solid_var(--line)] [background:#fff] [color:var(--sub)]"
-                  onClick={() => setAskSupplier(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn-primary [border:0] [background:var(--sale)] [color:#fff]"
-                  onClick={() => addPendingToCart("s1")}
-                >
-                  Use first supplier
-                </button>
+              <p className="text-sm text-muted">
+                Choose the stock lot for this product. The selected lot will be deducted when the
+                sale is completed.
+              </p>
+              <div className="mt-3 grid max-h-[45dvh] gap-2 overflow-y-auto">
+                {supplierLots.map((lotRow) => {
+                  const reserved = cart
+                    .filter((line) => line.productLotId === lotRow.id)
+                    .reduce((sum, line) => sum + line.baseQty, 0);
+                  const available = Math.max(0, lotRow.remainingQuantity - reserved);
+                  const selectedUnit = pending
+                    ? resolveSellUnit(pending, pendingProductUnitId)
+                    : undefined;
+                  const needed =
+                    pending && selectedUnit
+                      ? displayToBaseQty(selectedUnit, num(qtyInput) || 1)
+                      : 0;
+                  const enough = available + 0.0001 >= needed;
+                  const tierPrice =
+                    priceMode === "wholesale"
+                      ? lotRow.wholesalePrice || lotRow.retailPrice
+                      : lotRow.retailPrice;
+                  const displayedPrice =
+                    pending && selectedUnit && tierPrice
+                      ? priceFromStock(sellUnitsFor(pending), pending.unit, tierPrice, selectedUnit)
+                      : selectedSearchPrice;
+                  return (
+                    <button
+                      key={lotRow.id}
+                      type="button"
+                      disabled={!enough}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper px-3 py-3 text-left text-ink hover:border-teal-500 disabled:cursor-not-allowed disabled:opacity-45"
+                      onClick={() => void addPendingToCart(lotRow.id)}
+                    >
+                      <span className="min-w-0">
+                        <strong className="block truncate">
+                          {supplierNames[lotRow.supplierId] || "No supplier"}
+                        </strong>
+                        <span className="block text-xs text-muted">
+                          {lotRow.lotNumber} · {qtyStr(available)}{" "}
+                          {pending ? prettyUnit(pending.unit) : "units"} left
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-right text-sm">
+                        <strong className="block">
+                          Rs {money(displayedPrice)} /{" "}
+                          {selectedUnit?.name || pending?.unit || "unit"}
+                        </strong>
+                        <span className="text-xs text-muted">
+                          Cost Rs {money(lotRow.purchasePrice)} / {pending?.unit || "unit"}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </>
           ) : null}

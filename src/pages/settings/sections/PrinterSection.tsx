@@ -16,7 +16,6 @@ const KEYS = [
   "printerName",
   "printerPaperWidth",
   "copies",
-  "autoPrint",
   "splitLongBill",
   "splitFirstPageItems",
   "splitMiddlePageItems",
@@ -204,14 +203,9 @@ export function PrinterSection() {
           />
         </Field>
       </div>
-      <Toggle
-        checked={draft.autoPrint}
-        onChange={(v) => patch({ autoPrint: v })}
-        label="Auto-print after sale"
-      />
       <p className="settings-note">
-        Sale complete and Print / F9 send a silent print to the printer saved here. Split long bills
-        still follow the page sizes below.
+        Complete Sale saves the bill without printing. Print / F9 sends the current bill, or the
+        most recently completed bill when the cart is empty, to the saved printer.
       </p>
       <Toggle
         checked={draft.splitLongBill}

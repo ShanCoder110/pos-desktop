@@ -32,8 +32,7 @@ import type { TableExportColumn } from "@/utils/exportFile";
 import type { InvoiceRow } from "@/shared/domain/types";
 import { formatTableDateTime, money } from "@/utils/format";
 import { paymentStatusTone } from "@/utils/paymentStatus";
-import { listAllInvoices, voidInvoice } from "@/services/sales";
-import { isAbortError } from "@/utils/async";
+import { voidInvoice } from "@/services/sales";
 import {
   canOpenInvoicePosEdit,
   canVoidInvoice,
@@ -69,7 +68,7 @@ function minimumFilterValue(chip: FilterChip) {
 export function InvoicesPage() {
   const navigate = useNavigate();
   const { sectionKpi, invoices: hubInvoices, refreshHub } = useSalesHub();
-  const [rows, setRows] = useState<InvoiceRow[]>([]);
+  const rows = hubInvoices;
   const [branchNames, setBranchNames] = useState<Record<string, string>>({});
   const [customerNames, setCustomerNames] = useState<Record<string, string>>({});
   const [customerDetails, setCustomerDetails] = useState<Record<string, MasterRecord>>({});
@@ -84,22 +83,6 @@ export function InvoicesPage() {
   useEffect(() => {
     setPage(1);
   }, [sectionKpi]);
-
-  useEffect(() => {
-    if (hubInvoices.length) {
-      setRows(hubInvoices);
-      return;
-    }
-    const controller = new AbortController();
-    listAllInvoices(controller.signal)
-      .then((data) => {
-        if (!controller.signal.aborted) setRows(data);
-      })
-      .catch((error) => {
-        if (!isAbortError(error) && !controller.signal.aborted) setRows([]);
-      });
-    return () => controller.abort();
-  }, [hubInvoices]);
 
   useEffect(() => {
     const controller = new AbortController();

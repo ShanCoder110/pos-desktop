@@ -135,6 +135,25 @@ function waitForPrintFonts(doc: Document): Promise<void> {
     );
 }
 
+async function waitForPrintImages(doc: Document): Promise<void> {
+  await Promise.all(
+    [...doc.images].map(async (image) => {
+      if (!image.complete) {
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            image.addEventListener("load", () => resolve(), { once: true });
+            image.addEventListener("error", () => resolve(), { once: true });
+          }),
+          new Promise<void>((resolve) => window.setTimeout(resolve, 3000)),
+        ]);
+      }
+      if (image.naturalWidth > 0 && image.decode) {
+        await image.decode().catch(() => undefined);
+      }
+    }),
+  );
+}
+
 /** Print HTML after Jameel Noori (and other) fonts are ready so Urdu is not substituted. */
 export function printReceiptHtml(html: string): Promise<void> {
   return new Promise((resolve) => {
@@ -159,7 +178,7 @@ export function printReceiptHtml(html: string): Promise<void> {
     doc.close();
 
     const win = frame.contentWindow;
-    void waitForPrintFonts(doc).then(() => {
+    void Promise.all([waitForPrintFonts(doc), waitForPrintImages(doc)]).then(() => {
       let settled = false;
       const done = () => {
         if (settled) return;

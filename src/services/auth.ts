@@ -52,8 +52,10 @@ export interface CashSessionResponse {
 }
 
 let ensurePromise: Promise<MeResponse | null> | null = null;
+let cachedSession: { token: string; value: MeResponse } | null = null;
 
 function storeLoginResponse(response: LoginResponse) {
+  cachedSession = null;
   setTokens(response.token, response.refreshToken);
 }
 
@@ -137,6 +139,7 @@ export async function logout() {
   } catch {
     // Token may already be invalid; clear locally anyway.
   } finally {
+    cachedSession = null;
     clearTokens();
   }
 }
@@ -153,13 +156,18 @@ export function ensureSession(signal?: AbortSignal): Promise<MeResponse | null> 
   if (!AUTH_ENABLED) {
     return ensureDevSession();
   }
+  const token = getAccessToken();
+  if (cachedSession?.token === token) return Promise.resolve(cachedSession.value);
   if (!ensurePromise) {
     ensurePromise = (async () => {
-      if (!getAccessToken()) return null;
+      if (!token) return null;
       try {
-        return await me();
+        const session = await me();
+        if (getAccessToken() === token) cachedSession = { token, value: session };
+        return session;
       } catch (error) {
         if (isAbortError(error)) throw error;
+        cachedSession = null;
         clearTokens();
         return null;
       }
@@ -172,13 +180,18 @@ export function ensureSession(signal?: AbortSignal): Promise<MeResponse | null> 
 
 /** When auth screens are disabled, only reuse an existing token — no seed login. */
 function ensureDevSession(): Promise<MeResponse | null> {
+  const token = getAccessToken();
+  if (cachedSession?.token === token) return Promise.resolve(cachedSession.value);
   if (!ensurePromise) {
     ensurePromise = (async () => {
-      if (!getAccessToken()) return null;
+      if (!token) return null;
       try {
-        return await me();
+        const session = await me();
+        if (getAccessToken() === token) cachedSession = { token, value: session };
+        return session;
       } catch (error) {
         if (isAbortError(error)) throw error;
+        cachedSession = null;
         clearTokens();
         return null;
       }

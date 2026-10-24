@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { BookPlus, CreditCard, LayoutGrid, Pencil, Trash2 } from "lucide-react";
 import {
@@ -64,15 +64,18 @@ import { DEFAULT_PAGE_SIZE } from "@/shared/constants/config";
 import { FIELD_LIMITS, FORM_COPY } from "@/shared/constants/fields";
 import { Controller, useAppForm } from "@/hooks/useAppForm";
 import { useQueryTab } from "@/hooks/useQueryTab";
+import { useDebounce } from "@/hooks/useDebounce";
 import { assignApiError, fieldMessage } from "@/utils/form";
 import { applyFilterChip } from "@/utils/filterChips";
 import { HubToolbar, type HubView } from "@/pages/products/HubToolbar";
 import {
   adjustCustomerBalance,
+  getCreditBookSummary,
   listCustomerLedgers,
   mapCustomer,
   recordCustomerPayment,
   type CustomerLedgerEntry,
+  type CreditBookSummary,
 } from "@/services/credit";
 import {
   CREDIT_CUSTOMER_EDIT_FORM_ID,
@@ -287,7 +290,9 @@ function creditBookQuery(search: string, chips: FilterChip[]) {
 
 export function CreditSalesPage() {
   const navigate = useNavigate();
+  const [summary, setSummary] = useState<CreditBookSummary | null>(null);
   const [allMasterCustomers, setAllMasterCustomers] = useState<DomainCustomer[]>([]);
+  const allMasterLoadedKey = useRef(-1);
   const [creditCustomers, setCreditCustomers] = useState<DomainCustomer[]>([]);
   const [search, setSearch] = useState("");
   const [chips, setChips] = useState<FilterChip[]>([]);
@@ -325,11 +330,27 @@ export function CreditSalesPage() {
   const showLedger = (id: string) => ledgerCols.includes(id);
   const tableColumnCount = cols.length + 1;
   const balanceChip = chipCsv(chips, "balance");
+  const debouncedSearch = useDebounce(search);
+  const debouncedLedgerSearch = useDebounce(ledgerSearch);
 
-  const bookFilters = useMemo(() => creditBookQuery(search, chips), [chips, search]);
+  const bookFilters = useMemo(
+    () => creditBookQuery(debouncedSearch, chips),
+    [chips, debouncedSearch],
+  );
 
-  // Load all customers for the book picker and accurate shop-wide summary cards.
+  // The KPI query is one aggregate row; no full customer download on page load.
   useEffect(() => {
+    const controller = new AbortController();
+    void getCreditBookSummary(controller.signal)
+      .then(setSummary)
+      .catch(() => setSummary(null));
+    return () => controller.abort();
+  }, [reloadKey]);
+
+  // The full picker/chart list is only needed when those views are opened.
+  useEffect(() => {
+    if (!bookDrawerOpen && !(isBooksTab && view === "insights")) return;
+    if (allMasterLoadedKey.current === reloadKey) return;
     const controller = new AbortController();
     async function loadSupportData() {
       const allCustomersData = await listAllMasterRecords(
@@ -338,12 +359,13 @@ export function CreditSalesPage() {
         controller.signal,
       );
       setAllMasterCustomers(allCustomersData.map(mapRow));
+      allMasterLoadedKey.current = reloadKey;
     }
     void loadSupportData().catch(() => {
       setAllMasterCustomers([]);
     });
     return () => controller.abort();
-  }, [reloadKey]);
+  }, [bookDrawerOpen, isBooksTab, reloadKey, view]);
 
   // Credit book table: server-filtered enrolled customers
   useEffect(() => {
@@ -394,7 +416,7 @@ export function CreditSalesPage() {
     setLoading((current) => ({ ...current, ledger: true }));
     listCustomerLedgers(
       {
-        search: ledgerSearch.trim() || undefined,
+        search: debouncedLedgerSearch.trim() || undefined,
         customer: chipCsv(ledgerChips, "customer"),
         entryType: chipCsv(ledgerChips, "entryType"),
         notes: chipCsv(ledgerChips, "notes"),
@@ -427,25 +449,18 @@ export function CreditSalesPage() {
       guard.dispose();
       controller.abort();
     };
-  }, [isLedgerTab, ledgerChips, ledgerPage, ledgerPageSize, ledgerSearch, reloadKey]);
+  }, [isLedgerTab, ledgerChips, ledgerPage, ledgerPageSize, debouncedLedgerSearch, reloadKey]);
 
   const enrolledCustomers = allMasterCustomers.filter(
     (customer) => customer.inCreditBook && !customer.isWalkIn,
   );
 
   // KPI calculations use every enrolled customer, not only the current table page.
-  const owingCustomers = enrolledCustomers.filter((c) => c.currentBalance > 0);
-  const toCollect = owingCustomers.reduce((sum, row) => sum + row.currentBalance, 0);
-  const advanceHeld = Math.abs(
-    enrolledCustomers
-      .filter((c) => c.currentBalance < 0)
-      .reduce((sum, c) => sum + c.currentBalance, 0),
-  );
-  const settledCount = enrolledCustomers.filter((c) => c.currentBalance === 0).length;
-  const totalProfitHold = enrolledCustomers.reduce(
-    (sum, customer) => sum + (customer.profitOnHold ?? 0),
-    0,
-  );
+  const toCollect = summary?.owedToShop ?? 0;
+  const owingCount = summary?.owingAccounts ?? 0;
+  const advanceHeld = summary?.advanceHeld ?? 0;
+  const settledCount = summary?.settled ?? 0;
+  const totalProfitHold = summary?.profitOnHold ?? 0;
 
   const paginatedRows = creditCustomers;
 
@@ -675,7 +690,7 @@ export function CreditSalesPage() {
         />
         <KpiCard
           label="Owing Accounts"
-          value={owingCustomers.length}
+          value={owingCount}
           hint={CREDIT_COPY.customersHint}
           tone="warn"
           active={balanceChip === CUSTOMER_BALANCE_OWES}

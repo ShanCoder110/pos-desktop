@@ -3,6 +3,8 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use sea_orm::{DatabaseBackend, FromQueryResult, Statement};
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::backend::{
@@ -18,6 +20,30 @@ use crate::backend::{
     services::CreditService,
     AppState,
 };
+
+#[derive(Debug, FromQueryResult, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreditBookSummary {
+    owed_to_shop: f64,
+    owing_accounts: i64,
+    profit_on_hold: f64,
+    advance_held: f64,
+    settled: i64,
+}
+
+pub async fn credit_book_summary(
+    State(state): State<AppState>,
+    _ctx: RequestContext,
+) -> Result<Json<CreditBookSummary>, AppError> {
+    let summary = CreditBookSummary::find_by_statement(Statement::from_string(
+        DatabaseBackend::Sqlite,
+        "WITH enrolled AS (SELECT c.id, COALESCE((SELECT cle.balance_after FROM customer_ledger_entries cle WHERE cle.customer_id = c.id ORDER BY cle.occurred_at DESC, cle.created_at DESC, cle.rowid DESC LIMIT 1), 0) AS balance, COALESCE((SELECT SUM(ii.gross_profit * CASE WHEN i.total > 0 THEN i.credit_amount / i.total ELSE 0 END) FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.id WHERE i.customer_id = c.id AND i.credit_amount > 0 AND i.status = 'COMPLETED' AND i.deleted_at IS NULL), 0) AS profit FROM customers c WHERE c.in_credit_book = 1 AND c.is_active = 1 AND c.is_walk_in = 0 AND c.deleted_at IS NULL) SELECT CAST(COALESCE(SUM(CASE WHEN balance > 0 THEN balance ELSE 0 END), 0) AS REAL) AS owed_to_shop, CAST(COALESCE(SUM(CASE WHEN balance > 0 THEN 1 ELSE 0 END), 0) AS INTEGER) AS owing_accounts, CAST(COALESCE(SUM(profit), 0) AS REAL) AS profit_on_hold, CAST(COALESCE(SUM(CASE WHEN balance < 0 THEN -balance ELSE 0 END), 0) AS REAL) AS advance_held, CAST(COALESCE(SUM(CASE WHEN balance = 0 THEN 1 ELSE 0 END), 0) AS INTEGER) AS settled FROM enrolled".to_owned(),
+    ))
+    .one(&state.db)
+    .await?
+    .ok_or_else(|| AppError::Internal("Credit summary unavailable".into()))?;
+    Ok(Json(summary))
+}
 
 pub async fn get_customer_ledger(
     State(state): State<AppState>,

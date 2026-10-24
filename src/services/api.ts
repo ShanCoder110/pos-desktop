@@ -37,6 +37,12 @@ const PUBLIC_AUTH_PATHS = new Set<string>([
 ]);
 
 let refreshPromise: Promise<void> | null = null;
+let dataVersion = 0;
+
+/** Invalidates short-lived catalog reads after any successful local write. */
+export function getDataVersion() {
+  return dataVersion;
+}
 
 export function queryString(values: object) {
   const params = new URLSearchParams();
@@ -136,6 +142,8 @@ export async function apiRequest<T>(
       status: response.status,
     });
   }
+
+  if ((options.method ?? "GET").toUpperCase() !== "GET") dataVersion += 1;
 
   if (response.status === 204) return undefined as T;
   const text = await response.text();

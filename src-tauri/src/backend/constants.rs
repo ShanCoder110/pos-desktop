@@ -21,6 +21,9 @@ pub const ALLOWED_API_ORIGINS: [&str; 5] = [
 ];
 pub const HEALTH_ROUTE: &str = "/health";
 pub const PRODUCTS_ROUTE: &str = "/products";
+pub const PRODUCTS_BULK_ROUTE: &str = "/products/bulk";
+pub const PRODUCT_CATALOG_ROUTE: &str = "/products/catalog";
+pub const PRODUCT_SALES_SUMMARY_ROUTE: &str = "/products/sales-summary";
 pub const PRODUCT_BY_ID_ROUTE: &str = "/products/{id}";
 pub const PRODUCT_SEARCH_ROUTE: &str = "/products/search";
 pub const PRODUCTS_IMPORT_ROUTE: &str = "/products/import";
@@ -33,6 +36,7 @@ pub const UNIT_BY_ID_ROUTE: &str = "/units/{id}";
 pub const SUPPLIERS_ROUTE: &str = "/suppliers";
 pub const SUPPLIER_BY_ID_ROUTE: &str = "/suppliers/{id}";
 pub const CUSTOMERS_ROUTE: &str = "/customers";
+pub const CREDIT_BOOK_SUMMARY_ROUTE: &str = "/customers/credit-book-summary";
 pub const CUSTOMER_BY_ID_ROUTE: &str = "/customers/{id}";
 pub const CUSTOMER_LEDGER_ROUTE: &str = "/customers/{id}/ledger";
 pub const CUSTOMER_LEDGERS_ROUTE: &str = "/customer-ledgers";

@@ -25,6 +25,7 @@ pub struct StockAllocationOptions<'a> {
     pub selling_branch_id: Uuid,
     pub reference_id: Uuid,
     pub product_id: Uuid,
+    pub preferred_lot_id: Option<Uuid>,
     pub needed: Decimal,
     pub unit_name: &'a str,
     pub displayed: Decimal,
@@ -55,6 +56,7 @@ pub async fn allocate_fifo_with_branch_fallback(
         options.selling_branch_id,
         options.reference_id,
         options.product_id,
+        options.preferred_lot_id,
         remaining,
         options.displayed,
         options.unit_name,
@@ -77,6 +79,7 @@ pub async fn allocate_fifo_with_branch_fallback(
             options.selling_branch_id,
             options.reference_id,
             options.product_id,
+            options.preferred_lot_id,
             remaining,
             if first_display {
                 options.displayed
@@ -119,13 +122,14 @@ async fn allocate_fifo_from_other_branches(
     selling_branch_id: Uuid,
     reference_id: Uuid,
     product_id: Uuid,
+    preferred_lot_id: Option<Uuid>,
     needed: Decimal,
     displayed: Decimal,
     unit_name: &str,
     movement_type: &str,
     reference_type: &str,
 ) -> Result<PartialAllocation, AppError> {
-    let lots = FifoLotRow::find_by_statement(Statement::from_sql_and_values(
+    let mut lots = FifoLotRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
         "SELECT bl.id AS branch_lot_id, bl.product_lot_id, bl.branch_id, bl.remaining_base_quantity AS remaining, CAST(pl.purchase_price_per_base AS REAL) AS unit_cost
          FROM branch_lots bl
@@ -137,6 +141,9 @@ async fn allocate_fifo_from_other_branches(
     ))
     .all(transaction)
     .await?;
+    if let Some(lot_id) = preferred_lot_id {
+        lots.retain(|lot| lot.product_lot_id == lot_id);
+    }
     consume_lots(
         transaction,
         context,
@@ -162,13 +169,14 @@ async fn allocate_fifo_from_branch(
     selling_branch_id: Uuid,
     reference_id: Uuid,
     product_id: Uuid,
+    preferred_lot_id: Option<Uuid>,
     needed: Decimal,
     displayed: Decimal,
     unit_name: &str,
     movement_type: &str,
     reference_type: &str,
 ) -> Result<PartialAllocation, AppError> {
-    let lots = FifoLotRow::find_by_statement(Statement::from_sql_and_values(
+    let mut lots = FifoLotRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
         "SELECT bl.id AS branch_lot_id, bl.product_lot_id, bl.branch_id, bl.remaining_base_quantity AS remaining, CAST(pl.purchase_price_per_base AS REAL) AS unit_cost
          FROM branch_lots bl
@@ -179,6 +187,9 @@ async fn allocate_fifo_from_branch(
     ))
     .all(transaction)
     .await?;
+    if let Some(lot_id) = preferred_lot_id {
+        lots.retain(|lot| lot.product_lot_id == lot_id);
+    }
     consume_lots(
         transaction,
         context,

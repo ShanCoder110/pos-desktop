@@ -116,6 +116,7 @@ export function CreditCustomerPage() {
   const [creditInvoices, setCreditInvoices] = useState<InvoiceRow[]>([]);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerRow[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [productsLoading, setProductsLoading] = useState(false);
   const requestedTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState<DetailTab>(
     requestedTab === "invoices" || requestedTab === "ledger" ? requestedTab : "credit-sales",
@@ -143,10 +144,9 @@ export function CreditCustomerPage() {
     async (signal?: AbortSignal) => {
       const session = await ensureSession(signal);
       if (!session || !customerId) return;
-      const [record, invoicePage, productRows, ledgerData] = await Promise.all([
+      const [record, invoicePage, ledgerData] = await Promise.all([
         getMasterRecord("customers", customerId, signal),
         listInvoices({ customerId, page: 1, perPage: 200, branchId: session.branchId }, signal),
-        listAllProducts(signal, session.branchId),
         getCustomerLedger(customerId, signal),
       ]);
       setCustomer({
@@ -157,7 +157,6 @@ export function CreditCustomerPage() {
       setAllInvoices(rawInvoices);
       const credits = rawInvoices.filter(isCreditInvoice);
       setCreditInvoices(credits);
-      setProducts(productRows);
       setLedgerEntries(ledgerData.entries.map(mapLedgerEntry));
     },
     [customerId],
@@ -189,6 +188,20 @@ export function CreditCustomerPage() {
       .finally(() => setLoading(false));
     return () => controller.abort();
   }, [reload]);
+
+  useEffect(() => {
+    if (!saleOpen || products.length) return;
+    const controller = new AbortController();
+    setProductsLoading(true);
+    void (async () => {
+      const session = await ensureSession(controller.signal);
+      if (!session) return;
+      setProducts(await listAllProducts(controller.signal, session.branchId));
+    })()
+      .catch(() => undefined)
+      .finally(() => setProductsLoading(false));
+    return () => controller.abort();
+  }, [saleOpen, products.length]);
 
   const balance = useMemo(() => creditState(customer?.currentBalance ?? 0), [customer]);
   const invoiceSummary = useMemo(() => summarizeCreditInvoices(creditInvoices), [creditInvoices]);
@@ -636,18 +649,27 @@ export function CreditCustomerPage() {
         footer={
           <>
             <Button onClick={() => setSaleOpen(false)}>Cancel</Button>
-            <Button variant="primary" type="submit" form={CREDIT_SALE_FORM_ID}>
+            <Button
+              variant="primary"
+              type="submit"
+              form={CREDIT_SALE_FORM_ID}
+              disabled={productsLoading}
+            >
               {CREDIT_COPY.newCreditSale}
             </Button>
           </>
         }
       >
-        <CreditSaleForm
-          products={products}
-          onSubmit={saveCreditSale}
-          previousBalance={customer?.currentBalance ?? 0}
-          hideSubmitButton
-        />
+        {productsLoading ? (
+          <p className="text-sm text-muted">Loading products…</p>
+        ) : (
+          <CreditSaleForm
+            products={products}
+            onSubmit={saveCreditSale}
+            previousBalance={customer?.currentBalance ?? 0}
+            hideSubmitButton
+          />
+        )}
       </Drawer>
 
       <Drawer

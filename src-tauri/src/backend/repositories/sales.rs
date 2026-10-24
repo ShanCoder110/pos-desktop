@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 use sea_orm::{
     ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbBackend, FromQueryResult, Statement,
@@ -90,6 +92,7 @@ struct InvoiceHeader {
 #[derive(Debug, FromQueryResult)]
 struct InvoiceItemRow {
     id: Uuid,
+    invoice_id: Uuid,
     product_id: Uuid,
     product_unit_id: Option<Uuid>,
     product_name: String,
@@ -114,6 +117,7 @@ struct InvoiceItemRow {
 #[derive(Debug, FromQueryResult)]
 struct PaymentRow {
     id: Uuid,
+    invoice_id: Uuid,
     amount: Decimal,
     amount_tendered: Option<Decimal>,
     change_amount: Decimal,
@@ -223,6 +227,8 @@ impl SalesRepository {
                 return Err(AppError::Forbidden(ERROR_BELOW_MINIMUM));
             }
             let authorized_by = parse_optional_uuid(item.authorized_by.as_deref(), "authorizedBy")?;
+            let preferred_lot_id =
+                parse_optional_uuid(item.product_lot_id.as_deref(), "items.productLotId")?;
             subtotal += line_total;
             demands.push(StockDemand {
                 product_id,
@@ -236,6 +242,7 @@ impl SalesRepository {
             prepared_items.push(PreparedItem {
                 product_id,
                 product_unit_id,
+                preferred_lot_id,
                 product_name: row.product_name,
                 sku: row.sku,
                 unit_name: row.unit_display_name,
@@ -338,6 +345,7 @@ impl SalesRepository {
                     selling_branch_id: context.branch_id,
                     reference_id: invoice_id,
                     product_id: prepared.product_id,
+                    preferred_lot_id: prepared.preferred_lot_id,
                     needed: prepared.base_quantity,
                     unit_name: &prepared.unit_name,
                     displayed: prepared.displayed,
@@ -525,10 +533,73 @@ impl SalesRepository {
         ))
         .all(database)
         .await?;
-        let mut responses = Vec::with_capacity(rows.len());
-        for row in rows {
-            responses.push(hydrate_invoice(database, row).await?);
+        if rows.is_empty() {
+            return Ok((Vec::new(), count));
         }
+        if query.include_details == Some(false) {
+            return Ok((
+                rows.into_iter()
+                    .map(|row| map_invoice(row, Vec::new(), Vec::new()))
+                    .collect(),
+                count,
+            ));
+        }
+        let placeholders = vec!["?"; rows.len()].join(", ");
+        let ids: Vec<_> = rows.iter().map(|row| row.id.into()).collect();
+        let items_sql = format!(
+            "SELECT ii.id, ii.invoice_id, ii.product_id, ii.product_unit_id, ii.product_name,
+                    CASE WHEN p.id IS NULL OR p.deleted_at IS NOT NULL THEN 1 ELSE 0 END AS product_deleted,
+                    ii.sku, ii.unit_name, ii.displayed_quantity, ii.conversion_to_base, ii.base_quantity,
+                    ii.unit_price, ii.minimum_price_snapshot, ii.price_mode, ii.sold_below_minimum,
+                    ii.authorized_by, ii.discount, ii.tax, ii.line_total, ii.fifo_cost, ii.gross_profit
+               FROM invoice_items ii
+               LEFT JOIN products p ON p.id = ii.product_id
+              WHERE ii.invoice_id IN ({placeholders})
+              ORDER BY ii.invoice_id, ii.created_at ASC"
+        );
+        let payment_sql = format!(
+            "SELECT id, invoice_id, amount, amount_tendered, change_amount, payment_method, reference_number, status, paid_at
+               FROM payments WHERE invoice_id IN ({placeholders}) ORDER BY invoice_id, paid_at ASC"
+        );
+        let items = InvoiceItemRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            items_sql,
+            ids.clone(),
+        ))
+        .all(database)
+        .await?;
+        let payments = PaymentRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            payment_sql,
+            ids,
+        ))
+        .all(database)
+        .await?;
+        let mut items_by_invoice: HashMap<Uuid, Vec<InvoiceItemRow>> = HashMap::new();
+        let mut payments_by_invoice: HashMap<Uuid, Vec<PaymentRow>> = HashMap::new();
+        for item in items {
+            items_by_invoice
+                .entry(item.invoice_id)
+                .or_default()
+                .push(item);
+        }
+        for payment in payments {
+            payments_by_invoice
+                .entry(payment.invoice_id)
+                .or_default()
+                .push(payment);
+        }
+        let responses = rows
+            .into_iter()
+            .map(|row| {
+                let id = row.id;
+                map_invoice(
+                    row,
+                    items_by_invoice.remove(&id).unwrap_or_default(),
+                    payments_by_invoice.remove(&id).unwrap_or_default(),
+                )
+            })
+            .collect();
         Ok((responses, count))
     }
 
@@ -672,7 +743,7 @@ impl SalesRepository {
 
         let payments = PaymentRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
-            "SELECT id, amount, amount_tendered, change_amount, payment_method, reference_number, status, paid_at FROM payments WHERE invoice_id = ?",
+            "SELECT id, invoice_id, amount, amount_tendered, change_amount, payment_method, reference_number, status, paid_at FROM payments WHERE invoice_id = ?",
             [invoice_id.into()],
         ))
         .all(transaction)
@@ -877,6 +948,7 @@ impl SalesRepository {
 struct PreparedItem {
     product_id: Uuid,
     product_unit_id: Uuid,
+    preferred_lot_id: Option<Uuid>,
     product_name: String,
     sku: String,
     unit_name: String,
@@ -935,7 +1007,7 @@ async fn hydrate_invoice(
 ) -> Result<InvoiceResponse, AppError> {
     let items = InvoiceItemRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        "SELECT ii.id, ii.product_id, ii.product_unit_id, ii.product_name,
+        "SELECT ii.id, ii.invoice_id, ii.product_id, ii.product_unit_id, ii.product_name,
                 CASE WHEN p.id IS NULL OR p.deleted_at IS NOT NULL THEN 1 ELSE 0 END AS product_deleted,
                 ii.sku, ii.unit_name, ii.displayed_quantity, ii.conversion_to_base, ii.base_quantity,
                 ii.unit_price, ii.minimum_price_snapshot, ii.price_mode, ii.sold_below_minimum,
@@ -950,12 +1022,20 @@ async fn hydrate_invoice(
     .await?;
     let payments = PaymentRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        "SELECT id, amount, amount_tendered, change_amount, payment_method, reference_number, status, paid_at FROM payments WHERE invoice_id = ? ORDER BY paid_at ASC",
+        "SELECT id, invoice_id, amount, amount_tendered, change_amount, payment_method, reference_number, status, paid_at FROM payments WHERE invoice_id = ? ORDER BY paid_at ASC",
         [row.id.into()],
     ))
     .all(database)
     .await?;
-    Ok(InvoiceResponse {
+    Ok(map_invoice(row, items, payments))
+}
+
+fn map_invoice(
+    row: InvoiceHeader,
+    items: Vec<InvoiceItemRow>,
+    payments: Vec<PaymentRow>,
+) -> InvoiceResponse {
+    InvoiceResponse {
         id: row.id.to_string(),
         branch_id: row.branch_id.to_string(),
         customer_id: row.customer_id.map(|value| value.to_string()),
@@ -1015,7 +1095,7 @@ async fn hydrate_invoice(
         voided_at: row.voided_at.map(|value| value.to_rfc3339()),
         created_at: row.created_at.to_rfc3339(),
         updated_at: row.updated_at.to_rfc3339(),
-    })
+    }
 }
 
 fn map_hold(row: HoldRow) -> Result<HoldResponse, AppError> {

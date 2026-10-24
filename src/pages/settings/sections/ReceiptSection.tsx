@@ -32,7 +32,10 @@ const KEYS = [
   "receiptShopNameSize",
   "receiptShopNameBold",
   "receiptTaglineAlign",
+  "receiptTaglineSize",
   "receiptContactAlign",
+  "receiptContactSize",
+  "receiptAddressSize",
   "receiptFooterSize",
   "receiptFooterBold",
   "receiptPromoAlign",
@@ -317,7 +320,7 @@ export function ReceiptSection() {
             />
           </Field>
           <div className="receipt-customization-card">
-            <ControlRow label="Receipt text size">
+            <ControlRow label="Receipt and table text size">
               <SizeChoice
                 value={draft.receiptTextSize}
                 onChange={(receiptTextSize) => patch({ receiptTextSize })}
@@ -358,6 +361,12 @@ export function ReceiptSection() {
               onChange={(receiptTaglineAlign) => patch({ receiptTaglineAlign })}
             />
             <TextArea value={draft.tagline} onChange={(e) => patch({ tagline: e.target.value })} />
+            <ControlRow label="Size">
+              <SizeChoice
+                value={draft.receiptTaglineSize}
+                onChange={(receiptTaglineSize) => patch({ receiptTaglineSize })}
+              />
+            </ControlRow>
           </Field>
           <Field label="Proprietor / contact" hint="Phone / WhatsApp printed on the slip">
             <AlignChoice
@@ -368,7 +377,19 @@ export function ReceiptSection() {
               value={draft.contactLine}
               onChange={(e) => patch({ contactLine: e.target.value })}
             />
+            <ControlRow label="WhatsApp / contact size">
+              <SizeChoice
+                value={draft.receiptContactSize}
+                onChange={(receiptContactSize) => patch({ receiptContactSize })}
+              />
+            </ControlRow>
           </Field>
+          <ControlRow label="Shop address size">
+            <SizeChoice
+              value={draft.receiptAddressSize}
+              onChange={(receiptAddressSize) => patch({ receiptAddressSize })}
+            />
+          </ControlRow>
           <Field label="Footer note">
             <TextInput value={draft.footer} onChange={(e) => patch({ footer: e.target.value })} />
             <ControlRow label="Style">

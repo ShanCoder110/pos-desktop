@@ -97,6 +97,34 @@ pub struct DashboardReportResponse {
     pub credit_outstanding: f64,
     pub low_stock_count: u64,
     pub open_repairs: u64,
+    pub invoice_total_today: f64,
+    pub bills_today: u64,
+    pub sales_yesterday: f64,
+    pub collected_today: f64,
+    pub collected_yesterday: f64,
+    pub credit_today: f64,
+    pub credit_yesterday: f64,
+    pub expenses_today: f64,
+    pub repairs_today: u64,
+    pub repairs_yesterday: u64,
+    pub pending_transfers: u64,
+    pub transfers_today: u64,
+    pub transfers_yesterday: u64,
+    pub returns_total: u64,
+    pub returns_today: u64,
+    pub returns_yesterday: u64,
+    pub recent_bills: Vec<DashboardRecentBill>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardRecentBill {
+    pub id: String,
+    pub invoice_number: String,
+    pub payment_status: String,
+    pub total: f64,
+    pub paid_amount: f64,
+    pub created_at: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]

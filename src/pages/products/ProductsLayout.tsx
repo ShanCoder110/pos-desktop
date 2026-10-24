@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type ReactNode,
@@ -45,7 +46,7 @@ import { openLotStockValue } from "@/pages/products/productFifo";
 import { supplierProductCount } from "@/pages/products/hubSupplierFilters";
 import { PRODUCT_COPY } from "@/shared/constants/products";
 import { ensureSession } from "@/services/auth";
-import { listAllProducts } from "@/services/products";
+import { listAllProducts, listProductCatalog } from "@/services/products";
 import { listAllLots } from "@/services/lots";
 import { listAllPurchaseOrders } from "@/services/purchasing";
 import { listAllTransfers } from "@/services/transfers";
@@ -89,7 +90,9 @@ type HubCtx = {
   products: Product[];
   setProducts: Dispatch<SetStateAction<Product[]>>;
   categories: { id: string; name: string }[];
+  setCategories: Dispatch<SetStateAction<{ id: string; name: string }[]>>;
   units: { id: string; name: string; symbol: string }[];
+  setUnits: Dispatch<SetStateAction<{ id: string; name: string; symbol: string }[]>>;
   suppliers: {
     id: string;
     name: string;
@@ -97,6 +100,7 @@ type HubCtx = {
     cityId?: string | null;
     cityName?: string | null;
   }[];
+  setSuppliers: Dispatch<SetStateAction<{ id: string; name: string; isActive: boolean }[]>>;
   transfers: { id: string; status: string; items: unknown[] }[];
   purchaseOrders: { id: string; status: string; total: number }[];
   loading: { hub: boolean; products: boolean; lots: boolean };
@@ -105,7 +109,11 @@ type HubCtx = {
   bumpListsEpoch: () => void;
   refreshHub: (
     signal?: AbortSignal,
-    options?: { quiet?: boolean; guard?: ReturnType<typeof createLoadGuard> },
+    options?: {
+      quiet?: boolean;
+      reuseLoaded?: boolean;
+      guard?: ReturnType<typeof createLoadGuard>;
+    },
   ) => Promise<void>;
   refreshLots: (signal?: AbortSignal) => Promise<void>;
   refreshProducts: (signal?: AbortSignal) => Promise<void>;
@@ -123,8 +131,11 @@ const ProductsHubContext = createContext<HubCtx>({
   products: [],
   setProducts: () => undefined,
   categories: [],
+  setCategories: () => undefined,
   units: [],
+  setUnits: () => undefined,
   suppliers: [],
+  setSuppliers: () => undefined,
   transfers: [],
   purchaseOrders: [],
   loading: { hub: true, products: false, lots: false },
@@ -667,6 +678,7 @@ export function ProductsLayout() {
     { id: string; status: string; total: number }[]
   >([]);
   const [loading, setLoading] = useState({ hub: true, products: false, lots: false });
+  const loaded = useRef({ products: false, catalog: false });
   const [listsEpoch, setListsEpoch] = useState(0);
   const bumpListsEpoch = useCallback(() => setListsEpoch((n) => n + 1), []);
 
@@ -675,6 +687,7 @@ export function ProductsLayout() {
     try {
       await ensureSession();
       const records = await listAllProducts(signal);
+      loaded.current.products = true;
       setProducts(records);
     } catch (error) {
       if (isAbortError(error)) return;
@@ -697,7 +710,11 @@ export function ProductsLayout() {
   const refreshHub = useCallback(
     async (
       signal?: AbortSignal,
-      options?: { quiet?: boolean; guard?: ReturnType<typeof createLoadGuard> },
+      options?: {
+        quiet?: boolean;
+        reuseLoaded?: boolean;
+        guard?: ReturnType<typeof createLoadGuard>;
+      },
     ) => {
       const guard = options?.guard;
       const quiet = options?.quiet ?? false;
@@ -710,53 +727,96 @@ export function ProductsLayout() {
         await ensureSession(signal);
         if (guard && !guard.isActive()) return;
 
-        const productRows = await listAllProducts(signal);
+        // Start the section data and its side queries together. A tab change within
+        // this mounted hub can reuse the catalog already in memory; explicit
+        // refreshHub calls after edits still fetch fresh data.
+        const needCatalog =
+          section === "catalog" && (!options?.reuseLoaded || !loaded.current.catalog);
+        const needProducts =
+          section !== "catalog" &&
+          section !== "transfers" &&
+          section !== "reorders" &&
+          (!options?.reuseLoaded || !loaded.current.products);
+        const reuseCatalogData = options?.reuseLoaded && loaded.current.catalog;
+        const [
+          snapshot,
+          productRows,
+          lotRows,
+          categoryRows,
+          unitRows,
+          supplierRows,
+          transferRows,
+          poRows,
+        ] = await Promise.all([
+          needCatalog ? listProductCatalog(signal) : Promise.resolve(null),
+          needProducts ? listAllProducts(signal) : Promise.resolve(null),
+          !reuseCatalogData && (section === "lots" || section === "suppliers" || section === "low")
+            ? hubSideQuery(listAllLots({}, signal), [])
+            : Promise.resolve(null),
+          !reuseCatalogData && (section === "categories" || section === "low")
+            ? hubSideQuery(
+                listMasterRecords(
+                  "categories",
+                  { perPage: MAX_PAGE_SIZE, isActive: true },
+                  signal,
+                ).then((r) => r.data.map(({ id, name }) => ({ id, name }))),
+                [],
+              )
+            : Promise.resolve(null),
+          section === "units" || section === "low"
+            ? hubSideQuery(
+                listMasterRecords("units", { perPage: MAX_PAGE_SIZE, isActive: true }, signal).then(
+                  (r) => r.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" })),
+                ),
+                [],
+              )
+            : Promise.resolve(null),
+          !reuseCatalogData && (section === "lots" || section === "suppliers" || section === "low")
+            ? hubSideQuery(
+                listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, signal).then((r) =>
+                  r.data.map(({ id, name, isActive, cityId, cityName }) => ({
+                    id,
+                    name,
+                    isActive,
+                    cityId,
+                    cityName,
+                  })),
+                ),
+                [],
+              )
+            : Promise.resolve(null),
+          section === "transfers"
+            ? hubSideQuery(listAllTransfers({}, signal), [])
+            : Promise.resolve(null),
+          section === "reorders"
+            ? hubSideQuery(listAllPurchaseOrders({}, signal), [])
+            : Promise.resolve(null),
+        ]);
         if (signal?.aborted || (guard && !guard.isActive())) return;
-        setProducts(productRows);
-
-        const [lotRows, categoryRows, unitRows, supplierRows, transferRows, poRows] =
-          await Promise.all([
-            hubSideQuery(listAllLots({}, signal), []),
-            hubSideQuery(
-              listMasterRecords(
-                "categories",
-                { perPage: MAX_PAGE_SIZE, isActive: true },
-                signal,
-              ).then((r) => r.data.map(({ id, name }) => ({ id, name }))),
-              [],
-            ),
-            hubSideQuery(
-              listMasterRecords("units", { perPage: MAX_PAGE_SIZE, isActive: true }, signal).then(
-                (r) => r.data.map(({ id, name, symbol }) => ({ id, name, symbol: symbol ?? "" })),
-              ),
-              [],
-            ),
-            hubSideQuery(
-              listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, signal).then((r) =>
-                r.data.map(({ id, name, isActive, cityId, cityName }) => ({
-                  id,
-                  name,
-                  isActive,
-                  cityId,
-                  cityName,
-                })),
-              ),
-              [],
-            ),
-            hubSideQuery(listAllTransfers({}, signal), []),
-            hubSideQuery(listAllPurchaseOrders({}, signal), []),
-          ]);
-        if (signal?.aborted || (guard && !guard.isActive())) return;
-        setLots(lotRows);
-        setCategories(categoryRows);
-        setUnits(unitRows);
-        setSuppliers(supplierRows);
-        setTransfers(
-          transferRows.map((t) => ({ id: t.id, status: t.status, items: t.items ?? [] })),
-        );
-        setPurchaseOrders(
-          poRows.map((row) => ({ id: row.id, status: row.status, total: row.total })),
-        );
+        if (snapshot) {
+          loaded.current.products = true;
+          loaded.current.catalog = true;
+          setProducts(snapshot.products);
+          setLots(snapshot.lots);
+          setCategories(snapshot.categories);
+          setSuppliers(snapshot.suppliers);
+        }
+        if (productRows) {
+          loaded.current.products = true;
+          setProducts(productRows);
+        }
+        if (lotRows) setLots(lotRows);
+        if (categoryRows) setCategories(categoryRows);
+        if (unitRows) setUnits(unitRows);
+        if (supplierRows) setSuppliers(supplierRows);
+        if (transferRows)
+          setTransfers(
+            transferRows.map((t) => ({ id: t.id, status: t.status, items: t.items ?? [] })),
+          );
+        if (poRows)
+          setPurchaseOrders(
+            poRows.map((row) => ({ id: row.id, status: row.status, total: row.total })),
+          );
         if (quiet) setListsEpoch((n) => n + 1);
       } catch (error) {
         if (isAbortError(error)) return;
@@ -768,7 +828,7 @@ export function ProductsLayout() {
         }
       }
     },
-    [],
+    [section],
   );
 
   // Keep refresh* identities stable. Wrapping them as new arrows inside this
@@ -777,7 +837,11 @@ export function ProductsLayout() {
   const refreshHubFn = useCallback(
     (
       signal?: AbortSignal,
-      options?: { quiet?: boolean; guard?: ReturnType<typeof createLoadGuard> },
+      options?: {
+        quiet?: boolean;
+        reuseLoaded?: boolean;
+        guard?: ReturnType<typeof createLoadGuard>;
+      },
     ) => refreshHub(signal, options).then(() => undefined),
     [refreshHub],
   );
@@ -803,8 +867,11 @@ export function ProductsLayout() {
       products,
       setProducts,
       categories,
+      setCategories,
       units,
+      setUnits,
       suppliers,
+      setSuppliers,
       transfers,
       purchaseOrders,
       loading,
@@ -842,7 +909,7 @@ export function ProductsLayout() {
   useEffect(() => {
     const controller = new AbortController();
     const guard = createLoadGuard();
-    void refreshHub(controller.signal, { guard });
+    void refreshHub(controller.signal, { guard, reuseLoaded: true });
     return () => {
       guard.dispose();
       controller.abort();

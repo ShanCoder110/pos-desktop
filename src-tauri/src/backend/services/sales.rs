@@ -377,6 +377,7 @@ mod tests {
                 client_request_id: "ledger-sale-1".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -407,6 +408,7 @@ mod tests {
                 client_request_id: "ledger-revise-1".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::ONE,
@@ -437,6 +439,7 @@ mod tests {
                 client_request_id: "ledger-sale-2".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -478,6 +481,10 @@ mod tests {
             .await
             .expect("dashboard open");
         assert_eq!(dash_open.credit_outstanding, 45.0);
+        assert_eq!(dash_open.invoice_total_today, 45.0);
+        assert_eq!(dash_open.bills_today, 2);
+        assert_eq!(dash_open.credit_today, 45.0);
+        assert_eq!(dash_open.recent_bills.len(), 2);
 
         // Payment / return need an open till.
         let session = AuthService::open_cash_session(
@@ -712,6 +719,7 @@ mod tests {
                 client_request_id: "mix-sale-1".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -770,6 +778,7 @@ mod tests {
                 client_request_id: "mix-revise-1".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(3, 0),
@@ -823,6 +832,7 @@ mod tests {
                 client_request_id: "mix-sale-2".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::ONE,
@@ -1064,6 +1074,7 @@ mod tests {
                 client_request_id: "ret-full-40".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -1153,6 +1164,7 @@ mod tests {
                 client_request_id: "ret-partial-60".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(3, 0),
@@ -1240,6 +1252,7 @@ mod tests {
                 client_request_id: "ret-pay-40".into(),
                 customer_id: Some(pay_cust.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -1443,6 +1456,7 @@ mod tests {
                 customer_id: Some(customer.id.clone()),
                 items: vec![
                     SaleItemInput {
+                        product_lot_id: None,
                         product_id: product.id.clone(),
                         product_unit_id: unit_id.clone(),
                         quantity: Decimal::ONE,
@@ -1454,6 +1468,7 @@ mod tests {
                         tax: Decimal::ZERO,
                     },
                     SaleItemInput {
+                        product_lot_id: None,
                         product_id: product.id.clone(),
                         product_unit_id: unit_id.clone(),
                         quantity: Decimal::ONE,
@@ -1544,6 +1559,7 @@ mod tests {
                 customer_id: Some(cust_c.id.clone()),
                 items: vec![
                     SaleItemInput {
+                        product_lot_id: None,
                         product_id: product.id.clone(),
                         product_unit_id: unit_id.clone(),
                         quantity: Decimal::ONE,
@@ -1555,6 +1571,7 @@ mod tests {
                         tax: Decimal::ZERO,
                     },
                     SaleItemInput {
+                        product_lot_id: None,
                         product_id: product.id.clone(),
                         product_unit_id: unit_id.clone(),
                         quantity: Decimal::ONE,
@@ -1736,6 +1753,7 @@ mod tests {
                 client_request_id: "ret-edit-sale".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -1789,6 +1807,7 @@ mod tests {
                 client_request_id: "ret-edit-revise".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id,
                     quantity: Decimal::new(2, 0),
@@ -1940,6 +1959,7 @@ mod tests {
                 client_request_id: "void-ret-sale".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -2129,6 +2149,7 @@ mod tests {
                 client_request_id: "noop-sale".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -2192,6 +2213,7 @@ mod tests {
                 client_request_id: "noop-revise".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id,
                     quantity: Decimal::new(2, 0),
@@ -2390,6 +2412,7 @@ mod tests {
                 client_request_id: "split-noop-sale".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -2445,6 +2468,7 @@ mod tests {
                 client_request_id: "split-noop-revise".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id,
                     quantity: Decimal::new(2, 0),
@@ -2630,6 +2654,7 @@ mod tests {
                 client_request_id: "alloc-sale".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -2714,6 +2739,7 @@ mod tests {
                 client_request_id: "alloc-noop".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -2752,6 +2778,7 @@ mod tests {
                 client_request_id: "alloc-revise-up".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(3, 0),
@@ -2923,6 +2950,7 @@ mod tests {
                 client_request_id: "alloc-low-sale".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -2966,6 +2994,7 @@ mod tests {
                 client_request_id: "alloc-low-revise".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id,
                     quantity: Decimal::ONE,
@@ -3127,6 +3156,7 @@ mod tests {
                 client_request_id: "walk-credit-sale".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(2, 0),
@@ -3155,6 +3185,7 @@ mod tests {
                 client_request_id: "walk-credit-revise".into(),
                 customer_id: Some(walk_in.id),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id,
                     quantity: Decimal::new(2, 0),
@@ -3279,6 +3310,7 @@ mod tests {
                 client_request_id: "oversell-sale".into(),
                 customer_id: None,
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id,
                     product_unit_id: unit_id,
                     quantity: Decimal::new(6, 0),
@@ -3439,6 +3471,7 @@ mod tests {
                 client_request_id: "void-credit-sale".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id,
                     quantity: Decimal::new(2, 0),
@@ -3601,6 +3634,7 @@ mod tests {
                 customer_id: None,
                 items: vec![
                     SaleItemInput {
+                        product_lot_id: None,
                         product_id: product.id.clone(),
                         product_unit_id: unit_id.clone(),
                         quantity: Decimal::new(10, 0),
@@ -3612,6 +3646,7 @@ mod tests {
                         tax: Decimal::ZERO,
                     },
                     SaleItemInput {
+                        product_lot_id: None,
                         product_id: product.id.clone(),
                         product_unit_id: unit_id.clone(),
                         quantity: Decimal::new(5, 0),
@@ -3658,5 +3693,24 @@ mod tests {
         // Sanity: fifo costs match opening cost × base qty
         assert!((sale.items[0].fifo_cost - 80.0).abs() < 0.02);
         assert!((sale.items[1].fifo_cost - 40.0).abs() < 0.02);
+
+        let full_list = SalesService::list(&database, Default::default())
+            .await
+            .expect("list hydrated invoices");
+        assert_eq!(full_list.data.len(), 1);
+        assert_eq!(full_list.data[0].items.len(), 2);
+        assert_eq!(full_list.data[0].payments.len(), 1);
+        let headers = SalesService::list(
+            &database,
+            crate::backend::dto::InvoiceListQuery {
+                include_details: Some(false),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("list invoice headers");
+        assert_eq!(headers.data[0].total, sale.total);
+        assert!(headers.data[0].items.is_empty());
+        assert!(headers.data[0].payments.is_empty());
     }
 }

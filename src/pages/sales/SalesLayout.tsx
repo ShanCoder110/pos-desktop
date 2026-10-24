@@ -213,13 +213,13 @@ function ClaimKpis() {
 function ProductSalesKpis() {
   const { invoices, products } = useSalesHub();
   const completed = invoices.filter((invoice) => invoice.status === "COMPLETED");
+  const productCost = new Map(products.map((product) => [product.id, product.cost]));
   const totals = completed.reduce(
     (summary, invoice) => {
       invoice.items.forEach((item) => {
-        const product = products.find((row) => row.id === item.productId);
         summary.sales += item.total;
         summary.quantity += item.baseQuantity;
-        summary.profit += item.total - item.baseQuantity * (product?.cost ?? 0);
+        summary.profit += item.total - item.baseQuantity * (productCost.get(item.productId) ?? 0);
         summary.products.add(item.productId);
       });
       return summary;
@@ -298,17 +298,23 @@ export function SalesLayout() {
     const controller = new AbortController();
     void (async () => {
       await ensureSession(controller.signal);
+      const isReturns = pathname.endsWith("/returns");
+      const isClaims = pathname.endsWith("/claims");
+      const isProductSales = pathname.endsWith("/products");
       const [invoiceRows, returnRows, productRows] = await Promise.all([
-        listAllInvoices(controller.signal).catch(() => [] as InvoiceRow[]),
-        listAllReturns(controller.signal).catch(() => [] as ReturnRow[]),
-        listAllProducts(controller.signal).catch(() => [] as Product[]),
+        !isClaims ? listAllInvoices(controller.signal).catch(() => [] as InvoiceRow[]) : null,
+        isReturns ? listAllReturns(controller.signal).catch(() => [] as ReturnRow[]) : null,
+        isReturns || isClaims || isProductSales
+          ? listAllProducts(controller.signal).catch(() => [] as Product[])
+          : null,
       ]);
-      setInvoices(invoiceRows);
-      setReturns(returnRows);
-      setProducts(productRows);
+      if (controller.signal.aborted) return;
+      if (invoiceRows) setInvoices(invoiceRows);
+      if (returnRows) setReturns(returnRows);
+      if (productRows) setProducts(productRows);
     })();
     return () => controller.abort();
-  }, [hubTick]);
+  }, [hubTick, pathname]);
 
   return (
     <SalesHubContext.Provider value={ctx}>

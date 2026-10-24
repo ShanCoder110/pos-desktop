@@ -1,4 +1,5 @@
 import { API_ROUTES } from "@/shared/constants/api";
+import { cachedLocalRead } from "@/services/readCache";
 import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { apiRequest, queryString, type PaginatedResponse } from "@/services/api";
 
@@ -75,6 +76,23 @@ export function listMasterRecords(
 export async function listAllMasterRecords(
   resource: MasterResource,
   params: Omit<MasterListParams, "page" | "perPage"> = {},
+  signal?: AbortSignal,
+) {
+  // Search requests are short-lived as the user types. Do not leave their
+  // paginated crawl running inside the shared cache after navigation/filtering.
+  if (params.search?.trim()) {
+    return fetchAllMasterRecords(resource, params, signal);
+  }
+  return cachedLocalRead(
+    `master:${resource}:${queryString(params)}`,
+    () => fetchAllMasterRecords(resource, params),
+    signal,
+  );
+}
+
+async function fetchAllMasterRecords(
+  resource: MasterResource,
+  params: Omit<MasterListParams, "page" | "perPage">,
   signal?: AbortSignal,
 ) {
   const records: MasterRecord[] = [];

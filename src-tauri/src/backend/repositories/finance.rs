@@ -9,11 +9,11 @@ use crate::backend::{
     context::RequestContext,
     dto::{
         AnalyticsDaySales, AnalyticsQuery, AnalyticsReportResponse, AnalyticsTopProduct,
-        CreateExpenseCategoryRequest, CreateExpenseRequest, DashboardReportResponse,
-        ExpenseCategoryResponse, ExpenseListQuery, ExpenseResponse, LocalizationSettingsResponse,
-        MoneyTransactionResponse, ProfileSettingsResponse, ReceiptSettingsQuery,
-        ReceiptSettingsResponse, TransactionListQuery, UpdateLocalizationRequest,
-        UpdateProfileRequest, UpdateReceiptRequest,
+        CreateExpenseCategoryRequest, CreateExpenseRequest, DashboardRecentBill,
+        DashboardReportResponse, ExpenseCategoryResponse, ExpenseListQuery, ExpenseResponse,
+        LocalizationSettingsResponse, MoneyTransactionResponse, ProfileSettingsResponse,
+        ReceiptSettingsQuery, ReceiptSettingsResponse, TransactionListQuery,
+        UpdateLocalizationRequest, UpdateProfileRequest, UpdateReceiptRequest,
     },
     errors::AppError,
     util::{money_value, now_utc, parse_date, parse_uuid, trimmed},
@@ -27,6 +27,34 @@ struct CountRow {
 #[derive(Debug, FromQueryResult)]
 struct DecimalRow {
     value: Option<Decimal>,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct DashboardInvoiceTotalsRow {
+    invoice_total_today: Decimal,
+    bills_today: i64,
+    sales_yesterday: Decimal,
+    collected_today: Decimal,
+    collected_yesterday: Decimal,
+    credit_today: Decimal,
+    credit_yesterday: Decimal,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct DashboardDayCountsRow {
+    total: i64,
+    today: i64,
+    yesterday: i64,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct DashboardRecentBillRow {
+    id: Uuid,
+    invoice_number: String,
+    payment_status: String,
+    total: Decimal,
+    paid_amount: Decimal,
+    created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -413,11 +441,108 @@ impl FinanceRepository {
         .map(|row| std::cmp::max(row.count, 0) as u64)
         .unwrap_or(0);
 
+        // The dashboard needs aggregates, not every invoice and its line items.
+        // Use the same UTC+5 calendar convention as the existing today-sales KPI.
+        let invoice_totals = DashboardInvoiceTotalsRow::find_by_statement(
+            Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "SELECT
+                    CAST(COALESCE(SUM(CASE WHEN status = 'COMPLETED' AND date(created_at, '+5 hours') = date('now', '+5 hours') THEN total ELSE 0 END), 0) AS REAL) AS invoice_total_today,
+                    COALESCE(SUM(CASE WHEN status = 'COMPLETED' AND date(created_at, '+5 hours') = date('now', '+5 hours') THEN 1 ELSE 0 END), 0) AS bills_today,
+                    CAST(COALESCE(SUM(CASE WHEN status = 'COMPLETED' AND date(created_at, '+5 hours') = date('now', '+5 hours', '-1 day') THEN total ELSE 0 END), 0) AS REAL) AS sales_yesterday,
+                    CAST(COALESCE(SUM(CASE WHEN status = 'COMPLETED' AND date(created_at, '+5 hours') = date('now', '+5 hours') THEN paid_amount ELSE 0 END), 0) AS REAL) AS collected_today,
+                    CAST(COALESCE(SUM(CASE WHEN status = 'COMPLETED' AND date(created_at, '+5 hours') = date('now', '+5 hours', '-1 day') THEN paid_amount ELSE 0 END), 0) AS REAL) AS collected_yesterday,
+                    CAST(COALESCE(SUM(CASE WHEN status = 'COMPLETED' AND date(created_at, '+5 hours') = date('now', '+5 hours') THEN credit_amount ELSE 0 END), 0) AS REAL) AS credit_today,
+                    CAST(COALESCE(SUM(CASE WHEN status = 'COMPLETED' AND date(created_at, '+5 hours') = date('now', '+5 hours', '-1 day') THEN credit_amount ELSE 0 END), 0) AS REAL) AS credit_yesterday
+                   FROM invoices WHERE branch_id = ? AND deleted_at IS NULL",
+                [branch_id.into()],
+            ),
+        )
+        .one(database)
+        .await?
+        .ok_or_else(|| AppError::Internal("Dashboard invoice totals unavailable".into()))?;
+
+        let expenses_today = DecimalRow::find_by_statement(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT CAST(COALESCE(SUM(amount), 0) AS REAL) AS value FROM expenses WHERE expense_date = date('now', '+5 hours')".to_owned(),
+        ))
+        .one(database)
+        .await?
+        .and_then(|row| row.value)
+        .unwrap_or(Decimal::ZERO);
+        let repairs = DashboardDayCountsRow::find_by_statement(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT COUNT(*) AS total,
+                    COALESCE(SUM(CASE WHEN date(received_at, '+5 hours') = date('now', '+5 hours') THEN 1 ELSE 0 END), 0) AS today,
+                    COALESCE(SUM(CASE WHEN date(received_at, '+5 hours') = date('now', '+5 hours', '-1 day') THEN 1 ELSE 0 END), 0) AS yesterday
+               FROM repair_jobs".to_owned(),
+        ))
+        .one(database)
+        .await?
+        .ok_or_else(|| AppError::Internal("Dashboard repair totals unavailable".into()))?;
+        let transfers = DashboardDayCountsRow::find_by_statement(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT COUNT(*) AS total,
+                    COALESCE(SUM(CASE WHEN date(created_at, '+5 hours') = date('now', '+5 hours') THEN 1 ELSE 0 END), 0) AS today,
+                    COALESCE(SUM(CASE WHEN date(created_at, '+5 hours') = date('now', '+5 hours', '-1 day') THEN 1 ELSE 0 END), 0) AS yesterday
+               FROM stock_transfers WHERE status IN ('DRAFT', 'SENT', 'PARTIAL')".to_owned(),
+        ))
+        .one(database)
+        .await?
+        .ok_or_else(|| AppError::Internal("Dashboard transfer totals unavailable".into()))?;
+        let returns = DashboardDayCountsRow::find_by_statement(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT COUNT(*) AS total,
+                    COALESCE(SUM(CASE WHEN date(created_at, '+5 hours') = date('now', '+5 hours') THEN 1 ELSE 0 END), 0) AS today,
+                    COALESCE(SUM(CASE WHEN date(created_at, '+5 hours') = date('now', '+5 hours', '-1 day') THEN 1 ELSE 0 END), 0) AS yesterday
+               FROM sale_returns".to_owned(),
+        ))
+        .one(database)
+        .await?
+        .ok_or_else(|| AppError::Internal("Dashboard return totals unavailable".into()))?;
+        let recent_bills =
+            DashboardRecentBillRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "SELECT id, invoice_number, payment_status, total, paid_amount, created_at
+                   FROM invoices WHERE branch_id = ? AND deleted_at IS NULL
+                   ORDER BY created_at DESC, id ASC LIMIT 8",
+                [branch_id.into()],
+            ))
+            .all(database)
+            .await?
+            .into_iter()
+            .map(|row| DashboardRecentBill {
+                id: row.id.to_string(),
+                invoice_number: row.invoice_number,
+                payment_status: row.payment_status,
+                total: decimal(row.total),
+                paid_amount: decimal(row.paid_amount),
+                created_at: row.created_at.to_rfc3339(),
+            })
+            .collect();
+
         Ok(DashboardReportResponse {
             today_sales_total: decimal(today_sales),
             credit_outstanding: decimal(credit_outstanding),
             low_stock_count: low_stock,
             open_repairs,
+            invoice_total_today: decimal(invoice_totals.invoice_total_today),
+            bills_today: invoice_totals.bills_today.max(0) as u64,
+            sales_yesterday: decimal(invoice_totals.sales_yesterday),
+            collected_today: decimal(invoice_totals.collected_today),
+            collected_yesterday: decimal(invoice_totals.collected_yesterday),
+            credit_today: decimal(invoice_totals.credit_today),
+            credit_yesterday: decimal(invoice_totals.credit_yesterday),
+            expenses_today: decimal(expenses_today),
+            repairs_today: repairs.today.max(0) as u64,
+            repairs_yesterday: repairs.yesterday.max(0) as u64,
+            pending_transfers: transfers.total.max(0) as u64,
+            transfers_today: transfers.today.max(0) as u64,
+            transfers_yesterday: transfers.yesterday.max(0) as u64,
+            returns_total: returns.total.max(0) as u64,
+            returns_today: returns.today.max(0) as u64,
+            returns_yesterday: returns.yesterday.max(0) as u64,
+            recent_bills,
         })
     }
 

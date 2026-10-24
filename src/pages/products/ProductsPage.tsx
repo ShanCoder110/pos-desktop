@@ -4,7 +4,10 @@ import { useLotDrawer } from "@/pages/lots/useLotDrawer";
 import { QuickReorderPopover } from "@/components/reorders/QuickReorderPopover";
 import {
   AlertTriangle,
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
+  ArrowUpDown,
   ChevronDown,
   FileSpreadsheet,
   FileText,
@@ -84,25 +87,27 @@ import { QUERY_CATEGORY_ID, QUERY_SUPPLIER_ID } from "@/shared/constants/query";
 import { productBelongsToSupplier } from "@/pages/products/hubSupplierFilters";
 import { useSettings } from "@/shared/settings";
 import type { Product } from "@/shared/types";
-import type { InvoiceRow, ProductLotRow } from "@/shared/domain/types";
+import type { ProductLotRow } from "@/shared/domain/types";
 import { ensureSession } from "@/services/auth";
-import { listAllRepairs, type RepairResponse } from "@/services/repairs";
 import {
   createProduct,
   deleteProduct,
+  getProductSalesSummary,
+  getCachedProductSalesSummary,
+  listAllProducts,
   searchAllProducts,
   updateProduct,
+  type ProductSort,
+  type ProductSortKey,
 } from "@/services/products";
 import {
   buildCreateProductPayload,
   buildUpdateProductPayload,
   resolveCategoryId,
 } from "@/pages/products/productPayload";
-import { listAllInvoices } from "@/services/sales";
 import { createMasterRecord } from "@/services/masters";
 import { compareProductSearch, productMatchesQuery } from "@/utils/salePricing";
 import {
-  buildProductSalesStats,
   formatInsightMetricValue,
   insightMetricDetails,
   insightMetricLabel,
@@ -113,10 +118,39 @@ import { exportProductsCsv, exportProductsExcel, printProducts } from "@/utils/e
 import { money, shortError } from "@/utils/format";
 import { profitMarginPercent } from "@/utils/margin";
 import { ProductCostDisplay } from "@/pages/products/ProductCostDisplay";
+import { compareNewestProducts } from "@/pages/products/productOrder";
 import { fifoCostForProduct, openLotStockValue } from "@/pages/products/productFifo";
 import { branchStockTooltip, productTotalStock } from "@/utils/productStock";
 
 type PriceField = "cost" | "min" | "wholesale" | "retail";
+
+function SortableProductHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+}: {
+  label: string;
+  sortKey: ProductSortKey;
+  sort: ProductSort;
+  onSort: (key: ProductSortKey) => void;
+}) {
+  const active = sort.key === sortKey;
+  const Icon = !active ? ArrowUpDown : sort.direction === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <Th sortDirection={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        type="button"
+        className={`inline-flex items-center gap-1 text-left hover:text-accent ${active ? "text-accent" : ""}`}
+        onClick={() => onSort(sortKey)}
+        aria-label={`Sort ${label} ${active && sort.direction === "asc" ? "descending" : "ascending"}`}
+      >
+        {label}
+        <Icon size={12} aria-hidden="true" />
+      </button>
+    </Th>
+  );
+}
 
 function unitPrices(row: Product, field: PriceField) {
   if (row.sellUnits?.length) {
@@ -355,13 +389,14 @@ export function ProductsPage() {
     section,
     sectionKpi,
     lots,
-    setLots,
     products: rows,
+    setProducts,
     categories,
     units,
     suppliers,
     loading,
     refreshHub,
+    refreshLots,
   } = useProductsHub();
   const categoryOptions = categories.map((c) => c.name);
   const supplierOptions = suppliers.map((s) => s.name);
@@ -372,6 +407,12 @@ export function ProductsPage() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [sort, setSort] = useState<ProductSort>({ key: "createdAt", direction: "desc" });
+  const [serverOrder, setServerOrder] = useState<{
+    key: ProductSortKey;
+    direction: ProductSort["direction"];
+    ids: Map<string, number>;
+  } | null>(null);
   const [cols, setCols] = useState<string[]>(
     tab === "low" ? DEFAULT_REORDER_COLUMNS : DEFAULT_PRODUCT_COLUMNS,
   );
@@ -380,8 +421,9 @@ export function ProductsPage() {
   const [chartProductId, setChartProductId] = useState("");
   const [remoteRows, setRemoteRows] = useState<Product[]>([]);
   const [insightMetric, setInsightMetric] = useState<ProductInsightMetric>("profit");
-  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
-  const [repairJobs, setRepairJobs] = useState<RepairResponse[]>([]);
+  const [salesSummary, setSalesSummary] = useState<
+    { productId: string; quantity: number; sales: number }[]
+  >([]);
   const [productLoading, setProductLoading] = useState({ saving: false, deleting: false });
   const [chips, setChips] = useState<FilterChip[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -394,28 +436,64 @@ export function ProductsPage() {
   const debouncedGlobalQuery = useDebounce(q.trim(), 320);
 
   useEffect(() => {
+    if (!rows.length || (sort.key === "createdAt" && sort.direction === "desc")) return;
+    const controller = new AbortController();
+    void listAllProducts(controller.signal, undefined, sort)
+      .then((products) => {
+        if (controller.signal.aborted) return;
+        setServerOrder({
+          key: sort.key,
+          direction: sort.direction,
+          ids: new Map(products.map((product, index) => [product.id, index])),
+        });
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        toaster.error(shortError(error, "Could not sort products"));
+        setSort({ key: "createdAt", direction: "desc" });
+      });
+    return () => controller.abort();
+  }, [rows, sort]);
+
+  function changeSort(key: ProductSortKey) {
+    setServerOrder(null);
+    setSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+    setPage(1);
+  }
+
+  useEffect(() => {
+    if (!rows.length) return;
+    const cached = getCachedProductSalesSummary();
+    if (cached) {
+      setSalesSummary(cached);
+      return;
+    }
     const controller = new AbortController();
     void (async () => {
       try {
         await ensureSession();
-        const [invoiceRows, repairs] = await Promise.all([
-          listAllInvoices(controller.signal).catch(() => [] as InvoiceRow[]),
-          listAllRepairs(controller.signal).catch(() => [] as RepairResponse[]),
-        ]);
+        const summary = await getProductSalesSummary(controller.signal);
         if (controller.signal.aborted) return;
-        setInvoices(invoiceRows);
-        setRepairJobs(repairs);
+        setSalesSummary(summary);
       } catch {
         if (controller.signal.aborted) return;
       }
     })();
     return () => controller.abort();
-  }, []);
+  }, [rows.length]);
 
-  const salesStats = useMemo(
-    () => buildProductSalesStats(rows, invoices, repairJobs),
-    [rows, invoices, repairJobs],
-  );
+  const salesStats = useMemo(() => {
+    const costById = new Map(rows.map((row) => [row.id, row.cost]));
+    return new Map(
+      salesSummary.map(({ productId, quantity, sales }) => [
+        productId,
+        { quantity, sales, profit: sales - quantity * (costById.get(productId) ?? 0) },
+      ]),
+    );
+  }, [rows, salesSummary]);
 
   useEffect(() => {
     if (debouncedGlobalQuery.length < 2) {
@@ -537,7 +615,7 @@ export function ProductsPage() {
         if (
           chip.field === "productNo" &&
           selected.length &&
-          !selected.some((value) => String(r.productNo ?? "").includes(value.trim()))
+          !selected.some((value) => String(r.productNo ?? "") === value.trim())
         ) {
           return false;
         }
@@ -612,9 +690,16 @@ export function ProductsPage() {
       return true;
     });
     const needle = q.trim();
-    if (!needle) return list;
+    if (serverOrder?.key === sort.key && serverOrder.direction === sort.direction) {
+      return list.sort(
+        (a, b) =>
+          (serverOrder.ids.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+          (serverOrder.ids.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+      );
+    }
+    if (!needle) return list.sort(compareNewestProducts);
     return [...list].sort((a, b) => compareProductSearch(a, b, needle));
-  }, [searchRows, q, tab, chips, sectionKpi, salesStats, lots, rows, suppliers]);
+  }, [searchRows, q, tab, chips, sectionKpi, salesStats, lots, rows, suppliers, serverOrder, sort]);
 
   const pageCount = pageSize === PAGE_SIZE_ALL ? Math.max(filtered.length, 1) : pageSize;
   const pages = Math.max(1, Math.ceil(filtered.length / pageCount));
@@ -685,6 +770,8 @@ export function ProductsPage() {
 
   async function commit(next: Product): Promise<boolean | string> {
     const isNewRow = !rows.some((r) => r.id === next.id);
+    const createsOpeningLot =
+      isNewRow && (next.stock > 0 || (next.branchStock ?? []).some((row) => row.quantity > 0));
     if (!units.some((row) => row.symbol === next.unit)) {
       toaster.error(PRODUCT_COPY.unitRequired);
       return false;
@@ -701,6 +788,7 @@ export function ProductsPage() {
         next.categoryId = category.id;
       }
       const session = await ensureSession();
+      let savedProduct: Product;
       if (isNewRow) {
         const payload = buildCreateProductPayload(next, {
           categoryId: category.id,
@@ -712,6 +800,7 @@ export function ProductsPage() {
           return false;
         }
         const created = await createProduct(payload);
+        savedProduct = created;
         next.id = created.id;
         next.categoryId = created.categoryId;
         next.category = created.category;
@@ -727,13 +816,28 @@ export function ProductsPage() {
           return false;
         }
         const updated = await updateProduct(next.id, payload);
+        savedProduct = updated;
         next.categoryId = updated.categoryId;
         next.category = updated.category;
         next.productNo = updated.productNo;
         next.sku = updated.sku;
-        setLots((prev) => [...prev.filter((lot) => lot.productId !== next.id)]);
       }
-      await refreshHub(undefined, { quiet: true });
+      setProducts((current) =>
+        isNewRow
+          ? [savedProduct, ...current]
+          : current.map((row) => (row.id === savedProduct.id ? savedProduct : row)),
+      );
+      if (isNewRow) {
+        setSort({ key: "createdAt", direction: "desc" });
+        setServerOrder(null);
+        setPage(1);
+        setQ("");
+        setChips([]);
+        setHealth(null);
+        setView("table");
+        navigate(productsHref());
+      }
+      if (createsOpeningLot) void refreshLots();
       return true;
     } catch (error) {
       const message = shortError(error, PRODUCT_COPY.saveFailed);
@@ -879,7 +983,12 @@ export function ProductsPage() {
             onRemove={removeChip}
             onClear={clearChips}
             filterFields={[
-              { id: "productNo", label: "ID" },
+              {
+                id: "productNo",
+                label: "Product ID",
+                placeholder: "Exact product ID",
+                numeric: true,
+              },
               { id: "name", label: "Name" },
               { id: "sku", label: "SKU" },
               { id: "category", label: "Category", options: categoryOptions, searchable: true },
@@ -1147,23 +1256,120 @@ export function ProductsPage() {
                 }}
               />
             </Th>
-            {show("productNo") ? <Th>ID</Th> : null}
-            <Th>Name</Th>
-            {show("urduName") ? <Th>Urdu name</Th> : null}
-            {show("sku") ? <Th>SKU</Th> : null}
-            {show("category") ? <Th>Category</Th> : null}
-            {show("supplier") ? <Th>Last supplier</Th> : null}
-            {show("cost") ? <Th>Cost</Th> : null}
-            {show("min") ? <Th>Minimum</Th> : null}
-            {show("wholesale") ? <Th>Wholesale</Th> : null}
-            {show("retail") ? <Th>Retail</Th> : null}
-            {show("margin") ? <Th>Margin</Th> : null}
-            {show("sales") ? <Th>Total sales</Th> : null}
-            {show("stock") ? <Th>Qty</Th> : null}
-            {show("minStock") ? <Th>Minimum qty</Th> : null}
-            {show("recommended") ? <Th>Recommended order</Th> : null}
-            {show("lastCost") ? <Th>Last cost</Th> : null}
-            {show("status") ? <Th>Status</Th> : null}
+            {show("productNo") ? (
+              <SortableProductHeader
+                label="ID"
+                sortKey="productNo"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
+            <SortableProductHeader label="Name" sortKey="name" sort={sort} onSort={changeSort} />
+            {show("urduName") ? (
+              <SortableProductHeader
+                label="Urdu name"
+                sortKey="urduName"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
+            {show("sku") ? (
+              <SortableProductHeader label="SKU" sortKey="sku" sort={sort} onSort={changeSort} />
+            ) : null}
+            {show("category") ? (
+              <SortableProductHeader
+                label="Category"
+                sortKey="category"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
+            {show("supplier") ? (
+              <SortableProductHeader
+                label="Last supplier"
+                sortKey="supplier"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
+            {show("cost") ? (
+              <SortableProductHeader label="Cost" sortKey="cost" sort={sort} onSort={changeSort} />
+            ) : null}
+            {show("min") ? (
+              <SortableProductHeader
+                label="Minimum"
+                sortKey="min"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
+            {show("wholesale") ? (
+              <SortableProductHeader
+                label="Wholesale"
+                sortKey="wholesale"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
+            {show("retail") ? (
+              <SortableProductHeader
+                label="Retail"
+                sortKey="retail"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
+            {show("margin") ? (
+              <SortableProductHeader
+                label="Margin"
+                sortKey="margin"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
+            {show("sales") ? (
+              <SortableProductHeader
+                label="Total sales"
+                sortKey="sales"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
+            {show("stock") ? (
+              <SortableProductHeader label="Qty" sortKey="stock" sort={sort} onSort={changeSort} />
+            ) : null}
+            {show("minStock") ? (
+              <SortableProductHeader
+                label="Minimum qty"
+                sortKey="minStock"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
+            {show("recommended") ? (
+              <SortableProductHeader
+                label="Recommended order"
+                sortKey="recommended"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
+            {show("lastCost") ? (
+              <SortableProductHeader
+                label="Last cost"
+                sortKey="lastCost"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
+            {show("status") ? (
+              <SortableProductHeader
+                label="Status"
+                sortKey="status"
+                sort={sort}
+                onSort={changeSort}
+              />
+            ) : null}
             <Th>Actions</Th>
           </tr>
         </THead>
@@ -1509,11 +1715,13 @@ export function ProductsPage() {
           }
           setProductLoading((current) => ({ ...current, deleting: true }));
           void deleteProduct(remove.id)
-            .then(() => refreshHub(undefined, { quiet: true }))
             .then(() => {
+              setProducts((current) => current.filter((row) => row.id !== remove.id));
+              setRemoteRows((current) => current.filter((row) => row.id !== remove.id));
               setSelected((selectedIds) => selectedIds.filter((id) => id !== remove.id));
               toaster.success(PRODUCT_COPY.deleted);
               setRemove(null);
+              void refreshHub(undefined, { quiet: true });
             })
             .catch((error) => {
               toaster.error(shortError(error, PRODUCT_COPY.deleteFailed));

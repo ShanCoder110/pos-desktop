@@ -36,6 +36,20 @@ fn ensure_lot_delete_permission(context: &RequestContext) -> Result<(), AppError
 pub struct LotService;
 
 impl LotService {
+    pub async fn list_bulk(
+        database: &DatabaseConnection,
+        mut query: LotListQuery,
+    ) -> Result<Paginated<LotResponse>, AppError> {
+        query.page = query.page.normalized();
+        query.page.page = 1;
+        query.page.per_page = 5000;
+        let (data, total) = LotRepository::list(database, &query).await?;
+        Ok(Paginated {
+            data,
+            meta: PaginationMeta::new(total, 1, 5000),
+        })
+    }
+
     pub async fn list(
         database: &DatabaseConnection,
         mut query: LotListQuery,
@@ -528,6 +542,7 @@ mod tests {
                 client_request_id: "lot-sell-30".into(),
                 customer_id: Some(customer.id.clone()),
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id,
                     quantity: Decimal::new(30, 0),
@@ -1010,6 +1025,7 @@ mod tests {
                 client_request_id: "shrink-sale".into(),
                 customer_id: None,
                 items: vec![SaleItemInput {
+                    product_lot_id: None,
                     product_id: product.id.clone(),
                     product_unit_id: unit_id.clone(),
                     quantity: Decimal::new(10, 0),

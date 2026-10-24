@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -29,23 +29,14 @@ import {
 import {
   DASHBOARD_COPY,
   DASHBOARD_KPI,
-  DASHBOARD_RECENT_INVOICES,
   DASHBOARD_TOP_PRODUCTS,
-  addDays,
   compareToPrevious,
-  isSameCalendarDay,
 } from "@/shared/constants/dashboard";
 import { productsHref } from "@/shared/constants/products";
 import { routes } from "@/shared/constants/routes";
-import type { ExpenseRow, InvoiceRow, ReturnRow } from "@/shared/domain/types";
 import { formatTableDateTime, money } from "@/utils/format";
 import { paymentStatusTone } from "@/utils/paymentStatus";
-import { ensureSession } from "@/services/auth";
-import { listAllReturns } from "@/services/credit";
-import { listAllExpenses, reportsAnalytics, reportsDashboard } from "@/services/finance";
-import { listAllRepairs, type RepairResponse } from "@/services/repairs";
-import { listAllInvoices } from "@/services/sales";
-import { listAllTransfers } from "@/services/transfers";
+import { reportsAnalytics, reportsDashboard, type DashboardReport } from "@/services/finance";
 import { createLoadGuard } from "@/utils/async";
 
 function weekdayLabel(date = new Date()) {
@@ -54,16 +45,6 @@ function weekdayLabel(date = new Date()) {
     day: "numeric",
     month: "short",
   });
-}
-
-function sumDay(rows: InvoiceRow[], day: Date, pick: (row: InvoiceRow) => number) {
-  return rows
-    .filter((row) => row.status === "COMPLETED" && isSameCalendarDay(row.createdAt, day))
-    .reduce((sum, row) => sum + pick(row), 0);
-}
-
-function countOnDay<T>(rows: T[], day: Date, dateOf: (row: T) => string) {
-  return rows.filter((row) => isSameCalendarDay(dateOf(row), day)).length;
 }
 
 function deltaClass(direction: "up" | "down" | "flat" | "new", invert?: boolean) {
@@ -75,16 +56,7 @@ function deltaClass(direction: "up" | "down" | "flat" | "new", invert?: boolean)
 export function DashboardPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState({ page: true });
-  const [todaySales, setTodaySales] = useState(0);
-  const [creditOpen, setCreditOpen] = useState(0);
-  const [low, setLow] = useState(0);
-  const [openRepairs, setOpenRepairs] = useState(0);
-  const [pendingTransfers, setPendingTransfers] = useState(0);
-  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
-  const [returns, setReturns] = useState<ReturnRow[]>([]);
-  const [repairs, setRepairs] = useState<RepairResponse[]>([]);
-  const [transfers, setTransfers] = useState<{ status: string; createdAt: string }[]>([]);
-  const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
+  const [summary, setSummary] = useState<DashboardReport | null>(null);
   const [chart, setChart] = useState<{ label: string; value: number }[]>([]);
   const [topProducts, setTopProducts] = useState<
     { productId: string; productName: string; quantity: number; revenue: number }[]
@@ -95,30 +67,12 @@ export function DashboardPage() {
     const guard = createLoadGuard();
     void (async () => {
       try {
-        const session = await ensureSession();
-        const [dash, analytics, transferRows, invoiceRows, returnRows, expenseRows, repairRows] =
-          await Promise.all([
-            reportsDashboard(controller.signal).catch(() => null),
-            reportsAnalytics({}, controller.signal).catch(() => null),
-            listAllTransfers({}, controller.signal).catch(() => []),
-            listAllInvoices(controller.signal, session?.branchId).catch(() => [] as InvoiceRow[]),
-            listAllReturns(controller.signal).catch(() => [] as ReturnRow[]),
-            listAllExpenses(controller.signal).catch(() => [] as ExpenseRow[]),
-            listAllRepairs(controller.signal).catch(() => [] as RepairResponse[]),
-          ]);
+        const [dash, analytics] = await Promise.all([
+          reportsDashboard(controller.signal).catch(() => null),
+          reportsAnalytics({}, controller.signal).catch(() => null),
+        ]);
         if (!guard.isActive()) return;
-        if (dash) {
-          setTodaySales(dash.todaySalesTotal);
-          setCreditOpen(dash.creditOutstanding);
-          setLow(dash.lowStockCount);
-          setOpenRepairs(dash.openRepairs);
-        }
-        setTransfers(transferRows);
-        setPendingTransfers(transferRows.filter((t) => t.status === "PENDING").length);
-        setInvoices(invoiceRows);
-        setReturns(returnRows);
-        setExpenses(expenseRows);
-        setRepairs(repairRows);
+        setSummary(dash);
         setChart(
           analytics?.salesByDay?.length
             ? analytics.salesByDay.map((day) => ({ label: day.day, value: day.total }))
@@ -137,42 +91,29 @@ export function DashboardPage() {
     };
   }, []);
 
-  const today = useMemo(() => new Date(), []);
-  const yesterday = useMemo(() => addDays(today, -1), [today]);
-
-  const todayInvoices = useMemo(
-    () =>
-      invoices.filter(
-        (row) => row.status === "COMPLETED" && isSameCalendarDay(row.createdAt, today),
-      ),
-    [invoices, today],
-  );
-  const salesToday = todaySales || sumDay(invoices, today, (row) => row.total);
-  const invoiceTotalToday = sumDay(invoices, today, (row) => row.total);
+  const todaySales = summary?.todaySalesTotal ?? 0;
+  const creditOpen = summary?.creditOutstanding ?? 0;
+  const low = summary?.lowStockCount ?? 0;
+  const openRepairs = summary?.openRepairs ?? 0;
+  const pendingTransfers = summary?.pendingTransfers ?? 0;
+  const invoiceTotalToday = summary?.invoiceTotalToday ?? 0;
+  const todayBillCount = summary?.billsToday ?? 0;
+  const salesToday = todaySales || invoiceTotalToday;
+  const salesYesterday = summary?.salesYesterday ?? 0;
+  const collectedToday = summary?.collectedToday ?? 0;
+  const collectedYesterday = summary?.collectedYesterday ?? 0;
+  const creditToday = summary?.creditToday ?? 0;
+  const creditYesterday = summary?.creditYesterday ?? 0;
+  const expenseToday = summary?.expensesToday ?? 0;
+  const repairsToday = summary?.repairsToday ?? 0;
+  const repairsYesterday = summary?.repairsYesterday ?? 0;
+  const transfersToday = summary?.transfersToday ?? 0;
+  const transfersYesterday = summary?.transfersYesterday ?? 0;
+  const returnsToday = summary?.returnsToday ?? 0;
+  const returnsYesterday = summary?.returnsYesterday ?? 0;
+  const returnsTotal = summary?.returnsTotal ?? 0;
+  const recentBills = summary?.recentBills ?? [];
   const salesMismatch = todaySales > 0 && Math.abs(todaySales - invoiceTotalToday) > 0.02;
-  const salesYesterday = sumDay(invoices, yesterday, (row) => row.total);
-  const collectedToday = sumDay(invoices, today, (row) => row.paidAmount);
-  const collectedYesterday = sumDay(invoices, yesterday, (row) => row.paidAmount);
-  const creditToday = sumDay(invoices, today, (row) => row.creditAmount);
-  const creditYesterday = sumDay(invoices, yesterday, (row) => row.creditAmount);
-  const expenseToday = expenses
-    .filter((row) => isSameCalendarDay(row.expenseDate, today))
-    .reduce((sum, row) => sum + row.amount, 0);
-  const repairsToday = countOnDay(repairs, today, (row) => row.receivedAt || row.createdAt);
-  const repairsYesterday = countOnDay(repairs, yesterday, (row) => row.receivedAt || row.createdAt);
-  const transfersToday = countOnDay(
-    transfers.filter((row) => row.status === "PENDING"),
-    today,
-    (row) => row.createdAt,
-  );
-  const transfersYesterday = countOnDay(
-    transfers.filter((row) => row.status === "PENDING"),
-    yesterday,
-    (row) => row.createdAt,
-  );
-  const returnsToday = countOnDay(returns, today, (row) => row.createdAt);
-  const returnsYesterday = countOnDay(returns, yesterday, (row) => row.createdAt);
-  const recentBills = invoices.slice(0, DASHBOARD_RECENT_INVOICES);
   const weekTotal = chart.reduce((sum, point) => sum + point.value, 0);
 
   const salesDelta = compareToPrevious(salesToday, salesYesterday);
@@ -209,11 +150,11 @@ export function DashboardPage() {
     },
     {
       label: "Returns",
-      value: returns.length,
+      value: returnsTotal,
       hint: "Tickets on file",
       icon: RotateCcw,
       to: routes.salesReturns,
-      severity: (returns.length ? "warn" : "ok") as "ok" | "warn" | "danger",
+      severity: (returnsTotal ? "warn" : "ok") as "ok" | "warn" | "danger",
       delta: compareToPrevious(returnsToday, returnsYesterday),
     },
   ];
@@ -231,8 +172,8 @@ export function DashboardPage() {
       {!loading.page && salesMismatch ? (
         <p className="rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-ink">
           Reconciliation: API today sales {money(todaySales)} vs invoices loaded{" "}
-          {money(invoiceTotalToday)} ({todayInvoices.length} bill
-          {todayInvoices.length === 1 ? "" : "s"}). Check branch filter or completed_at dates.
+          {money(invoiceTotalToday)} ({todayBillCount} bill
+          {todayBillCount === 1 ? "" : "s"}). Check branch filter or completed_at dates.
         </p>
       ) : null}
 
@@ -287,7 +228,7 @@ export function DashboardPage() {
         {[
           {
             label: "Bills today",
-            value: String(todayInvoices.length),
+            value: String(todayBillCount),
             hint: "Completed",
             tone: "blue",
           },

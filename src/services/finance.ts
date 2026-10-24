@@ -52,6 +52,30 @@ export interface DashboardReport {
   creditOutstanding: number;
   lowStockCount: number;
   openRepairs: number;
+  invoiceTotalToday: number;
+  billsToday: number;
+  salesYesterday: number;
+  collectedToday: number;
+  collectedYesterday: number;
+  creditToday: number;
+  creditYesterday: number;
+  expensesToday: number;
+  repairsToday: number;
+  repairsYesterday: number;
+  pendingTransfers: number;
+  transfersToday: number;
+  transfersYesterday: number;
+  returnsTotal: number;
+  returnsToday: number;
+  returnsYesterday: number;
+  recentBills: {
+    id: string;
+    invoiceNumber: string;
+    paymentStatus: string;
+    total: number;
+    paidAmount: number;
+    createdAt: string;
+  }[];
 }
 
 export interface AnalyticsReport {

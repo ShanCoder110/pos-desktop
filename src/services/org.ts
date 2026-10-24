@@ -1,6 +1,7 @@
 import { API_ROUTES } from "@/shared/constants/api";
 import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { apiRequest, queryString, type PaginatedResponse } from "@/services/api";
+import { getAccessToken } from "@/services/authToken";
 import type { Branch, BranchSetting, StaffUser, UserRole } from "@/shared/domain/types";
 
 export interface BranchResponse {
@@ -29,6 +30,14 @@ export interface BranchResponse {
   } | null;
   createdAt: string;
   updatedAt: string;
+}
+
+let branchCache: { token: string | null; rows: BranchResponse[]; at: number } | null = null;
+let branchLoad: { token: string | null; promise: Promise<BranchResponse[]> } | null = null;
+
+function invalidateBranches() {
+  branchCache = null;
+  branchLoad = null;
 }
 
 export interface UserResponse {
@@ -118,6 +127,9 @@ export function createBranch(payload: BranchRequestPayload) {
   return apiRequest<BranchResponse>(API_ROUTES.branches, {
     method: "POST",
     body: JSON.stringify(payload),
+  }).then((row) => {
+    invalidateBranches();
+    return row;
   });
 }
 
@@ -125,6 +137,9 @@ export function updateBranch(id: string, payload: BranchRequestPayload) {
   return apiRequest<BranchResponse>(API_ROUTES.branchById(id), {
     method: "PUT",
     body: JSON.stringify(payload),
+  }).then((row) => {
+    invalidateBranches();
+    return row;
   });
 }
 
@@ -158,14 +173,29 @@ export function listBranches(
 }
 
 export async function listAllBranches(signal?: AbortSignal): Promise<BranchResponse[]> {
-  const rows: BranchResponse[] = [];
-  let page = 1;
-  for (;;) {
-    const response = await listBranches({ page, perPage: MAX_PAGE_SIZE }, signal);
-    rows.push(...response.data);
-    if (!response.meta.hasNextPage) return rows;
-    page += 1;
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const token = getAccessToken();
+  if (branchCache?.token === token && Date.now() - branchCache.at < 60_000) {
+    return branchCache.rows;
   }
+  if (branchLoad?.token !== token) {
+    const promise = (async () => {
+      const rows: BranchResponse[] = [];
+      let page = 1;
+      for (;;) {
+        const response = await listBranches({ page, perPage: MAX_PAGE_SIZE });
+        rows.push(...response.data);
+        if (!response.meta.hasNextPage) break;
+        page += 1;
+      }
+      if (getAccessToken() === token) branchCache = { token, rows, at: Date.now() };
+      return rows;
+    })().finally(() => {
+      if (branchLoad?.promise === promise) branchLoad = null;
+    });
+    branchLoad = { token, promise };
+  }
+  return branchLoad.promise;
 }
 
 export function listUsers(

@@ -1,8 +1,12 @@
 use std::path::PathBuf;
 use std::time::Duration;
+use std::time::Instant;
 
 use axum::{
+    extract::Request,
     http::{HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
+    response::Response,
     routing::{get, post},
     Json, Router,
 };
@@ -22,14 +26,15 @@ use super::{
         AUTH_REFRESH_ROUTE, AUTH_SETUP_ROUTE, AUTH_STATUS_ROUTE, BRANCHES_ROUTE,
         BRANCH_BY_ID_ROUTE, CASH_SESSIONS_CURRENT_ROUTE, CASH_SESSIONS_OPEN_ROUTE,
         CASH_SESSION_CLOSE_ROUTE, CATEGORIES_ROUTE, CATEGORY_BY_ID_ROUTE, CITIES_ROUTE,
-        CITY_BY_ID_ROUTE, CLAIMS_ROUTE, CLAIM_BY_ID_ROUTE, CUSTOMERS_ROUTE,
-        CUSTOMER_ADJUST_BALANCE_ROUTE, CUSTOMER_BY_ID_ROUTE, CUSTOMER_LEDGERS_ROUTE,
-        CUSTOMER_LEDGER_ROUTE, CUSTOMER_PAYMENTS_ROUTE, DEVICES_ROUTE, DEVICE_PRINTER_ROUTE,
-        EXPENSES_ROUTE, EXPENSE_CATEGORIES_ROUTE, HEALTH_ROUTE, INVOICES_ROUTE,
-        INVOICE_BY_ID_ROUTE, INVOICE_REVISE_ROUTE, INVOICE_VOID_ROUTE, LOG_TARGET,
+        CITY_BY_ID_ROUTE, CLAIMS_ROUTE, CLAIM_BY_ID_ROUTE, CREDIT_BOOK_SUMMARY_ROUTE,
+        CUSTOMERS_ROUTE, CUSTOMER_ADJUST_BALANCE_ROUTE, CUSTOMER_BY_ID_ROUTE,
+        CUSTOMER_LEDGERS_ROUTE, CUSTOMER_LEDGER_ROUTE, CUSTOMER_PAYMENTS_ROUTE, DEVICES_ROUTE,
+        DEVICE_PRINTER_ROUTE, EXPENSES_ROUTE, EXPENSE_CATEGORIES_ROUTE, HEALTH_ROUTE,
+        INVOICES_ROUTE, INVOICE_BY_ID_ROUTE, INVOICE_REVISE_ROUTE, INVOICE_VOID_ROUTE, LOG_TARGET,
         LOTS_RECEIVE_ROUTE, LOTS_ROUTE, LOT_BY_ID_ROUTE, PRODUCTION_BY_ID_ROUTE,
-        PRODUCTION_COMPLETE_ROUTE, PRODUCTION_ROUTE, PRODUCTION_START_ROUTE, PRODUCTS_IMPORT_ROUTE,
-        PRODUCTS_ROUTE, PRODUCT_BY_ID_ROUTE, PRODUCT_SEARCH_ROUTE, PURCHASE_ORDERS_ROUTE,
+        PRODUCTION_COMPLETE_ROUTE, PRODUCTION_ROUTE, PRODUCTION_START_ROUTE, PRODUCTS_BULK_ROUTE,
+        PRODUCTS_IMPORT_ROUTE, PRODUCTS_ROUTE, PRODUCT_BY_ID_ROUTE, PRODUCT_CATALOG_ROUTE,
+        PRODUCT_SALES_SUMMARY_ROUTE, PRODUCT_SEARCH_ROUTE, PURCHASE_ORDERS_ROUTE,
         PURCHASE_ORDER_BY_ID_ROUTE, PURCHASE_ORDER_CANCEL_ROUTE, PURCHASE_ORDER_ORDER_ROUTE,
         PURCHASE_ORDER_RECEIVE_ROUTE, PURCHASE_ORDER_UNLINK_LOT_ROUTE, REPAIRS_ROUTE,
         REPAIR_BY_ID_ROUTE, REPAIR_COMPLETE_ROUTE, REPAIR_DELIVER_ROUTE, REPAIR_START_ROUTE,
@@ -163,6 +168,12 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
         )
         // Catalog
         .route(PRODUCT_SEARCH_ROUTE, get(handlers::search_products))
+        .route(PRODUCTS_BULK_ROUTE, get(handlers::list_products_bulk))
+        .route(PRODUCT_CATALOG_ROUTE, get(handlers::product_catalog))
+        .route(
+            PRODUCT_SALES_SUMMARY_ROUTE,
+            get(handlers::product_sales_summary),
+        )
         .route(PRODUCTS_IMPORT_ROUTE, post(handlers::import_products))
         .route(
             PRODUCTS_ROUTE,
@@ -227,6 +238,10 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
         .route(
             CUSTOMERS_ROUTE,
             get(handlers::list_customers).post(handlers::create_customer),
+        )
+        .route(
+            CREDIT_BOOK_SUMMARY_ROUTE,
+            get(handlers::credit_book_summary),
         )
         .route(
             CUSTOMER_BY_ID_ROUTE,
@@ -387,7 +402,8 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
                 ])
                 .allow_headers(Any),
         )
-        .layer(TraceLayer::new_for_http());
+        .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(log_slow_request));
     let listener = match tokio::net::TcpListener::bind((host.as_str(), port)).await {
         Ok(listener) => listener,
         Err(error) => {
@@ -411,4 +427,26 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
 
 async fn health() -> (StatusCode, Json<Value>) {
     (StatusCode::OK, Json(json!({ "status": "ok" })))
+}
+
+/// Windows machines can have much slower SQLite or antivirus scans than a
+/// developer workstation. Log only slow route timings, without query strings,
+/// bodies, or auth headers, so a production log can identify the bottleneck.
+async fn log_slow_request(request: Request, next: Next) -> Response {
+    let path = request.uri().path().to_owned();
+    let method = request.method().clone();
+    let started = Instant::now();
+    let response = next.run(request).await;
+    let duration = started.elapsed();
+    if duration >= Duration::from_millis(500) {
+        warn!(
+            target: LOG_TARGET,
+            %method,
+            %path,
+            status = %response.status(),
+            elapsed_ms = duration.as_millis(),
+            "slow API request"
+        );
+    }
+    response
 }

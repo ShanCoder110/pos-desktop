@@ -40,13 +40,15 @@ export function Th({
   children,
   className,
   hint,
+  sortDirection,
 }: {
   children?: ReactNode;
   className?: string;
   hint?: string;
+  sortDirection?: "ascending" | "descending" | "none";
 }) {
   return (
-    <th className={className} title={hint}>
+    <th className={className} title={hint} aria-sort={sortDirection}>
       <span className="ui-th-label">{children}</span>
       {hint ? <small className="ui-th-hint">{hint}</small> : null}
     </th>

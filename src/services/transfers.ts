@@ -2,6 +2,7 @@ import type { StockTransferRow, TransferStatus } from "@/shared/domain/types";
 import { API_ROUTES } from "@/shared/constants/api";
 import { MAX_PAGE_SIZE } from "@/shared/constants/config";
 import { apiRequest, queryString, type PaginatedResponse } from "@/services/api";
+import { cachedLocalRead } from "@/services/readCache";
 
 export interface TransferItemResponse {
   id: string;
@@ -92,10 +93,20 @@ export async function listAllTransfers(
   params: Omit<Parameters<typeof listTransfers>[0], "page" | "perPage"> = {},
   signal?: AbortSignal,
 ): Promise<StockTransferRow[]> {
+  return cachedLocalRead(
+    `transfers:${queryString(params)}`,
+    () => fetchAllTransfers(params),
+    signal,
+  );
+}
+
+async function fetchAllTransfers(
+  params: Omit<Parameters<typeof listTransfers>[0], "page" | "perPage">,
+): Promise<StockTransferRow[]> {
   const rows: StockTransferRow[] = [];
   let page = 1;
   for (;;) {
-    const response = await listTransfers({ ...params, page, perPage: MAX_PAGE_SIZE }, signal);
+    const response = await listTransfers({ ...params, page, perPage: MAX_PAGE_SIZE });
     rows.push(...response.data.map(mapTransfer));
     if (!response.meta.hasNextPage) return rows;
     page += 1;

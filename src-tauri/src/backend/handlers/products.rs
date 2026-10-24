@@ -3,18 +3,22 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use sea_orm::{DatabaseBackend, DatabaseConnection, FromQueryResult, Statement};
 use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::backend::{
     constants::ERROR_INVALID_ID,
     context::RequestContext,
     dto::{
-        CreateProductRequest, DeleteResponse, Paginated, ProductImportCatalog, ProductImportResult,
-        ProductListQuery, ProductResponse, ProductSearchResponse, UpdateProductRequest,
+        CreateProductRequest, DeleteResponse, LotListQuery, LotResponse, MasterResponse, PageQuery,
+        Paginated, ProductImportCatalog, ProductImportResult, ProductListQuery, ProductResponse,
+        ProductSearchResponse, UpdateProductRequest,
     },
     errors::AppError,
-    services::ProductService,
+    repositories::MasterKind,
+    services::{LotService, MasterService, ProductService},
     AppState,
 };
 
@@ -32,6 +36,110 @@ pub async fn list_products(
         query.branch_id = Some(ctx.branch_id.to_string());
     }
     Ok(Json(ProductService::list(&state.db, query).await?))
+}
+
+/// One catalog snapshot for local screens that need the whole product list.
+/// Ordinary /products remains capped and paginated for table queries.
+pub async fn list_products_bulk(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Query(mut query): Query<ProductListQuery>,
+) -> Result<Json<Paginated<ProductResponse>>, AppError> {
+    query.branch_id = Some(ctx.branch_id.to_string());
+    Ok(Json(ProductService::list_bulk(&state.db, query).await?))
+}
+
+pub async fn product_catalog(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Query(mut query): Query<ProductListQuery>,
+) -> Result<Json<ProductCatalogResponse>, AppError> {
+    query.branch_id = Some(ctx.branch_id.to_string());
+    query.page.sort_by = Some("createdAt".to_owned());
+    query.page.sort_direction = Some(crate::backend::dto::SortDirection::Desc);
+    let lot_query = LotListQuery::default();
+    let (products, lots, sales_summary, categories, suppliers) = tokio::try_join!(
+        ProductService::list_bulk(&state.db, query),
+        LotService::list_bulk(&state.db, lot_query),
+        load_product_sales_summary(&state.db),
+        MasterService::list(
+            &state.db,
+            MasterKind::Category,
+            PageQuery {
+                page: 1,
+                per_page: 100,
+                is_active: Some(true),
+                ..Default::default()
+            }
+        ),
+        MasterService::list(
+            &state.db,
+            MasterKind::Supplier,
+            PageQuery {
+                page: 1,
+                per_page: 100,
+                ..Default::default()
+            }
+        )
+    )?;
+    Ok(Json(ProductCatalogResponse {
+        products,
+        lots,
+        sales_summary,
+        categories: categories.data,
+        suppliers: suppliers.data,
+    }))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductCatalogResponse {
+    products: Paginated<ProductResponse>,
+    lots: Paginated<LotResponse>,
+    sales_summary: Vec<ProductSalesSummary>,
+    categories: Vec<MasterResponse>,
+    suppliers: Vec<MasterResponse>,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct ProductSalesAggregate {
+    product_id: Uuid,
+    quantity: f64,
+    sales: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductSalesSummary {
+    product_id: String,
+    quantity: f64,
+    sales: f64,
+}
+
+pub async fn product_sales_summary(
+    State(state): State<AppState>,
+    _ctx: RequestContext,
+) -> Result<Json<Vec<ProductSalesSummary>>, AppError> {
+    Ok(Json(load_product_sales_summary(&state.db).await?))
+}
+
+async fn load_product_sales_summary(
+    db: &DatabaseConnection,
+) -> Result<Vec<ProductSalesSummary>, AppError> {
+    let rows = ProductSalesAggregate::find_by_statement(Statement::from_string(
+        DatabaseBackend::Sqlite,
+        "SELECT product_id, CAST(SUM(base_quantity) AS REAL) AS quantity, CAST(SUM(line_total) AS REAL) AS sales FROM (SELECT ii.product_id, ii.base_quantity, ii.line_total FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE i.status = 'COMPLETED' AND i.deleted_at IS NULL UNION ALL SELECT rp.product_id, rp.base_quantity, rp.line_total FROM repair_parts rp JOIN repair_jobs rj ON rj.id = rp.repair_job_id) GROUP BY product_id".to_owned(),
+    ))
+    .all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| ProductSalesSummary {
+            product_id: row.product_id.to_string(),
+            quantity: row.quantity,
+            sales: row.sales,
+        })
+        .collect())
 }
 
 pub async fn search_products(

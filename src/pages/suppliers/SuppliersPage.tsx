@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useDebounce } from "@/hooks/useDebounce";
 import { BookOpen, Building2, Pencil, Plus, Scale, Trash2, Wallet } from "lucide-react";
 import {
   Button,
@@ -469,7 +470,9 @@ export function SuppliersPage() {
   });
   const [kpiPicked, setKpiPicked] = useState(false);
 
-  const filters = useMemo(() => supplierQuery(search, chips), [chips, search]);
+  const debouncedSearch = useDebounce(search);
+  const debouncedLedgerSearch = useDebounce(ledgerSearch);
+  const filters = useMemo(() => supplierQuery(debouncedSearch, chips), [chips, debouncedSearch]);
   const canAdjust = supplierCanAdjust(viewerRole);
   const statusChips = chipValuesForField(chips, "status");
   const balanceChips = chipValuesForField(chips, "balance");
@@ -559,7 +562,7 @@ export function SuppliersPage() {
     const debit = Number(chipValuesForField(ledgerChips, "debit")[0]);
     const credit = Number(chipValuesForField(ledgerChips, "credit")[0]);
     const params = {
-      search: ledgerSearch,
+      search: debouncedLedgerSearch,
       supplier: chipCsv(ledgerChips, "supplier"),
       entryType: chipCsv(ledgerChips, "entryType"),
       notes: chipCsv(ledgerChips, "notes"),
@@ -604,7 +607,7 @@ export function SuppliersPage() {
     ledgerChips,
     ledgerPage,
     ledgerPageSize,
-    ledgerSearch,
+    debouncedLedgerSearch,
     reloadKey,
     tab,
   ]);

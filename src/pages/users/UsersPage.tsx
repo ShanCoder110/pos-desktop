@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useDebounce } from "@/hooks/useDebounce";
 import { Navigate } from "react-router-dom";
 import {
   CircleDot,
@@ -155,7 +156,11 @@ export function UsersPage() {
   const [loading, setLoading] = useState({ fetching: true, saving: false, deleting: false });
 
   const canViewUsers = staffCanViewUsers(viewerRole);
-  const apiFilters = useMemo(() => userQuery(search, chips, branches), [branches, chips, search]);
+  const debouncedSearch = useDebounce(search);
+  const apiFilters = useMemo(
+    () => userQuery(debouncedSearch, chips, branches),
+    [branches, chips, debouncedSearch],
+  );
 
   const filterFields = useMemo(
     () =>
@@ -222,6 +227,7 @@ export function UsersPage() {
   }, [apiFilters, page, pageSize, reloadKey]);
 
   useEffect(() => {
+    if (view !== "insights") return;
     const controller = new AbortController();
     void listAllUsers(apiFilters, controller.signal)
       .then((response) => setChartRows(response.map(mapUser)))
@@ -230,7 +236,7 @@ export function UsersPage() {
         setChartRows([]);
       });
     return () => controller.abort();
-  }, [apiFilters, reloadKey]);
+  }, [apiFilters, reloadKey, view]);
 
   useEffect(() => {
     const controller = new AbortController();
