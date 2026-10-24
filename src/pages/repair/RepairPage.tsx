@@ -41,7 +41,7 @@ import {
   wholeQty,
 } from "@/utils/salePricing";
 import { RepairStockComposer } from "./RepairStockComposer";
-import { createRepairAddTransfer, permanentlyDeleteRepairTransfer } from "./repairShopMutations";
+import { permanentlyDeleteRepairTransfer, replaceRepairAddTransfer } from "./repairShopMutations";
 import {
   decodeRepairTransfer,
   isActiveRepairTransfer,
@@ -101,7 +101,9 @@ export function RepairPage() {
         repairShopId ? listAllProducts(signal) : Promise.resolve(null),
         listAllLots({}, signal),
         listAllBranches(signal),
-        repairShopId ? listAllTransfers({}, signal) : Promise.resolve(null),
+        repairShopId
+          ? listAllTransfers({ toBranchId: repairShopId }, signal)
+          : Promise.resolve(null),
       ]);
       if (nextProducts) setProducts(nextProducts);
       setLots(nextLots);
@@ -268,21 +270,21 @@ export function RepairPage() {
     setActionBusy(true);
     setEditError("");
     try {
-      await permanentlyDeleteRepairTransfer(transfer, transfers);
       const nextLots = await listAllLots({});
-      await createRepairAddTransfer({
-        sourceBranchId: sourceBranch.id,
-        repairBranchId,
+      await replaceRepairAddTransfer({
+        original: transfer,
         lines: nextLines,
         products,
         lots: nextLots,
       });
       toaster.success("Product updated");
       setEditLine(null);
-      await refresh();
+      void refresh().catch((error) =>
+        toaster.error(shortError(error, "Product updated, but could not refresh repair stock")),
+      );
     } catch (error) {
       setEditError(shortError(error, "Could not update product"));
-      await refresh();
+      void refresh().catch(() => undefined);
     } finally {
       setActionBusy(false);
     }
@@ -297,24 +299,26 @@ export function RepairPage() {
     );
     setActionBusy(true);
     try {
-      await permanentlyDeleteRepairTransfer(transfer, transfers);
       if (remaining.length) {
         const nextLots = await listAllLots({});
-        await createRepairAddTransfer({
-          sourceBranchId: sourceBranch.id,
-          repairBranchId,
+        await replaceRepairAddTransfer({
+          original: transfer,
           lines: remaining,
           products,
           lots: nextLots,
         });
+      } else {
+        await permanentlyDeleteRepairTransfer(transfer, transfers);
       }
       toaster.success(remaining.length ? "Product removed" : "Record deleted");
       setDeleteLine(null);
       setOpenRecord(null);
-      await refresh();
+      void refresh().catch((error) =>
+        toaster.error(shortError(error, "Product removed, but could not refresh repair stock")),
+      );
     } catch (error) {
       toaster.error(shortError(error, "Could not delete product"));
-      await refresh();
+      void refresh().catch(() => undefined);
     } finally {
       setActionBusy(false);
     }
@@ -326,6 +330,7 @@ export function RepairPage() {
       return;
     }
     setSavingShop(true);
+    let createdId: string;
     try {
       const created = await createBranch({
         name: shopName.trim(),
@@ -334,19 +339,20 @@ export function RepairPage() {
         address: shopAddress.trim() || undefined,
         isActive: true,
       });
-      await refresh();
-      setRepairBranchId(created.id);
+      createdId = created.id;
       setCreateOpen(false);
       setShopName("");
       setShopPhone("");
       setShopAddress("");
       toaster.success("Repair shop created");
-      navigate(`${routes.repair}/${encodeURIComponent(created.id)}`);
     } catch (error) {
       toaster.error(shortError(error, "Could not create repair shop"));
+      return;
     } finally {
       setSavingShop(false);
     }
+    setRepairBranchId(createdId);
+    navigate(`${routes.repair}/${encodeURIComponent(createdId)}`);
   }
 
   function openShop(shopId: string) {
@@ -494,9 +500,13 @@ export function RepairPage() {
             repairBranchName={selectedShop.name}
             products={products}
             lots={lots}
-            onSaved={async () => {
-              await refresh();
+            onSaved={() => {
               setAddProductsOpen(false);
+              void refresh().catch((error) => {
+                toaster.error(
+                  shortError(error, "Products added, but repair totals could not refresh"),
+                );
+              });
             }}
           />
         </Drawer>

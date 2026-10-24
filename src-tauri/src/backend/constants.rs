@@ -96,6 +96,9 @@ pub const TRANSFERS_ROUTE: &str = "/transfers";
 pub const TRANSFER_BY_ID_ROUTE: &str = "/transfers/{id}";
 pub const TRANSFER_SEND_ROUTE: &str = "/transfers/{id}/send";
 pub const TRANSFER_RECEIVE_ROUTE: &str = "/transfers/{id}/receive";
+pub const REPAIR_TRANSFER_ROUTE: &str = "/transfers/repair";
+pub const REPAIR_TRANSFER_REPLACE_ROUTE: &str = "/transfers/{id}/repair-replace";
+pub const RECEIVED_TRANSFER_ROUTE: &str = "/transfers/received";
 
 pub const PRODUCTION_ROUTE: &str = "/production";
 pub const PRODUCTION_BY_ID_ROUTE: &str = "/production/{id}";

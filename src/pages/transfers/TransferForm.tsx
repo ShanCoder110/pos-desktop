@@ -18,7 +18,7 @@ import type { ProductLotRow } from "@/shared/domain/types";
 import type { Product } from "@/shared/types";
 import { ensureSession } from "@/services/auth";
 import type { BranchResponse } from "@/services/org";
-import { createTransfer, receiveTransfer, sendTransfer } from "@/services/transfers";
+import { createReceivedTransfer } from "@/services/transfers";
 import { shortError } from "@/utils/format";
 
 export const TRANSFER_FORM_ID = "transfer-form";
@@ -237,14 +237,12 @@ export function TransferForm({
     setSaving(true);
     onSavingChange?.(true);
     try {
-      const created = await createTransfer({
+      await createReceivedTransfer({
         fromBranchId,
         toBranchId,
         notes: notes.trim() || null,
         items,
       });
-      await sendTransfer(created.id);
-      await receiveTransfer(created.id);
       toaster.success(TRANSFER_COPY.created);
       onSaved();
       onClose();

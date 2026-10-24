@@ -108,8 +108,16 @@ function reorderApiFilters(
 }
 
 export function ReordersPage() {
-  const { setActions, products, suppliers, lots, sectionKpi, purchaseOrders, refreshHub } =
-    useProductsHub();
+  const {
+    setActions,
+    products,
+    suppliers,
+    lots,
+    loading: hubLoading,
+    sectionKpi,
+    purchaseOrders,
+    refreshHub,
+  } = useProductsHub();
   const { openCreate, lotDrawer } = useLotDrawer();
   const [createOpen, setCreateOpen] = useState(false);
   const [page, setPage] = useState(1);
@@ -137,6 +145,7 @@ export function ReordersPage() {
   }, [sectionKpi, chips, search, dateRange]);
 
   useEffect(() => {
+    if (hubLoading.hub) return;
     const controller = new AbortController();
     setLoading(true);
     void listPurchaseOrders({ ...apiFilters, page, perPage: pageSize }, controller.signal)
@@ -154,15 +163,20 @@ export function ReordersPage() {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [apiFilters, page, pageSize, purchaseOrders]);
+  }, [apiFilters, hubLoading.hub, page, pageSize, purchaseOrders]);
 
   useEffect(() => {
+    if (hubLoading.hub) return;
+    if (!Object.values(apiFilters).some((value) => value != null && value !== "")) {
+      setFilteredTotalCost(purchaseOrders.reduce((sum, row) => sum + row.total, 0));
+      return;
+    }
     const controller = new AbortController();
     void listAllPurchaseOrders(apiFilters, controller.signal)
       .then((data) => setFilteredTotalCost(data.reduce((sum, row) => sum + row.total, 0)))
       .catch(() => setFilteredTotalCost(0));
     return () => controller.abort();
-  }, [apiFilters, purchaseOrders]);
+  }, [apiFilters, hubLoading.hub, purchaseOrders]);
 
   const productName = (id: string) => products.find((row) => row.id === id)?.name ?? id;
   const supplierOptions = useMemo(() => hubSupplierOptions(suppliers), [suppliers]);

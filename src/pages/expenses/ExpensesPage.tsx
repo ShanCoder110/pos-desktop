@@ -19,6 +19,7 @@ import {
   TextInput,
   THead,
   Th,
+  toaster,
 } from "@/components/common";
 import type { ExpenseCategory, ExpenseRow } from "@/shared/domain/types";
 import { FIELD_LIMITS, FORM_COPY } from "@/shared/constants/fields";
@@ -42,15 +43,14 @@ const EXPENSE_FORM_ID = "expense-form";
 function ExpenseEditForm({
   row,
   categories,
-  branches,
+  branchName,
   onValid,
 }: {
   row: ExpenseRow;
   categories: ExpenseCategory[];
-  branches: { id: string; name: string }[];
+  branchName: string;
   onValid: (values: {
     categoryId: string;
-    branchId: string;
     amount: string;
     paymentMethod: ExpenseRow["paymentMethod"];
     description: string;
@@ -65,7 +65,6 @@ function ExpenseEditForm({
   } = useAppForm({
     defaultValues: {
       categoryId: row.categoryId,
-      branchId: row.branchId,
       amount: row.amount ? String(row.amount) : "",
       paymentMethod: row.paymentMethod,
       description: row.description,
@@ -102,22 +101,9 @@ function ExpenseEditForm({
         />
       </Field>
       <Field label="Branch">
-        <Controller
-          name="branchId"
-          control={control}
-          render={({ field }) => (
-            <SelectInput
-              value={field.value}
-              onChange={(event) => field.onChange(event.target.value)}
-            >
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
-              ))}
-            </SelectInput>
-          )}
-        />
+        <div className="rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink">
+          {branchName || "Current branch"}
+        </div>
       </Field>
       <Field label="Amount" error={fieldMessage(errors, "amount")}>
         <Controller
@@ -150,10 +136,10 @@ function ExpenseEditForm({
                 field.onChange(event.target.value as ExpenseRow["paymentMethod"])
               }
             >
-              <option>CASH</option>
-              <option>CARD</option>
-              <option>BANK</option>
-              <option>OTHER</option>
+              <option value="CASH">Cash</option>
+              <option value="CARD">Card</option>
+              <option value="BANK">Bank</option>
+              <option value="OTHER">Other</option>
             </SelectInput>
           )}
         />
@@ -171,6 +157,7 @@ function ExpenseEditForm({
 export function ExpensesPage() {
   const [rows, setRows] = useState<ExpenseRow[]>([]);
   const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
+  const [defaultBranchId, setDefaultBranchId] = useState("");
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [q, setQ] = useState("");
   const tabItems = useMemo(
@@ -189,7 +176,7 @@ export function ExpensesPage() {
 
   const blank = (): ExpenseRow => ({
     id: "",
-    branchId: branches[0]?.id ?? "",
+    branchId: branches.find((branch) => branch.id === defaultBranchId)?.id ?? branches[0]?.id ?? "",
     categoryId: expenseCategories[0]?.id ?? "",
     amount: 0,
     paymentMethod: "CASH",
@@ -201,24 +188,32 @@ export function ExpensesPage() {
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
-      await ensureSession(controller.signal);
-      const [expenseRows, categories, branchRows] = await Promise.all([
+      const session = await ensureSession(controller.signal);
+      const [expenseRows, categoryResult, branchRows] = await Promise.all([
         listAllExpenses(controller.signal).catch(() => [] as ExpenseRow[]),
-        listExpenseCategories(controller.signal).catch(() => [] as ExpenseCategory[]),
+        listExpenseCategories(controller.signal)
+          .then((rows) => ({ rows, failed: false }))
+          .catch(() => ({ rows: [] as ExpenseCategory[], failed: true })),
         listAllBranches(controller.signal)
           .then((rows) => rows.map(mapBranch))
           .catch(() => []),
       ]);
-      let expenseCategories = categories;
-      if (expenseCategories.length === 0) {
+      if (controller.signal.aborted) return;
+      let categories = categoryResult.rows;
+      if (categoryResult.failed) {
+        toaster.error("Could not load expense categories");
+      } else if (categories.length === 0) {
         try {
-          expenseCategories = [await createExpenseCategory("General")];
+          categories = [await createExpenseCategory("General")];
         } catch {
-          expenseCategories = [];
+          // A concurrent first load may have created General already.
+          categories = await listExpenseCategories(controller.signal).catch(() => []);
         }
       }
+      if (controller.signal.aborted) return;
+      setDefaultBranchId(session?.branchId ?? "");
       setRows(expenseRows);
-      setExpenseCategories(expenseCategories);
+      setExpenseCategories(categories);
       setBranches(branchRows);
     })();
     return () => controller.abort();
@@ -252,7 +247,6 @@ export function ExpensesPage() {
 
   async function saveExpense(values: {
     categoryId: string;
-    branchId: string;
     amount: string;
     paymentMethod: ExpenseRow["paymentMethod"];
     description: string;
@@ -395,7 +389,7 @@ export function ExpensesPage() {
             key={edit.id || "new"}
             row={edit}
             categories={expenseCategories}
-            branches={branches}
+            branchName={branchName(edit.branchId)}
             onValid={saveExpense}
           />
         ) : null}

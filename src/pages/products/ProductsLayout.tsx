@@ -58,7 +58,7 @@ export type HubSection =
   "catalog" | "lots" | "units" | "categories" | "suppliers" | "transfers" | "reorders" | "low";
 
 export function matchesHealth(row: Product, kpi: ProductHealth) {
-  if (kpi === "healthy") return row.stock >= (row.minimumStock ?? 20);
+  if (kpi === "healthy") return row.stock > 0 && row.stock >= (row.minimumStock ?? 20);
   if (kpi === "risk") return row.stock > 0 && row.stock < (row.minimumStock ?? 20);
   if (kpi === "dead") return row.stock <= 0;
   return row.isLinear;
@@ -730,8 +730,12 @@ export function ProductsLayout() {
         // Start the section data and its side queries together. A tab change within
         // this mounted hub can reuse the catalog already in memory; explicit
         // refreshHub calls after edits still fetch fresh data.
+        // Transfers and reorders need products/lots (and reorder suppliers)
+        // for their tables and drawers. The catalog snapshot supplies these
+        // together instead of leaving blank product cells or raw IDs.
         const needCatalog =
-          section === "catalog" && (!options?.reuseLoaded || !loaded.current.catalog);
+          (section === "catalog" || section === "transfers" || section === "reorders") &&
+          (!options?.reuseLoaded || !loaded.current.catalog);
         const needProducts =
           section !== "catalog" &&
           section !== "transfers" &&

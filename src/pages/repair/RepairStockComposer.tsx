@@ -22,7 +22,7 @@ import {
   roundStockQty,
   toBaseQty,
 } from "@/pages/products/productQty";
-import { createTransfer, receiveTransfer, sendTransfer } from "@/services/transfers";
+import { createReceivedRepairTransfer } from "@/services/transfers";
 import { limitMoneyDraft, money, shortError } from "@/utils/format";
 import {
   availableWholeQty,
@@ -32,6 +32,7 @@ import {
 } from "@/utils/salePricing";
 import { stockToDisplayedQuantity } from "@/utils/unitConversion";
 import { encodeRepairTransfer, type RepairTransferLineMeta } from "./repairShopTransfer";
+import { allocateRepairItems } from "./repairShopMutations";
 
 type DraftRow = {
   id: string;
@@ -227,7 +228,6 @@ export function RepairStockComposer({
 
   async function save() {
     const metadata: RepairTransferLineMeta[] = [];
-    const items: { productId: string; productLotId: string; quantity: number }[] = [];
 
     for (const row of rows) {
       const product = products.find((item) => item.id === row.productId);
@@ -260,16 +260,6 @@ export function RepairStockComposer({
         return;
       }
 
-      let remaining = baseQuantity;
-      const fifoLots = lots
-        .filter((lot) => lot.productId === product.id && branchQty(lot, sourceBranchId) > 0)
-        .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
-      for (const lot of fifoLots) {
-        const take = roundStockQty(Math.min(remaining, branchQty(lot, sourceBranchId)));
-        if (take > 0) items.push({ productId: product.id, productLotId: lot.id, quantity: take });
-        remaining = roundStockQty(remaining - take);
-        if (remaining <= 0) break;
-      }
       metadata.push({
         productId: product.id,
         unitId: unit.id,
@@ -281,22 +271,21 @@ export function RepairStockComposer({
       });
     }
 
-    if (!items.length) {
+    if (!metadata.length) {
       setError("Add at least one product.");
       return;
     }
     setSaving(true);
     setError("");
     try {
+      const { items } = allocateRepairItems(metadata, products, lots, sourceBranchId);
       const noteBits = [encodeRepairTransfer(metadata), notes.trim()].filter(Boolean);
-      const created = await createTransfer({
+      await createReceivedRepairTransfer({
         fromBranchId: sourceBranchId,
         toBranchId: repairBranchId,
         notes: noteBits.join("\n"),
         items,
       });
-      await sendTransfer(created.id);
-      await receiveTransfer(created.id);
       toaster.success(`Products added to ${repairBranchName}`);
       setRows([]);
       setNotes("");

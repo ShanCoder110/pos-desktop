@@ -90,20 +90,14 @@ function lotApiFilters(
   search: string,
   dateRange: DateRangeFilter,
   sectionKpi: string | null,
-  products: Product[],
-  suppliers: { id: string; name: string }[],
+  productId: string | undefined,
+  supplierId: string | undefined,
 ) {
   const statusFromChips = chipCsv(chips, "status");
   return {
     search: search.trim() || undefined,
-    productId: chipCsvFromNames(
-      chipValuesForField(chips, "product"),
-      (name) => products.find((product) => product.name === name)?.id,
-    ),
-    supplierId: chipCsvFromNames(
-      chipValuesForField(chips, "supplier"),
-      (name) => suppliers.find((supplier) => supplier.name === name)?.id,
-    ),
+    productId,
+    supplierId,
     city: chipCsv(chips, "city"),
     lotStatus:
       sectionKpi === "open" ? "Remaining" : sectionKpi === "empty" ? "Empty" : statusFromChips,
@@ -129,7 +123,13 @@ export function LotsPage() {
   const [filteredRows, setFilteredRows] = useState<ProductLotRow[]>([]);
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
-  const [filteredValueTotal, setFilteredValueTotal] = useState(0);
+  const filteredValueTotal = useMemo(() => {
+    const productsById = new Map(products.map((product) => [product.id, product]));
+    return filteredRows.reduce(
+      (sum, lot) => sum + lotValueLeft(productsById.get(lot.productId), lot),
+      0,
+    );
+  }, [filteredRows, products]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
@@ -170,7 +170,10 @@ export function LotsPage() {
 
   const productOf = useCallback((id: string) => products.find((p) => p.id === id), [products]);
 
-  const productLabel = useCallback((id: string) => productOf(id)?.name ?? id, [productOf]);
+  const productLabel = useCallback(
+    (id: string) => productOf(id)?.name ?? "Deleted product",
+    [productOf],
+  );
 
   const supplierLabel = useCallback(
     (id: string) => hubSupplierLabel(id, suppliers, supplierRows),
@@ -182,9 +185,17 @@ export function LotsPage() {
     [suppliers, supplierRows],
   );
 
+  const productIdFilter = chipCsvFromNames(
+    chipValuesForField(chips, "product"),
+    (name) => products.find((product) => product.name === name)?.id,
+  );
+  const supplierIdFilter = chipCsvFromNames(
+    chipValuesForField(chips, "supplier"),
+    (name) => suppliers.find((supplier) => supplier.name === name)?.id,
+  );
   const apiFilters = useMemo(
-    () => lotApiFilters(chips, q, dateRange, sectionKpi, products, suppliers),
-    [chips, dateRange, products, q, sectionKpi, suppliers],
+    () => lotApiFilters(chips, q, dateRange, sectionKpi, productIdFilter, supplierIdFilter),
+    [chips, dateRange, productIdFilter, q, sectionKpi, supplierIdFilter],
   );
 
   useEffect(() => {
@@ -245,19 +256,13 @@ export function LotsPage() {
     void listAllLots(apiFilters, controller.signal)
       .then((data) => {
         setFilteredRows(data);
-        setFilteredValueTotal(
-          data.reduce((sum, lot) => {
-            const product = products.find((item) => item.id === lot.productId);
-            return sum + lotValueLeft(product, lot);
-          }, 0),
-        );
       })
       .catch((error) => {
         if (isAbortError(error)) return;
         // Keep prior totals; primary table shows the loadError + Retry.
       });
     return () => controller.abort();
-  }, [apiFilters, products, reloadToken, listsEpoch]);
+  }, [apiFilters, reloadToken, listsEpoch]);
 
   function writeLots(nextLots: ProductLotRow[], productIds: string[]) {
     setRows(nextLots);

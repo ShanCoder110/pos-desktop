@@ -125,6 +125,31 @@ export function createTransfer(payload: {
   }).then(mapTransfer);
 }
 
+export type TransferDraft = Parameters<typeof createTransfer>[0];
+
+export function createReceivedTransfer(payload: TransferDraft) {
+  return apiRequest<TransferResponse>(API_ROUTES.receivedTransfer, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).then(mapTransfer);
+}
+
+/** Repair stock is committed only after create, send, and receive all succeed. */
+export function createReceivedRepairTransfer(payload: TransferDraft) {
+  return apiRequest<TransferResponse>(API_ROUTES.repairTransfer, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).then(mapTransfer);
+}
+
+/** The original transfer survives if the replacement cannot be completed. */
+export function replaceReceivedRepairTransfer(id: string, payload: TransferDraft) {
+  return apiRequest<TransferResponse>(API_ROUTES.repairTransferReplace(id), {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).then(mapTransfer);
+}
+
 export function sendTransfer(id: string) {
   return apiRequest<TransferResponse>(API_ROUTES.transferSend(id), {
     method: "POST",

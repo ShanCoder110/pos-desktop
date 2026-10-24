@@ -25,12 +25,12 @@ import {
 import type { ProductLotRow, SupplierRow } from "@/shared/domain/types";
 import type { Product, ProductSellUnit } from "@/shared/types";
 import { ensureSession } from "@/services/auth";
-import { receiveLot, receivePayloadFromLot } from "@/services/lots";
+import { getLot, receiveLot, receivePayloadFromLot } from "@/services/lots";
 import { linkedPoToast, REORDER_COPY } from "@/shared/constants/reorders";
 import { unlinkPurchaseOrderLot } from "@/services/purchasing";
 import { createMasterRecord, listMasterRecords } from "@/services/masters";
 import { updateLot } from "@/services/lots";
-import { createProduct, updateProduct } from "@/services/products";
+import { createProduct, getProduct, updateProduct } from "@/services/products";
 import { shortError } from "@/utils/format";
 import { pkMobileDigits } from "@/utils/phone";
 
@@ -76,16 +76,8 @@ function blankSupplierRow(): SupplierRow {
 }
 
 export function useLotDrawer() {
-  const {
-    lots,
-    products,
-    setProducts,
-    categories,
-    units,
-    bumpListsEpoch,
-    refreshLots,
-    refreshProducts,
-  } = useProductsHub();
+  const { lots, products, setLots, setProducts, categories, units, bumpListsEpoch } =
+    useProductsHub();
   const [edit, setEdit] = useState<ProductLotRow | null>(null);
   const [supplierRows, setSupplierRows] = useState<SupplierRow[]>([]);
   const [apiSupplierIds, setApiSupplierIds] = useState<Set<string>>(() => new Set());
@@ -290,7 +282,7 @@ export function useLotDrawer() {
         return false;
       }
       const created = await createProduct(payload);
-      await refreshProducts();
+      setProducts((current) => [created, ...current]);
       setEdit((current) =>
         current
           ? {
@@ -362,6 +354,15 @@ export function useLotDrawer() {
     }
   }
 
+  async function refreshAffectedProduct(productId: string) {
+    try {
+      const updated = await getProduct(productId);
+      setProducts((current) => current.map((row) => (row.id === updated.id ? updated : row)));
+    } catch (error) {
+      toaster.error(shortError(error, "Lot saved, but product totals could not refresh"));
+    }
+  }
+
   async function saveLot(lot: ProductLotRow, sellUnits?: ProductSellUnit[]) {
     const exists = lots.some((row) => row.id === lot.id);
     if (!exists) {
@@ -399,10 +400,14 @@ export function useLotDrawer() {
         }
         const created = await receiveLot(receivePayloadFromLot({ ...lot, supplierId }));
         if (sellUnits?.length) {
-          await persistSellUnits(lot.productId, sellUnits);
+          try {
+            await persistSellUnits(lot.productId, sellUnits);
+          } catch (error) {
+            toaster.error(shortError(error, "Lot saved, but product units could not update"));
+          }
         }
-        // Refresh products + lots in place (no hub skeleton). Bump epoch so LotsPage table refetches.
-        await Promise.all([refreshLots(), refreshProducts()]);
+        setLots((current) => [created, ...current]);
+        // The visible table refetches its current page; do not crawl both catalogs.
         bumpListsEpoch();
         toaster.success(
           created.purchaseOrderNumber
@@ -410,6 +415,7 @@ export function useLotDrawer() {
             : "Lot added",
         );
         closeLotDrawer();
+        void refreshAffectedProduct(lot.productId);
       } catch (error) {
         toaster.error(error instanceof Error ? error.message : "Could not receive lot");
       } finally {
@@ -441,7 +447,7 @@ export function useLotDrawer() {
         branchAllocations.length > 0
           ? Math.round(allocTotal * 10000) / 10000
           : Math.round(next.remainingQuantity * 10000) / 10000;
-      await updateLot(next.id, {
+      const updatedLot = await updateLot(next.id, {
         supplierId: next.supplierId || undefined,
         // Original qty is immutable after movements — omit so a stale client cannot desync.
         remainingQuantity,
@@ -454,12 +460,17 @@ export function useLotDrawer() {
         branchAllocations: branchAllocations.length ? branchAllocations : undefined,
       });
       if (sellUnits?.length) {
-        await persistSellUnits(next.productId, sellUnits);
+        try {
+          await persistSellUnits(next.productId, sellUnits);
+        } catch (error) {
+          toaster.error(shortError(error, "Lot saved, but product units could not update"));
+        }
       }
-      await Promise.all([refreshLots(), refreshProducts()]);
+      setLots((current) => current.map((row) => (row.id === updatedLot.id ? updatedLot : row)));
       bumpListsEpoch();
       toaster.success("Lot updated");
       closeLotDrawer();
+      void refreshAffectedProduct(next.productId);
     } catch (error) {
       toaster.error(shortError(error, "Could not update lot"));
     } finally {
@@ -576,11 +587,17 @@ export function useLotDrawer() {
     if (!lot.purchaseOrderId) return;
     try {
       await unlinkPurchaseOrderLot(lot.purchaseOrderId, lot.id);
-      await refreshLots();
       bumpListsEpoch();
       toaster.success(REORDER_COPY.unlinked);
     } catch (error) {
       toaster.error(shortError(error, REORDER_COPY.unlinkFailed));
+      return;
+    }
+    try {
+      const updatedLot = await getLot(lot.id);
+      setLots((current) => current.map((row) => (row.id === updatedLot.id ? updatedLot : row)));
+    } catch (error) {
+      toaster.error(shortError(error, "Lot unlinked, but its details could not refresh"));
     }
   }
 

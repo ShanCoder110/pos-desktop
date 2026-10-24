@@ -66,6 +66,35 @@ pub async fn delete_transfer(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn create_repair_transfer(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Json(request): Json<CreateTransferRequest>,
+) -> Result<(StatusCode, Json<TransferResponse>), AppError> {
+    let transfer = TransferService::create_received_repair(&state.db, &ctx, request).await?;
+    Ok((StatusCode::CREATED, Json(transfer)))
+}
+
+pub async fn create_received_transfer(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Json(request): Json<CreateTransferRequest>,
+) -> Result<(StatusCode, Json<TransferResponse>), AppError> {
+    let transfer = TransferService::create_received(&state.db, &ctx, request).await?;
+    Ok((StatusCode::CREATED, Json(transfer)))
+}
+
+pub async fn replace_repair_transfer(
+    State(state): State<AppState>,
+    ctx: RequestContext,
+    Path(id): Path<String>,
+    Json(request): Json<CreateTransferRequest>,
+) -> Result<Json<TransferResponse>, AppError> {
+    Ok(Json(
+        TransferService::replace_received_repair(&state.db, &ctx, parse_id(&id)?, request).await?,
+    ))
+}
+
 fn parse_id(value: &str) -> Result<Uuid, AppError> {
     Uuid::parse_str(value).map_err(|_| AppError::Validation(ERROR_INVALID_ID.into()))
 }
