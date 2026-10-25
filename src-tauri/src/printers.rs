@@ -146,9 +146,15 @@ fn paper_label(paper_width: &str) -> &'static str {
     }
 }
 
-/// ~24 mm at 203 dpi. Leave enough paper between the last footer line and
-/// the cutter, which is farther from the printhead on some thermal printers.
-const CUTTER_FEED_DOTS: u8 = 192;
+/// Finish at a line boundary, establish 203 units/inch, then let the printer
+/// feed to its cutter position plus 3 mm. GS V 0 cuts at the current position;
+/// a guessed ESC J feed before it can leave the footer on the next receipt.
+/// GS V 65 n includes the printer's printhead-to-cutter distance instead.
+const RECEIPT_END: &[u8] = &[0x0A, 0x1D, 0x50, 203, 203, 0x1D, 0x56, 65, 24];
+
+fn finish_receipt(out: &mut Vec<u8>) {
+    out.extend_from_slice(RECEIPT_END);
+}
 
 fn pixel_is_ink(pixel: &image::Rgba<u8>) -> bool {
     let alpha = pixel[3] as u16;
@@ -182,7 +188,7 @@ fn trim_vertical_whitespace(image: DynamicImage) -> DynamicImage {
     image.crop_imm(0, top, width, bottom - top)
 }
 
-/// ESC @ + GS v 0 raster (chunked) + a short feed + GS V 0 full cut.
+/// ESC @ + GS v 0 raster (chunked) + feed to cutter and full cut.
 fn png_to_escpos(png: &[u8], width_dots: u32) -> Result<Vec<u8>, String> {
     let reader = ImageReader::new(Cursor::new(png))
         .with_guessed_format()
@@ -231,8 +237,7 @@ fn png_to_escpos(png: &[u8], width_dots: u32) -> Result<Vec<u8>, String> {
         out.extend_from_slice(&raster[start..end]);
         y += rows;
     }
-    // Feed past the cutter before cutting so the footer is not sliced off.
-    out.extend_from_slice(&[0x1B, 0x4A, CUTTER_FEED_DOTS, 0x1D, 0x56, 0x00]);
+    finish_receipt(&mut out);
     Ok(out)
 }
 
@@ -251,7 +256,8 @@ fn text_escpos(lines: &[&str]) -> Vec<u8> {
         out.extend_from_slice(text.as_bytes());
         out.push(b'\n');
     }
-    out.extend_from_slice(&[0x1B, 0x45, 0x00, 0x1B, 0x64, 0x06, 0x1D, 0x56, 0x00]);
+    out.extend_from_slice(&[0x1B, 0x45, 0x00]);
+    finish_receipt(&mut out);
     out
 }
 
@@ -341,14 +347,15 @@ fn send_raw_blocking(printer_name: &str, payload: &[u8]) -> Result<(), String> {
     }
 }
 
-/// Feed a few lines then full-cut (ESC/POS).
+/// Feed to the cutter position plus the receipt margin, then full-cut.
 #[tauri::command]
 #[tracing::instrument(skip_all, err)]
 pub async fn cut_thermal_paper(printer_name: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let name = require_printer_name(&printer_name)?;
-        let payload: &[u8] = &[0x1B, 0x40, 0x1B, 0x64, 0x06, 0x1D, 0x56, 0x00];
-        send_raw(name, payload)
+        let mut payload = vec![0x1B, 0x40];
+        finish_receipt(&mut payload);
+        send_raw(name, &payload)
     })
     .await
     .map_err(|error| format!("Printer task failed: {error}"))?
@@ -454,7 +461,7 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{dots_for_paper, png_to_escpos, receipt_batch_payload};
+    use super::{dots_for_paper, png_to_escpos, receipt_batch_payload, text_escpos, RECEIPT_END};
     use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
     use std::io::Cursor;
 
@@ -473,7 +480,7 @@ mod tests {
         assert!(payload
             .windows(4)
             .any(|bytes| bytes == [0x1D, 0x76, 0x30, 0x00]));
-        assert!(payload.ends_with(&[0x1B, 0x4A, 192, 0x1D, 0x56, 0x00]));
+        assert!(payload.ends_with(RECEIPT_END));
         assert_eq!(dots_for_paper("MM_80"), 576);
     }
 
@@ -529,7 +536,24 @@ mod tests {
         }
         assert_eq!(printed_rows, 600);
         assert!(last_row.iter().all(|byte| *byte == 0xff));
-        assert_eq!(&payload[cursor..], &[0x1B, 0x4A, 192, 0x1D, 0x56, 0x00]);
+        assert_eq!(&payload[cursor..], RECEIPT_END);
+    }
+
+    #[test]
+    fn receipt_ending_feeds_to_cutter_instead_of_cutting_at_printhead() {
+        assert_eq!(
+            RECEIPT_END,
+            &[0x0A, 0x1D, 0x50, 203, 203, 0x1D, 0x56, 65, 24]
+        );
+        let test_slip = text_escpos(&["Dukan", "Footer must be above this cut"]);
+        assert!(test_slip.ends_with(RECEIPT_END));
+        assert_eq!(
+            test_slip
+                .windows(RECEIPT_END.len())
+                .filter(|part| *part == RECEIPT_END)
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -547,6 +571,15 @@ mod tests {
         let first_payload = png_to_escpos(&pages[0], 8).unwrap();
         let second_payload = png_to_escpos(&pages[1], 8).unwrap();
         let batch = receipt_batch_payload(&pages, 8, 2).unwrap();
+        // Each copy/page ends with its own feed-and-cut before the next ESC @.
+        let boundary = [RECEIPT_END, &[0x1B, 0x40]].concat();
+        assert_eq!(
+            batch
+                .windows(boundary.len())
+                .filter(|part| *part == boundary.as_slice())
+                .count(),
+            3
+        );
         assert_eq!(
             batch,
             [
