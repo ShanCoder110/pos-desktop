@@ -17,7 +17,7 @@ import { receiptFontFamilyCss } from "@/shared/constants/receiptBranding";
 import { toaster } from "@/components/common/Toast";
 import {
   listSystemPrinters,
-  printThermalPng,
+  printThermalPngBatch,
   type SystemPrinter,
   type ThermalPrintResult,
 } from "@/services/printers";
@@ -85,6 +85,8 @@ export function PrintPreview({
   /** Skip the preview overlay — render off-screen and send straight to the system printer. */
   directPrint = false,
   onPrintingChange,
+  onPrintDraft,
+  savingDraft = false,
   /** POS Urdu/EN print button — overrides Settings → receipt language for this slip only. */
   languageOverride,
 }: {
@@ -107,6 +109,9 @@ export function PrintPreview({
   languageOverride?: ReceiptLanguage;
   /** True while a slip is being sent, so the cashier print controls stay disabled. */
   onPrintingChange?: (printing: boolean) => void;
+  /** Save a POS draft before printing; a draft receipt is not an invoice. */
+  onPrintDraft?: () => void;
+  savingDraft?: boolean;
 }) {
   const { settings: savedSettings, setSettings } = useSettings();
   const receiptLanguage = resolveReceiptLanguage(languageOverride, savedSettings.receiptLanguage);
@@ -221,31 +226,38 @@ export function PrintPreview({
       if (!pageNodes.length) return false;
       await waitForReceiptAssets(node);
       const copies = Math.max(1, Math.min(9, Number(settings.copies) || 1));
-      for (let copy = 0; copy < copies; copy += 1) {
-        for (const page of pageNodes) {
-          const blob = await toBlob(page, {
-            pixelRatio: 2,
-            backgroundColor: "#ffffff",
-            cacheBust: true,
-            style: { boxShadow: "none", overflow: "visible" },
-          });
-          if (!blob) {
-            toaster.error("Could not capture the receipt.");
-            printerOverrideRef.current = null;
-            if (directPrint) onCloseRef.current();
-            return true;
-          }
-          const png = new Uint8Array(await blob.arrayBuffer());
-          const result = await printThermalPng(printerName, png, printPaper);
-          const fail = thermalFailure(result);
-          if (fail) {
-            toaster.error(fail);
-            printerOverrideRef.current = null;
-            if (directPrint) onCloseRef.current();
-            return true;
-          }
+      const pngPages: Uint8Array[] = [];
+      for (const page of pageNodes) {
+        // A receipt can extend below the visible preview viewport. Capture
+        // every full page only once; copies are duplicated by the printer job.
+        const captureWidth = Math.ceil(Math.max(page.clientWidth, page.scrollWidth));
+        const captureHeight = Math.ceil(Math.max(page.clientHeight, page.scrollHeight));
+        const printerDots = printPaper === "MM_58" ? 384 : 576;
+        const blob = await toBlob(page, {
+          width: captureWidth,
+          height: captureHeight,
+          pixelRatio: Math.min(2, Math.max(1, printerDots / captureWidth)),
+          backgroundColor: "#ffffff",
+          cacheBust: false,
+          style: { boxShadow: "none", overflow: "visible" },
+        });
+        if (!blob) {
+          toaster.error("Could not capture the receipt.");
+          printerOverrideRef.current = null;
+          if (directPrint) onCloseRef.current();
+          return true;
         }
+        pngPages.push(new Uint8Array(await blob.arrayBuffer()));
       }
+      const result = await printThermalPngBatch(printerName, pngPages, printPaper, copies);
+      const fail = thermalFailure(result);
+      if (fail) {
+        toaster.error(fail);
+        printerOverrideRef.current = null;
+        if (directPrint) onCloseRef.current();
+        return true;
+      }
+      toaster.success("Receipt sent to printer. You can keep using POS.");
       printerOverrideRef.current = null;
       if (directPrint) onCloseRef.current();
       return true;
@@ -257,25 +269,25 @@ export function PrintPreview({
     }
   }, [directPrint, isUrdu, paper, printDialog, settings.copies, settings.printerName]);
 
-  const setBusy = useCallback(
-    (busy: boolean) => {
-      printingLockRef.current = busy;
-      setPrinting(busy);
-      if (!directPrint) onPrintingChangeRef.current?.(busy);
-    },
-    [directPrint],
-  );
+  const setBusy = useCallback((busy: boolean) => {
+    printingLockRef.current = busy;
+    setPrinting(busy);
+    onPrintingChangeRef.current?.(busy);
+  }, []);
 
   const beginSend = useCallback(() => {
     if (sendingRef.current) return;
     sendingRef.current = true;
     setBusy(true);
+    if (directPrint && desktop) {
+      toaster.info("Printing in background. You can keep using POS.");
+    }
     let attempts = 0;
     const tryPrint = () => {
       void runPrintJob().then((ok) => {
         if (ok) {
           sendingRef.current = false;
-          if (!directPrint) setBusy(false);
+          setBusy(false);
           return;
         }
         attempts += 1;
@@ -284,12 +296,12 @@ export function PrintPreview({
           return;
         }
         sendingRef.current = false;
-        if (!directPrint) setBusy(false);
+        setBusy(false);
         if (directPrint) onCloseRef.current();
       });
     };
     tryPrint();
-  }, [directPrint, isUrdu, runPrintJob, setBusy]);
+  }, [desktop, directPrint, isUrdu, runPrintJob, setBusy]);
 
   const refreshSetupPrinters = useCallback(async () => {
     setLoadingPrinters(true);
@@ -551,10 +563,26 @@ export function PrintPreview({
           <Button
             variant="primary"
             icon={<Printer size={14} />}
-            disabled={printing}
-            onClick={() => handlePrint()}
+            disabled={printing || savingDraft}
+            onClick={() => {
+              if (!invoiceNumber && onPrintDraft) {
+                onPrintDraft();
+                return;
+              }
+              handlePrint();
+            }}
           >
-            {printing ? (isUrdu ? "پرنٹ ہو رہا ہے" : "Printing…") : isUrdu ? "پرنٹ" : "Print"}
+            {savingDraft
+              ? isUrdu
+                ? "محفوظ ہو رہا ہے…"
+                : "Saving sale…"
+              : printing
+                ? isUrdu
+                  ? "پرنٹ ہو رہا ہے"
+                  : "Printing…"
+                : isUrdu
+                  ? "پرنٹ"
+                  : "Print"}
           </Button>
           <Button disabled={!hasPhone} icon={<MessageCircle size={14} />} onClick={handleWhatsApp}>
             WhatsApp

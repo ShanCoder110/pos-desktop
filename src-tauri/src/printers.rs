@@ -5,6 +5,9 @@ use image::{DynamicImage, GenericImageView, ImageReader};
 use serde::Serialize;
 use std::io::Cursor;
 use std::process::Command;
+use std::sync::Mutex;
+
+static PRINT_JOB_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::io::Write;
@@ -19,7 +22,13 @@ pub struct SystemPrinter {
 }
 
 #[tauri::command]
-pub fn list_system_printers() -> Result<Vec<SystemPrinter>, String> {
+pub async fn list_system_printers() -> Result<Vec<SystemPrinter>, String> {
+    tauri::async_runtime::spawn_blocking(list_system_printers_blocking)
+        .await
+        .map_err(|error| format!("Could not list printers: {error}"))?
+}
+
+fn list_system_printers_blocking() -> Result<Vec<SystemPrinter>, String> {
     #[cfg(target_os = "macos")]
     {
         list_cups_printers()
@@ -162,8 +171,9 @@ fn paper_label(paper_width: &str) -> &'static str {
     }
 }
 
-/// ~8 mm at 203 dpi. Just enough for the auto-cutter to clear the last line.
-const CUTTER_FEED_DOTS: u8 = 64;
+/// ~24 mm at 203 dpi. Leave enough paper between the last footer line and
+/// the cutter, which is farther from the printhead on some thermal printers.
+const CUTTER_FEED_DOTS: u8 = 192;
 
 fn pixel_is_ink(pixel: &image::Rgba<u8>) -> bool {
     let alpha = pixel[3] as u16;
@@ -246,7 +256,7 @@ fn png_to_escpos(png: &[u8], width_dots: u32) -> Result<Vec<u8>, String> {
         out.extend_from_slice(&raster[start..end]);
         y += rows;
     }
-    // Short feed so the blade clears the last line without a tall blank tail.
+    // Feed past the cutter before cutting so the footer is not sliced off.
     out.extend_from_slice(&[0x1B, 0x4A, CUTTER_FEED_DOTS, 0x1D, 0x56, 0x00]);
     Ok(out)
 }
@@ -270,7 +280,35 @@ fn text_escpos(lines: &[&str]) -> Vec<u8> {
     out
 }
 
+fn receipt_batch_payload(
+    png_pages: &[Vec<u8>],
+    width_dots: u32,
+    copies: u8,
+) -> Result<Vec<u8>, String> {
+    if png_pages.is_empty() || png_pages.len() > 32 {
+        return Err("A print job needs between 1 and 32 pages".into());
+    }
+    if !(1..=9).contains(&copies) {
+        return Err("A print job needs between 1 and 9 copies".into());
+    }
+    let pages = png_pages
+        .iter()
+        .map(|png| png_to_escpos(png, width_dots))
+        .collect::<Result<Vec<_>, _>>()?;
+    let capacity = pages.iter().map(Vec::len).sum::<usize>() * copies as usize;
+    let mut payload = Vec::with_capacity(capacity);
+    for _ in 0..copies {
+        for page in &pages {
+            payload.extend_from_slice(page);
+        }
+    }
+    Ok(payload)
+}
+
 fn send_raw(printer_name: &str, payload: &[u8]) -> Result<(), String> {
+    let _guard = PRINT_JOB_LOCK
+        .lock()
+        .map_err(|_| "Printer queue is unavailable".to_owned())?;
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         let mut child = Command::new("lp")
@@ -311,8 +349,9 @@ fn send_raw(printer_name: &str, payload: &[u8]) -> Result<(), String> {
 fn send_raw_windows(printer_name: &str, payload: &[u8]) -> Result<(), String> {
     use std::fs;
     let dir = std::env::temp_dir();
-    let bin_path = dir.join("dukan-thermal-job.bin");
-    let script_path = dir.join("dukan-thermal-job.ps1");
+    let job_id = uuid::Uuid::new_v4();
+    let bin_path = dir.join(format!("dukan-thermal-{job_id}.bin"));
+    let script_path = dir.join(format!("dukan-thermal-{job_id}.ps1"));
     fs::write(&bin_path, payload)
         .map_err(|error| format!("Could not write print file: {error}"))?;
     let script = r#"
@@ -351,7 +390,16 @@ public class DukanRawPrinter {
     IntPtr buffer = Marshal.AllocCoTaskMem(bytes.Length);
     Marshal.Copy(bytes, 0, buffer, bytes.Length);
     int written;
-    bool ok = WritePrinter(handle, buffer, bytes.Length, out written);
+    bool ok = true;
+    int offset = 0;
+    while (offset < bytes.Length) {
+      IntPtr chunk = IntPtr.Add(buffer, offset);
+      if (!WritePrinter(handle, chunk, bytes.Length - offset, out written) || written <= 0) {
+        ok = false;
+        break;
+      }
+      offset += written;
+    }
     Marshal.FreeCoTaskMem(buffer);
     EndPagePrinter(handle);
     EndDocPrinter(handle);
@@ -393,40 +441,73 @@ $bytes = [System.IO.File]::ReadAllBytes($Path)
 
 /// Feed a few lines then full-cut (ESC/POS).
 #[tauri::command]
-pub fn cut_thermal_paper(printer_name: String) -> Result<(), String> {
-    let name = require_printer_name(&printer_name)?;
-    let payload: &[u8] = &[0x1B, 0x40, 0x1B, 0x64, 0x06, 0x1D, 0x56, 0x00];
-    send_raw(name, payload)
+pub async fn cut_thermal_paper(printer_name: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = require_printer_name(&printer_name)?;
+        let payload: &[u8] = &[0x1B, 0x40, 0x1B, 0x64, 0x06, 0x1D, 0x56, 0x00];
+        send_raw(name, payload)
+    })
+    .await
+    .map_err(|error| format!("Printer task failed: {error}"))?
 }
 
 /// Silent receipt: PNG of one slip page → ESC/POS raster + cut. No print dialog.
 #[tauri::command]
-pub fn print_thermal_receipt(
+pub async fn print_thermal_receipt(
     printer_name: String,
     png_base64: String,
     paper_width: String,
 ) -> Result<(), String> {
-    let name = require_printer_name(&printer_name)?;
-    let bytes = base64_decode(png_base64.trim())?;
-    let payload = png_to_escpos(&bytes, dots_for_paper(&paper_width))?;
-    send_raw(name, &payload)
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = require_printer_name(&printer_name)?;
+        let bytes = base64_decode(png_base64.trim())?;
+        let payload = png_to_escpos(&bytes, dots_for_paper(&paper_width))?;
+        send_raw(name, &payload)
+    })
+    .await
+    .map_err(|error| format!("Printer task failed: {error}"))?
+}
+
+/// Send all split pages and copies as one raw spool job.
+#[tauri::command]
+pub async fn print_thermal_receipt_batch(
+    printer_name: String,
+    png_base64_pages: Vec<String>,
+    paper_width: String,
+    copies: u8,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = require_printer_name(&printer_name)?;
+        let png_pages = png_base64_pages
+            .iter()
+            .map(|page| base64_decode(page.trim()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let payload = receipt_batch_payload(&png_pages, dots_for_paper(&paper_width), copies)?;
+        send_raw(name, &payload)
+    })
+    .await
+    .map_err(|error| format!("Printer task failed: {error}"))?
 }
 
 /// Short text slip so Settings can confirm the saved printer without a dialog.
 #[tauri::command]
-pub fn print_thermal_test(
+pub async fn print_thermal_test(
     printer_name: String,
     paper_width: String,
     shop_name: String,
 ) -> Result<(), String> {
-    let name = require_printer_name(&printer_name)?;
-    let shop = shop_name.trim();
-    let payload = text_escpos(&[
-        if shop.is_empty() { "Dukan" } else { shop },
-        "Test print",
-        paper_label(&paper_width),
-    ]);
-    send_raw(name, &payload)
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = require_printer_name(&printer_name)?;
+        let shop = shop_name.trim();
+        let payload = text_escpos(&[
+            if shop.is_empty() { "Dukan" } else { shop },
+            "Test print",
+            paper_label(&paper_width),
+        ]);
+        send_raw(name, &payload)
+    })
+    .await
+    .map_err(|error| format!("Printer task failed: {error}"))?
 }
 
 fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
@@ -467,7 +548,7 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{dots_for_paper, png_to_escpos};
+    use super::{dots_for_paper, png_to_escpos, receipt_batch_payload};
     use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
     use std::io::Cursor;
 
@@ -486,7 +567,7 @@ mod tests {
         assert!(payload
             .windows(4)
             .any(|bytes| bytes == [0x1D, 0x76, 0x30, 0x00]));
-        assert!(payload.ends_with(&[0x1B, 0x4A, 64, 0x1D, 0x56, 0x00]));
+        assert!(payload.ends_with(&[0x1B, 0x4A, 192, 0x1D, 0x56, 0x00]));
         assert_eq!(dots_for_paper("MM_80"), 576);
     }
 
@@ -513,5 +594,64 @@ mod tests {
             .unwrap();
         let rows = u16::from_le_bytes([marker[6], marker[7]]);
         assert_eq!(rows, 10);
+    }
+
+    #[test]
+    fn raster_keeps_footer_at_end_of_tall_receipt() {
+        let mut image = RgbaImage::from_pixel(16, 600, Rgba([255, 255, 255, 255]));
+        for x in 0..16 {
+            image.put_pixel(x, 0, Rgba([0, 0, 0, 255]));
+            image.put_pixel(x, 599, Rgba([0, 0, 0, 255]));
+        }
+        let mut png = Vec::new();
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+            .unwrap();
+        let payload = png_to_escpos(&png, 16).unwrap();
+        let mut cursor = 2; // ESC @
+        let mut printed_rows = 0;
+        let mut last_row = &[][..];
+        while payload[cursor..].starts_with(&[0x1D, 0x76, 0x30, 0x00]) {
+            let width_bytes =
+                u16::from_le_bytes([payload[cursor + 4], payload[cursor + 5]]) as usize;
+            let rows = u16::from_le_bytes([payload[cursor + 6], payload[cursor + 7]]) as usize;
+            let raster_start = cursor + 8;
+            let raster_end = raster_start + width_bytes * rows;
+            last_row = &payload[raster_end - width_bytes..raster_end];
+            printed_rows += rows;
+            cursor = raster_end;
+        }
+        assert_eq!(printed_rows, 600);
+        assert!(last_row.iter().all(|byte| *byte == 0xff));
+        assert_eq!(&payload[cursor..], &[0x1B, 0x4A, 192, 0x1D, 0x56, 0x00]);
+    }
+
+    #[test]
+    fn batch_prints_each_page_in_order_for_each_copy() {
+        let first = RgbaImage::from_pixel(8, 1, Rgba([0, 0, 0, 255]));
+        let second = RgbaImage::from_pixel(8, 1, Rgba([255, 255, 255, 255]));
+        let encode = |image| {
+            let mut png = Vec::new();
+            DynamicImage::ImageRgba8(image)
+                .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+                .unwrap();
+            png
+        };
+        let pages = vec![encode(first), encode(second)];
+        let first_payload = png_to_escpos(&pages[0], 8).unwrap();
+        let second_payload = png_to_escpos(&pages[1], 8).unwrap();
+        let batch = receipt_batch_payload(&pages, 8, 2).unwrap();
+        assert_eq!(
+            batch,
+            [
+                first_payload.as_slice(),
+                second_payload.as_slice(),
+                first_payload.as_slice(),
+                second_payload.as_slice(),
+            ]
+            .concat()
+        );
+        assert!(receipt_batch_payload(&[], 8, 1).is_err());
+        assert!(receipt_batch_payload(&pages, 8, 0).is_err());
     }
 }

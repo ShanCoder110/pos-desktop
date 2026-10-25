@@ -14,6 +14,7 @@ pub fn run() {
             printers::list_system_printers,
             printers::cut_thermal_paper,
             printers::print_thermal_receipt,
+            printers::print_thermal_receipt_batch,
             printers::print_thermal_test
         ])
         .setup(|app| {

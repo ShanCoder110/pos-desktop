@@ -78,6 +78,30 @@ export async function printThermalPng(
   }
 }
 
+/** Capture each page once, then send all pages/copies as one ordered print job. */
+export async function printThermalPngBatch(
+  printerName: string | undefined,
+  pngPages: Uint8Array[],
+  paperWidth: string,
+  copies: number,
+): Promise<ThermalPrintResult> {
+  const name = printerName?.trim();
+  if (!isTauri()) return { ok: false, reason: "not-desktop" };
+  if (!name) return { ok: false, reason: "no-printer" };
+  if (!pngPages.length) return { ok: false, reason: "failed", message: "Receipt has no pages." };
+  try {
+    await invoke("print_thermal_receipt_batch", {
+      printerName: name,
+      pngBase64Pages: pngPages.map(bytesToBase64),
+      paperWidth,
+      copies,
+    });
+    return { ok: true };
+  } catch (error) {
+    return printError(error);
+  }
+}
+
 /** Short text slip to confirm the saved printer. Desktop app only. */
 export async function printThermalTest(
   printerName: string | undefined,

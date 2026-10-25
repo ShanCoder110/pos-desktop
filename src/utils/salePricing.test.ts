@@ -130,6 +130,9 @@ describe("conversions", () => {
 });
 
 describe("balanceAfterSale", () => {
+  it("adds an unpaid sale to an existing amount owed", () => {
+    expect(balanceAfterSale(-120, 100, 0)).toBe(-220);
+  });
   it("subtracts the bill once", () => {
     expect(balanceAfterSale(330, 15, 0)).toBe(315);
     expect(balanceAfterSale(-1170, 15, 0)).toBe(-1185);

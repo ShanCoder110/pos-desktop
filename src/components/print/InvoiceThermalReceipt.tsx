@@ -306,7 +306,7 @@ export function InvoiceThermalReceipt({
           <div className="receipt-meta-row">
             <span>{labels.invoice}</span>
             <span className="receipt-bold receipt-meta-value" dir="ltr">
-              {invoiceNumber ?? `${settings.invoicePrefix || "INV"}-0001`}
+              {invoiceNumber ?? (isUrdu ? "مسودہ — محفوظ نہیں" : "DRAFT — NOT SAVED")}
             </span>
           </div>
           <div className="receipt-meta-row">

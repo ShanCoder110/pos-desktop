@@ -184,8 +184,8 @@ mod tests {
         db::connect_memory,
         dto::{
             CashSessionOpenRequest, CompleteSaleRequest, CreateProductRequest, CreateReturnRequest,
-            CustomerPaymentRequest, MasterRequest, OpeningStockInput, ProductUnitInput,
-            ReturnItemInput, SaleItemInput, SalePaymentInput,
+            CustomerPaymentRequest, InvoiceListQuery, MasterRequest, OpeningStockInput,
+            ProductUnitInput, ReturnItemInput, SaleItemInput, SalePaymentInput,
         },
         repositories::{
             CreditRepository, LedgerParty, LedgerRepository, MasterKind, MasterRepository,
@@ -263,6 +263,159 @@ mod tests {
         .expect("count query")
         .map(|row| row.count)
         .unwrap_or(0)
+    }
+
+    #[tokio::test]
+    async fn unpaid_pos_sale_adds_to_customer_opening_balance() {
+        let database = connect_memory().await.expect("memory db");
+        seed_owner(&database).await;
+        let context = ctx();
+
+        let customer = MasterService::create(
+            &database,
+            MasterKind::Customer,
+            MasterRequest {
+                name: "Opening Balance Customer".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: Some(120.0),
+            },
+            Some(&context),
+        )
+        .await
+        .expect("customer with opening balance");
+        assert_eq!(customer.balance, Some(120.0));
+
+        let category = MasterService::create(
+            &database,
+            MasterKind::Category,
+            MasterRequest {
+                name: "Unpaid Sale Category".into(),
+                symbol: None,
+                phone: None,
+                email: None,
+                address: None,
+                city_id: None,
+                notes: None,
+                is_active: true,
+                precision: None,
+                is_walk_in: false,
+                in_credit_book: None,
+                previous_balance: None,
+            },
+            None,
+        )
+        .await
+        .expect("category");
+        let unit = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|row| row.symbol.as_deref() == Some("pc"))
+            .expect("piece unit");
+        let product = ProductService::create(
+            &database,
+            &context,
+            CreateProductRequest {
+                urdu_name: None,
+                name: "Unpaid Sale Product".into(),
+                category_id: category.id,
+                base_unit_id: unit.id.clone(),
+                created_by: None,
+                product_no: None,
+                sku: None,
+                barcode: None,
+                is_manufactured: false,
+                track_lots: true,
+                track_expiry: false,
+                minimum_stock: Decimal::ZERO,
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                sell_units: vec![ProductUnitInput {
+                    id: None,
+                    unit_id: unit.id,
+                    name: "Piece".into(),
+                    contains: Decimal::ONE,
+                    cost: Decimal::new(50, 0),
+                    min: Decimal::new(60, 0),
+                    wholesale: Decimal::new(80, 0),
+                    price: Decimal::new(100, 0),
+                    barcode: None,
+                    factor_direction: None,
+                    is_base: true,
+                    is_default: true,
+                }],
+                opening_stock: Some(OpeningStockInput {
+                    branch_id: SEED_BRANCH_ID.into(),
+                    supplier_id: None,
+                    quantity: Decimal::new(5, 0),
+                    cost: Decimal::new(50, 0),
+                    received_date: "2026-10-25".into(),
+                    expiry_date: None,
+                }),
+                opening_stocks: vec![],
+            },
+        )
+        .await
+        .expect("product");
+        let sale = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "opening-balance-unpaid-sale".into(),
+                customer_id: Some(customer.id.clone()),
+                items: vec![SaleItemInput {
+                    product_lot_id: None,
+                    product_id: product.id.clone(),
+                    product_unit_id: product.sell_units[0].id.clone(),
+                    quantity: Decimal::ONE,
+                    unit_price: Decimal::new(100, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("unpaid sale");
+
+        assert_eq!(sale.total, 100.0);
+        assert_eq!(sale.credit_amount, 100.0);
+        assert_eq!(sale.customer_id.as_deref(), Some(customer.id.as_str()));
+        let refreshed = MasterRepository::find(
+            &database,
+            MasterKind::Customer,
+            Uuid::parse_str(&customer.id).unwrap(),
+        )
+        .await
+        .expect("customer lookup")
+        .expect("customer still exists");
+        assert_eq!(refreshed.balance, Some(220.0));
+        assert_eq!(
+            ledger_balances(&database, &customer.id).await,
+            vec![120.0, 220.0]
+        );
+        let listed = SalesService::list(&database, InvoiceListQuery::default())
+            .await
+            .expect("sales list");
+        assert_eq!(listed.meta.total_items, 1);
+        assert_eq!(listed.data[0].id, sale.id);
     }
 
     #[tokio::test]

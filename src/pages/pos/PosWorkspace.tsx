@@ -75,11 +75,13 @@ import {
 } from "@/utils/productStock";
 import { consumeLots } from "@/utils/lots";
 import { buildReceiptText, openWhatsAppReceipt } from "@/utils/receiptShare";
+import { receiptLinesFromInvoice } from "@/utils/posReceipt";
 import { ensureCashSession, ensureSession } from "@/services/auth";
 import { listAllProducts, searchAllProducts } from "@/services/products";
 import { listAllLots } from "@/services/lots";
 import type { ProductLotRow } from "@/shared/domain/types";
-import { createMasterRecord, listAllMasterRecords } from "@/services/masters";
+import type { InvoiceRow } from "@/shared/domain/types";
+import { createMasterRecord, getMasterRecord, listAllMasterRecords } from "@/services/masters";
 import { listCustomersWithBalances } from "@/services/credit";
 import {
   completeSale as completeSaleRequest,
@@ -423,6 +425,7 @@ export function PosWorkspace() {
   const [printDirect, setPrintDirect] = useState(false);
   const [printing, setPrinting] = useState(false);
   const printingRef = useRef(false);
+  const saleSavingRef = useRef(false);
   const [printLanguage, setPrintLanguage] = useState<ReceiptLanguage | undefined>();
   const [printRequestId, setPrintRequestId] = useState(0);
   const [receiptInvoiceNo, setReceiptInvoiceNo] = useState("");
@@ -1622,25 +1625,35 @@ export function PosWorkspace() {
   function makeReceiptSnapshot(
     invoiceNumber?: string,
     language?: ReceiptLanguage,
+    savedInvoice?: InvoiceRow,
   ): ReceiptSnapshot {
-    return {
-      lines: cart.map((item) => ({
-        id: item.id,
-        productId: item.productId,
-        name: item.name,
-        urduName:
-          item.urduName?.trim() ||
+    const urduNames = Object.fromEntries(
+      cart.map((item) => [
+        item.productId,
+        item.urduName?.trim() ||
           products.find((product) => product.id === item.productId)?.urduName,
-        qty: item.qty,
-        unit: item.sellUnit,
-        price: item.listPrice,
-        minFloor: item.minPrice,
-        lotsNote: item.lotsNote,
-        discount: item.lineDisc,
-      })),
-      total: t.total,
-      discount: t.lineDisc + t.billDiscount,
-      paid: amountPaid,
+      ]),
+    );
+    return {
+      lines: savedInvoice
+        ? receiptLinesFromInvoice(savedInvoice, urduNames)
+        : cart.map((item) => ({
+            id: item.id,
+            productId: item.productId,
+            name: item.name,
+            urduName:
+              item.urduName?.trim() ||
+              products.find((product) => product.id === item.productId)?.urduName,
+            qty: item.qty,
+            unit: item.sellUnit,
+            price: item.unitPrice,
+            minFloor: item.minPrice,
+            lotsNote: item.lotsNote,
+            discount: item.lineDisc,
+          })),
+      total: savedInvoice?.total ?? t.total,
+      discount: savedInvoice?.discount ?? t.billDiscount,
+      paid: savedInvoice?.paidAmount ?? amountPaid,
       // Receipts use ledger sign (Owes=N / Advance=P); POS UI keeps the negated Due/Cr sign.
       balanceBefore: posBalanceToLedger(previousBalance),
       balanceAfter: posBalanceToLedger(balanceAfter),
@@ -1668,26 +1681,31 @@ export function PosWorkspace() {
     if (printNow) setPrintRequestId((request) => request + 1);
   }
 
-  function printReceipt(language: ReceiptLanguage) {
-    if (printingRef.current) return;
-    if (cart.length) openReceipt(receiptInvoiceNo, true, language);
-    else if (lastCompletedReceipt) {
+  async function printReceipt(language: ReceiptLanguage) {
+    if (printingRef.current || saleSavingRef.current) return;
+    if (cart.length) {
+      const savedReceipt = await completeSale();
+      if (savedReceipt) {
+        openReceipt(savedReceipt.invoiceNumber, true, language, savedReceipt);
+      }
+    } else if (lastCompletedReceipt) {
       openReceipt(lastCompletedReceipt.invoiceNumber, true, language, lastCompletedReceipt);
     } else showToast("Nothing to print");
   }
 
-  async function completeSale() {
+  async function completeSale(): Promise<ReceiptSnapshot | null> {
+    if (saleSavingRef.current) return null;
     if (!cart.length) {
       showToast("Cart is empty");
-      return;
+      return null;
     }
     if (cartOverStock) {
       showToast("Cart exceeds available stock");
-      return;
+      return null;
     }
     if (!paymentOk) {
       showToast(customer.isWalking ? "Walk-in must pay in full" : "Payment incomplete");
-      return;
+      return null;
     }
     const payments =
       payMethod === "split"
@@ -1726,6 +1744,7 @@ export function PosWorkspace() {
                 },
               ]
             : [];
+    saleSavingRef.current = true;
     setLoading((current) => ({ ...current, sale: true }));
     const wasEditing = Boolean(editInvoiceId);
     try {
@@ -1767,33 +1786,59 @@ export function PosWorkspace() {
         },
         ...prev.filter((row) => row.id !== invoice.id),
       ]);
-      // Refresh ledger balances so header CREDIT matches dashboard / customer page.
-      void listCustomersWithBalances()
-        .then((records) =>
-          setCustomers(
-            records.map((record) => ({
-              id: record.id,
-              name: record.name,
-              phone: record.phone,
-              balance: -record.currentBalance,
-              isWalking: Boolean(record.isWalkIn),
-            })),
+      // Show the completed credit immediately. Then reconcile with the ledger's
+      // authoritative balance; refreshing the entire customer catalog can lag.
+      if (!wasEditing && customerId && !customer.isWalking) {
+        const completedCustomerId = customerId;
+        setCustomers((current) =>
+          current.map((row) =>
+            row.id === completedCustomerId ? { ...row, balance: balanceAfter } : row,
           ),
-        )
-        .catch(() => undefined);
+        );
+        void getMasterRecord("customers", completedCustomerId)
+          .then((record) => {
+            const ledgerBalance = record.balance;
+            if (typeof ledgerBalance !== "number") return;
+            setCustomers((current) =>
+              current.map((row) =>
+                row.id === completedCustomerId ? { ...row, balance: -ledgerBalance } : row,
+              ),
+            );
+          })
+          .catch(() => undefined);
+      } else if (wasEditing) {
+        // An invoice revision may move credit between two customers.
+        void listCustomersWithBalances()
+          .then((records) =>
+            setCustomers(
+              records.map((record) => ({
+                id: record.id,
+                name: record.name,
+                phone: record.phone,
+                balance: -record.currentBalance,
+                isWalking: Boolean(record.isWalkIn),
+              })),
+            ),
+          )
+          .catch(() => undefined);
+      }
       // Refetch live stock after every completed sale/revise (no optimistic cache).
       void reloadProducts().catch(() => undefined);
-      setLastCompletedReceipt(makeReceiptSnapshot(invoice.invoiceNumber));
+      const savedReceipt = makeReceiptSnapshot(invoice.invoiceNumber, undefined, invoice);
+      setLastCompletedReceipt(savedReceipt);
       showToast(
         wasEditing
           ? `Invoice ${invoice.invoiceNumber} updated`
           : `Sale ${invoice.invoiceNumber} complete`,
       );
       newBill(true);
+      return savedReceipt;
     } catch (error) {
       const message = errorToastMessage(error, "Could not complete sale");
       if (message) showToast(message);
+      return null;
     } finally {
+      saleSavingRef.current = false;
       setLoading((current) => ({ ...current, sale: false }));
     }
   }
@@ -1848,7 +1893,7 @@ export function PosWorkspace() {
       F7: () => applyExact(),
       F8: () => document.getElementById("billDiscount")?.focus(),
       F9: () => {
-        printReceipt("EN");
+        void printReceipt("EN");
       },
       F10: () => {
         setSplitPrint((v) => {
@@ -1895,12 +1940,29 @@ export function PosWorkspace() {
       // Stop browser defaults (F5 refresh, F12 tools, etc.)
       e.preventDefault();
       e.stopPropagation();
-      if (printOpen || holdsOpen || recentOpen || askSupplier || addCustomerOpen) return;
+      // A hidden direct-print job must not block cashier shortcuts while the
+      // printer spools. Only visible print/setup dialogs should capture keys.
+      if (
+        (printOpen && (!printDirect || !settings.printerSetupDone)) ||
+        holdsOpen ||
+        recentOpen ||
+        askSupplier ||
+        addCustomerOpen
+      )
+        return;
       fnRef.current[e.key]?.();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [printOpen, holdsOpen, recentOpen, askSupplier, addCustomerOpen]);
+  }, [
+    printOpen,
+    printDirect,
+    settings.printerSetupDone,
+    holdsOpen,
+    recentOpen,
+    askSupplier,
+    addCustomerOpen,
+  ]);
 
   const invoiceLines: InvoiceLine[] = cart.map((c) => ({
     id: c.id,
@@ -1910,7 +1972,7 @@ export function PosWorkspace() {
       c.urduName?.trim() || products.find((product) => product.id === c.productId)?.urduName,
     qty: c.qty,
     unit: c.sellUnit,
-    price: c.listPrice,
+    price: c.unitPrice,
     minFloor: c.minPrice,
     lotsNote: c.lotsNote,
     discount: c.lineDisc,
@@ -3049,21 +3111,21 @@ export function PosWorkspace() {
               </button>
               <button
                 type="button"
-                disabled={printing}
+                disabled={printing || loading.sale}
                 className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print-ur disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => {
                   // Force UR labels (product name stays English only when urduName is empty).
-                  printReceipt("UR");
+                  void printReceipt("UR");
                 }}
               >
                 {printing ? "Printing…" : "پرنٹ اردو"}
               </button>
               <button
                 type="button"
-                disabled={printing}
+                disabled={printing || loading.sale}
                 className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-print disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => {
-                  printReceipt("EN");
+                  void printReceipt("EN");
                 }}
               >
                 {printing ? "Printing…" : "Print · F9"}
@@ -3096,6 +3158,7 @@ export function PosWorkspace() {
                   customer: displayCustomer,
                   lines: invoiceLines,
                   total: t.total,
+                  discount: t.billDiscount,
                   paid: amountPaid,
                   balanceBefore: posBalanceToLedger(previousBalance),
                   balanceAfter: posBalanceToLedger(balanceAfter),
@@ -3427,10 +3490,12 @@ export function PosWorkspace() {
           setReceiptSnap(null);
         }}
         onPrintingChange={setPrintBusy}
+        onPrintDraft={() => void printReceipt(receiptSnap?.language ?? settings.receiptLanguage)}
+        savingDraft={loading.sale}
         customer={receiptSnap?.customer ?? displayCustomer}
         lines={receiptSnap?.lines ?? invoiceLines}
         total={receiptSnap?.total ?? t.total}
-        discount={receiptSnap?.discount ?? t.lineDisc + t.billDiscount}
+        discount={receiptSnap?.discount ?? t.billDiscount}
         paid={receiptSnap?.paid ?? amountPaid}
         balanceBefore={receiptSnap?.balanceBefore ?? posBalanceToLedger(customer.balance)}
         balanceAfter={receiptSnap?.balanceAfter ?? posBalanceToLedger(balanceAfter)}
