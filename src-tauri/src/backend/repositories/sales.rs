@@ -460,7 +460,8 @@ impl SalesRepository {
 
         // Walk-in invoices may be unpaid, but the shared walk-in customer must
         // never accumulate a balance for unrelated shoppers.
-        if credit_amount > Decimal::ZERO && !is_walk_in {
+        let ledger_delta = money_value(total - paid_amount);
+        if ledger_delta != Decimal::ZERO && !is_walk_in {
             if let Some(customer_id) = customer_id {
                 let note = format!("Sale {invoice_number}");
                 LedgerRepository::post_entry(
@@ -470,8 +471,8 @@ impl SalesRepository {
                         party: LedgerParty::Customer(customer_id),
                         branch_id: context.branch_id,
                         entry_type: LEDGER_SALE,
-                        debit: credit_amount,
-                        credit: Decimal::ZERO,
+                        debit: ledger_delta.max(Decimal::ZERO),
+                        credit: (-ledger_delta).max(Decimal::ZERO),
                         notes: Some(&note),
                         occurred_at: now,
                         created_by: context.user_id,

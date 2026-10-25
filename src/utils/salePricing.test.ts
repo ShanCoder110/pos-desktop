@@ -130,6 +130,12 @@ describe("conversions", () => {
 });
 
 describe("balanceAfterSale", () => {
+  it("separates the bill balance from the balance after receiving cash", () => {
+    expect(balanceAfterSale(-745, 140, 0)).toBe(-885);
+    expect(balanceAfterSale(-745, 140, 300)).toBe(-585);
+    expect(balanceAfterSale(-435, 70, 0)).toBe(-505);
+    expect(balanceAfterSale(-435, 70, 400)).toBe(-105);
+  });
   it("adds an unpaid sale to an existing amount owed", () => {
     expect(balanceAfterSale(-120, 100, 0)).toBe(-220);
   });

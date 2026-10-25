@@ -449,7 +449,7 @@ export function PrintPreview({
     <div
       ref={slipRef}
       className="relative flex flex-col gap-4"
-      style={{ width: widthPx }}
+      style={{ width: widthPx, flexShrink: 0 }}
       data-print-lang={isUrdu ? "UR" : "EN"}
     >
       {pages.map((page) => (
@@ -494,11 +494,13 @@ export function PrintPreview({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-slate-900/50 p-8 pt-10">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-hidden bg-slate-900/50 p-4 sm:p-8">
       <style>{`${jameelNooriFontFaceCss()}${RECEIPT_THERMAL_CSS}`}</style>
-      <div className="flex gap-4">
-        {slip}
-        <div className="flex w-52 flex-col gap-2 rounded-lg bg-white p-3">
+      <div className="flex h-full min-h-0 max-w-full items-start gap-4">
+        <div className="h-full min-w-0 overflow-auto" aria-label="Receipt preview">
+          {slip}
+        </div>
+        <div className="flex w-52 shrink-0 flex-col gap-2 self-start rounded-lg bg-white p-3">
           <div className="flex items-center justify-between">
             <p className="text-[13px] font-semibold">{isUrdu ? "پرنٹ" : "Print"}</p>
             <Button size="icon" variant="ghost" onClick={onClose} aria-label="Close">

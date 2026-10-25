@@ -416,6 +416,108 @@ mod tests {
             .expect("sales list");
         assert_eq!(listed.meta.total_items, 1);
         assert_eq!(listed.data[0].id, sale.id);
+        // Retaining cash beyond this bill must reduce the previous balance,
+        // and revising a paid invoice must read its payment rows successfully.
+        let session = AuthService::open_cash_session(
+            &database,
+            &context,
+            CashSessionOpenRequest {
+                opening_float: Decimal::ZERO,
+            },
+        )
+        .await
+        .expect("open till");
+        let mut context = context;
+        context.cash_session_id = Some(Uuid::parse_str(&session.id).unwrap());
+        let mut revised = CompleteSaleRequest {
+            client_request_id: "opening-balance-paid-revise".into(),
+            customer_id: Some(customer.id.clone()),
+            items: vec![SaleItemInput {
+                product_lot_id: None,
+                product_id: product.id.clone(),
+                product_unit_id: product.sell_units[0].id.clone(),
+                quantity: Decimal::ONE,
+                unit_price: Decimal::new(100, 0),
+                price_mode: "RETAIL".into(),
+                sold_below_minimum: false,
+                authorized_by: None,
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+            }],
+            payments: vec![SalePaymentInput {
+                amount: Decimal::new(150, 0),
+                amount_tendered: Some(Decimal::new(150, 0)),
+                payment_method: "CASH".into(),
+                reference_number: None,
+                notes: None,
+                client_request_id: None,
+            }],
+            discount: Decimal::ZERO,
+            tax: Decimal::ZERO,
+            notes: None,
+        };
+        SalesService::revise(
+            &database,
+            &context,
+            Uuid::parse_str(&sale.id).unwrap(),
+            revised.clone(),
+        )
+        .await
+        .expect("retain extra cash");
+        assert_eq!(
+            *ledger_balances(&database, &customer.id)
+                .await
+                .last()
+                .unwrap(),
+            70.0
+        );
+        revised.client_request_id = "opening-balance-paid-revise-again".into();
+        revised.payments[0].amount = Decimal::new(140, 0);
+        revised.payments[0].amount_tendered = Some(Decimal::new(140, 0));
+        let mut new_sale = revised.clone();
+        new_sale.client_request_id = "new-sale-retained-cash".into();
+        SalesService::revise(
+            &database,
+            &context,
+            Uuid::parse_str(&sale.id).unwrap(),
+            revised,
+        )
+        .await
+        .expect("revise existing payment");
+        assert_eq!(
+            *ledger_balances(&database, &customer.id)
+                .await
+                .last()
+                .unwrap(),
+            80.0
+        );
+        let extra_sale = SalesService::complete(&database, &context, new_sale)
+            .await
+            .expect("new paid sale retains extra cash");
+        assert_eq!(
+            *ledger_balances(&database, &customer.id)
+                .await
+                .last()
+                .unwrap(),
+            40.0
+        );
+        SalesService::void(
+            &database,
+            &context,
+            Uuid::parse_str(&extra_sale.id).unwrap(),
+            crate::backend::dto::VoidRequest {
+                reason: "QA reverse retained cash".into(),
+            },
+        )
+        .await
+        .expect("void retained cash sale");
+        assert_eq!(
+            *ledger_balances(&database, &customer.id)
+                .await
+                .last()
+                .unwrap(),
+            80.0
+        );
     }
 
     #[tokio::test]

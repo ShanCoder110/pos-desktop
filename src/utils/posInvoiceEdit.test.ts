@@ -10,6 +10,25 @@ import {
 } from "@/utils/posInvoiceEdit";
 
 describe("posInvoiceEdit preload", () => {
+  it("excludes retained extra cash when reopening a paid invoice", () => {
+    const snap = invoiceEditLoadSnapshot({
+      total: 140,
+      paidAmount: 140,
+      creditAmount: 0,
+      discount: 0,
+      payments: [{ amount: 300, paymentMethod: "CASH" }],
+    });
+    expect(snap.creditOpen).toBe(-160);
+    expect(previousBalanceExcludingInvoiceCredit(-585, snap.creditOpen)).toBe(-745);
+    expect(
+      invoiceEditBalanceAfter({
+        previousBalance: -745,
+        billTotal: 140,
+        tenderPaid: 300,
+        allocatedPaid: 0,
+      }),
+    ).toBe(-585);
+  });
   it("allocation-only paid 5 (no sale tender rows) → received 0, credit open 25", () => {
     // INV-0004 style: paidAmount includes later customer-payment allocation, not cash at sale.
     const snap = invoiceEditLoadSnapshot({

@@ -169,7 +169,7 @@ export function previousBalanceExcludingInvoiceCredit(
   customerPosBalance: number,
   invoiceCreditAmount: number,
 ) {
-  return +(customerPosBalance + Math.max(0, Number(invoiceCreditAmount) || 0)).toFixed(2);
+  return +(customerPosBalance + (Number(invoiceCreditAmount) || 0)).toFixed(2);
 }
 
 /** Snapshot of fields the edit loader must restore (customer, money, notes). */
@@ -187,7 +187,10 @@ export function invoiceEditLoadSnapshot(invoice: {
     customerId: invoice.customerId ?? "",
     billDiscount: Number(invoice.discount) || 0,
     notes: invoice.notes ?? "",
-    creditOpen: Math.max(0, Number(invoice.creditAmount) || 0),
+    // Retained overpayment is a negative invoice ledger contribution.
+    creditOpen:
+      (Number(invoice.creditAmount) || 0) -
+      Math.max(0, invoiceEditSaleTenderTotal(invoice.payments) - invoice.total),
     allocatedPaid: invoiceEditAllocatedPaid(invoice),
     ...payment,
   };

@@ -245,7 +245,7 @@ pub async fn revise_invoice(
     let credit_amount = money_value(total - applied_paid);
     // Ledger SALE is the credit taken at this sale/revise (total − tenders), not the
     // remaining open credit after allocations.
-    let sale_ledger_debit = money_value(total - sale_tender_applied);
+    let sale_ledger_debit = money_value(total - sale_tender_paid);
     // Preserve the existing protection against moving an open named-customer
     // debt to the shared walk-in account. A walk-in invoice can itself be
     // created or revised with an unpaid amount; it has no customer ledger.
@@ -425,7 +425,7 @@ pub async fn revise_invoice(
             .await?;
     }
 
-    if sale_ledger_debit > Decimal::ZERO && !is_walk_in {
+    if sale_ledger_debit != Decimal::ZERO && !is_walk_in {
         if let Some(customer_id) = customer_id {
             let note = format!("Revised credit sale {invoice_id}");
             LedgerRepository::post_entry(
@@ -435,8 +435,8 @@ pub async fn revise_invoice(
                     party: LedgerParty::Customer(customer_id),
                     branch_id: context.branch_id,
                     entry_type: LEDGER_SALE,
-                    debit: sale_ledger_debit,
-                    credit: Decimal::ZERO,
+                    debit: sale_ledger_debit.max(Decimal::ZERO),
+                    credit: (-sale_ledger_debit).max(Decimal::ZERO),
                     notes: Some(&note),
                     occurred_at: now,
                     created_by: context.user_id,
@@ -771,7 +771,7 @@ async fn void_payments(
 ) -> Result<(), AppError> {
     let payments = PaymentRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        "SELECT id, amount, amount_tendered, change_amount, payment_method, reference_number, status, paid_at FROM payments WHERE invoice_id = ?",
+        "SELECT id, invoice_id, amount, amount_tendered, change_amount, payment_method, reference_number, status, paid_at FROM payments WHERE invoice_id = ?",
         [invoice_id.into()],
     ))
     .all(transaction)

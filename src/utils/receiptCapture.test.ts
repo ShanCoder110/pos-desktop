@@ -30,7 +30,7 @@ describe("receipt preparation", () => {
       page,
       expect.objectContaining({
         width: 280,
-        height: 1200,
+        height: 1216,
         fontEmbedCSS: "embedded receipt fonts",
       }),
     );
@@ -60,6 +60,25 @@ describe("receipt preparation", () => {
     vi.mocked(toBlob).mockResolvedValueOnce(null);
     await expect(captureReceiptPages(node, "MM_80")).rejects.toThrow(
       "Could not capture the receipt",
+    );
+  });
+  it("loads newly mounted receipt fonts before measuring or capturing", async () => {
+    const load = vi.fn().mockResolvedValue([]);
+    vi.stubGlobal("document", { fonts: { ready: Promise.resolve(), load } });
+    vi.stubGlobal("getComputedStyle", () => ({
+      fontStyle: "normal",
+      fontWeight: "400",
+      fontSize: "20px",
+      fontFamily: "Jameel Noori Nastaleeq",
+    }));
+    const receipt = {
+      textContent: "اردو",
+      querySelectorAll: (selector: string) => (selector === ".slip-page" ? [page] : []),
+    } as unknown as HTMLElement;
+    await captureReceiptPages(receipt, "MM_80");
+    expect(load).toHaveBeenCalledWith("normal 400 20px Jameel Noori Nastaleeq", "اردو");
+    expect(load.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(toBlob).mock.invocationCallOrder[0],
     );
   });
 });

@@ -7,7 +7,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { isTauri } from "@tauri-apps/api/core";
 import {
   formatStockQty,
   normalizeSellUnits,
@@ -498,10 +497,6 @@ export function PosWorkspace() {
   const recoveryIdRef = useRef<string>("");
   if (!recoveryIdRef.current) recoveryIdRef.current = crypto.randomUUID();
   const holdInFlightRef = useRef<Promise<boolean> | null>(null);
-  const closeAllowedRef = useRef(false);
-  const closeHoldRef = useRef<() => Promise<boolean>>(async () => false);
-  const closeHasCartRef = useRef(false);
-  const closeIsEditingRef = useRef(false);
   const recoveryWriteWarnedRef = useRef(false);
   const [invoices, setInvoices] = useState<
     {
@@ -551,9 +546,6 @@ export function PosWorkspace() {
   useEffect(() => {
     sessionBranchIdRef.current = sessionBranchId;
   }, [sessionBranchId]);
-
-  closeHasCartRef.current = cart.length > 0;
-  closeIsEditingRef.current = Boolean(editInvoiceId);
 
   // This synchronous local copy survives a forced process kill, when neither
   // a browser unload handler nor the desktop close event can run.
@@ -1098,6 +1090,7 @@ export function PosWorkspace() {
   const balanceAfter = customer.isWalking
     ? 0
     : balanceAfterSale(previousBalance, t.total, appliedPaid);
+  const balanceAfterBill = balanceAfterSale(previousBalance, t.total, 0);
   const paymentState = paymentStatusLabel({
     paid: amountPaid,
     unpaid,
@@ -1783,8 +1776,6 @@ export function PosWorkspace() {
     }
   }
 
-  closeHoldRef.current = saveCurrentAsHold;
-
   async function leavePos(destination: string) {
     if (!cart.length) {
       navigate(destination);
@@ -1798,45 +1789,6 @@ export function PosWorkspace() {
     window.localStorage.setItem(POS_AUTO_HELD_KEY, "1");
     navigate(destination);
   }
-
-  useEffect(() => {
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (closeAllowedRef.current || !closeHasCartRef.current) return;
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", beforeUnload);
-    if (!isTauri()) return () => window.removeEventListener("beforeunload", beforeUnload);
-
-    let active = true;
-    let unlisten: (() => void) | undefined;
-    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-      if (!active) return;
-      void getCurrentWindow()
-        .onCloseRequested(async (event) => {
-          if (closeAllowedRef.current || !closeHasCartRef.current) return;
-          event.preventDefault();
-          if (closeIsEditingRef.current) {
-            toaster.warn("Finish this invoice edit before closing Dukan.");
-            return;
-          }
-          if (!window.confirm("This bill is not saved. Hold it and close Dukan?")) return;
-          if (!(await closeHoldRef.current())) return;
-          window.localStorage.setItem(POS_AUTO_HELD_KEY, "1");
-          closeAllowedRef.current = true;
-          await getCurrentWindow().close();
-        })
-        .then((stop) => {
-          if (active) unlisten = stop;
-          else stop();
-        });
-    });
-    return () => {
-      active = false;
-      unlisten?.();
-      window.removeEventListener("beforeunload", beforeUnload);
-    };
-  }, []);
 
   function applyExact() {
     if (!t.total) {
@@ -1910,7 +1862,7 @@ export function PosWorkspace() {
           })),
       total: savedInvoice?.total ?? t.total,
       discount: savedInvoice?.discount ?? t.billDiscount,
-      paid: savedInvoice?.paidAmount ?? amountPaid,
+      paid: appliedPaid,
       // Receipts use ledger sign (Owes=N / Advance=P); POS UI keeps the negated Due/Cr sign.
       balanceBefore: posBalanceToLedger(previousBalance),
       balanceAfter: posBalanceToLedger(balanceAfter),
@@ -1936,17 +1888,18 @@ export function PosWorkspace() {
     setPrintDirect(printNow);
     setPrintOpen(true);
     if (printNow) setPrintRequestId((request) => request + 1);
+    else setPrintRequestId(0);
   }
 
-  async function printReceipt(language: ReceiptLanguage) {
+  async function printReceipt(language: ReceiptLanguage, printNow = true) {
     if (printingRef.current || saleSavingRef.current) return;
     if (cart.length) {
       const savedReceipt = await completeSale();
       if (savedReceipt) {
-        openReceipt(savedReceipt.invoiceNumber, true, language, savedReceipt);
+        openReceipt(savedReceipt.invoiceNumber, printNow, language, savedReceipt);
       }
     } else if (lastCompletedReceipt) {
-      openReceipt(lastCompletedReceipt.invoiceNumber, true, language, lastCompletedReceipt);
+      openReceipt(lastCompletedReceipt.invoiceNumber, printNow, language, lastCompletedReceipt);
     } else showToast("Nothing to print");
   }
 
@@ -1966,14 +1919,16 @@ export function PosWorkspace() {
         ? [
             cashAmt > 0
               ? {
-                  amount: Math.min(cashAmt, t.total),
+                  amount: giveChange ? Math.min(cashAmt, t.total) : cashAmt,
                   amountTendered: cashAmt,
                   paymentMethod: "CASH",
                 }
               : null,
             onlineAmt > 0
               ? {
-                  amount: Math.min(onlineAmt, Math.max(0, t.total - Math.min(cashAmt, t.total))),
+                  amount: giveChange
+                    ? Math.min(onlineAmt, Math.max(0, t.total - Math.min(cashAmt, t.total)))
+                    : onlineAmt,
                   paymentMethod: "MOBILE",
                   referenceNumber: bank,
                 }
@@ -1983,7 +1938,7 @@ export function PosWorkspace() {
           ? onlineAmt > 0
             ? [
                 {
-                  amount: Math.min(onlineAmt, t.total),
+                  amount: giveChange ? Math.min(onlineAmt, t.total) : onlineAmt,
                   paymentMethod: "MOBILE",
                   referenceNumber: bank,
                 },
@@ -1992,7 +1947,7 @@ export function PosWorkspace() {
           : received > 0
             ? [
                 {
-                  amount: Math.min(received, t.total),
+                  amount: giveChange ? Math.min(received, t.total) : received,
                   amountTendered: received,
                   paymentMethod: "CASH",
                 },
@@ -3121,9 +3076,9 @@ export function PosWorkspace() {
               className={`after-bal ${
                 customer.isWalking
                   ? "is-walk"
-                  : balanceAfter < 0
+                  : balanceAfterBill < 0
                     ? "is-due"
-                    : balanceAfter > 0
+                    : balanceAfterBill > 0
                       ? "is-credit"
                       : ""
               }`}
@@ -3133,13 +3088,15 @@ export function PosWorkspace() {
                   ? unpaid > 0.009
                     ? "Unpaid on this bill"
                     : "Paid on this bill"
-                  : balanceAfter < 0
+                  : balanceAfterBill < 0
                     ? "Due after bill"
-                    : balanceAfter > 0
+                    : balanceAfterBill > 0
                       ? "Credit after bill"
                       : "Settled after bill"}
               </span>
-              <strong>{customer.isWalking ? money(unpaid) : money(Math.abs(balanceAfter))}</strong>
+              <strong>
+                {customer.isWalking ? money(unpaid) : money(Math.abs(balanceAfterBill))}
+              </strong>
             </div>
           </div>
 
@@ -3213,7 +3170,7 @@ export function PosWorkspace() {
                         : extra > 0.001
                           ? giveChange
                             ? "Change"
-                            : "To balance"
+                            : "Towards previous balance / credit"
                           : "Paid"}
                     </span>
                     <strong className="tender-val">
@@ -3227,7 +3184,7 @@ export function PosWorkspace() {
                         className={!returnChange ? "is-active" : ""}
                         onClick={() => setReturnChange(false)}
                       >
-                        Add to balance
+                        Keep against balance
                       </button>
                       <button
                         type="button"
@@ -3315,6 +3272,18 @@ export function PosWorkspace() {
                   ? "Reduce qty — not enough stock"
                   : `${paymentStatusDetail} · Ready to complete`}
             </div>
+            {!customer.isWalking && (
+              <div className={`after-bal ${balanceAfter < 0 ? "is-due" : "is-credit"}`}>
+                <span>
+                  {balanceAfter < 0
+                    ? "Remaining after payment"
+                    : balanceAfter > 0
+                      ? "Credit after payment"
+                      : "Settled after payment"}
+                </span>
+                <strong>{money(Math.abs(balanceAfter))}</strong>
+              </div>
+            )}
           </div>
 
           <div className="note-row [flex-shrink:0]">
@@ -3387,8 +3356,7 @@ export function PosWorkspace() {
               type="button"
               className="btn [height:36px] [border:1px_solid_var(--line)] [background:#fff] [border-radius:5px] [cursor:pointer] [font-weight:600] [font-size:12px] [color:var(--sub)] [transition:all_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] btn-preview"
               onClick={() => {
-                if (cart.length) openReceipt();
-                else showToast("Nothing to preview");
+                void printReceipt(settings.receiptLanguage, false);
               }}
             >
               Preview
