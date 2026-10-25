@@ -25,7 +25,7 @@ import { jameelNooriFontFaceCss } from "@/utils/receiptPrintFonts";
 import { buildReceiptPrintHtml, RECEIPT_THERMAL_CSS } from "@/utils/receiptThermalStyles";
 import { shouldSplitThermalBill, splitBillPages } from "@/utils/splitBillPages";
 import { isTauri } from "@tauri-apps/api/core";
-import { toBlob } from "html-to-image";
+import { captureReceiptPages } from "@/utils/receiptCapture";
 
 function thermalFailure(result: ThermalPrintResult) {
   if (result.ok) return null;
@@ -44,28 +44,6 @@ function slipMatchesLanguage(node: HTMLElement, urdu: boolean) {
     return marker === "UR" && (node.textContent?.includes("انوائس") ?? false);
   }
   return marker === "EN";
-}
-
-async function waitForReceiptAssets(node: HTMLElement) {
-  await document.fonts.ready;
-  await Promise.all(
-    [...node.querySelectorAll("img")].map(async (image) => {
-      if (!image.complete) {
-        await new Promise<void>((resolve) => {
-          const timeout = window.setTimeout(resolve, 3000);
-          const finish = () => {
-            window.clearTimeout(timeout);
-            resolve();
-          };
-          image.addEventListener("load", finish, { once: true });
-          image.addEventListener("error", finish, { once: true });
-        });
-      }
-      if (image.naturalWidth > 0 && image.decode) {
-        await image.decode().catch(() => undefined);
-      }
-    }),
-  );
 }
 
 export function PrintPreview({
@@ -222,33 +200,8 @@ export function PrintPreview({
         return true;
       }
 
-      const pageNodes = [...node.querySelectorAll<HTMLElement>(".slip-page")];
-      if (!pageNodes.length) return false;
-      await waitForReceiptAssets(node);
       const copies = Math.max(1, Math.min(9, Number(settings.copies) || 1));
-      const pngPages: Uint8Array[] = [];
-      for (const page of pageNodes) {
-        // A receipt can extend below the visible preview viewport. Capture
-        // every full page only once; copies are duplicated by the printer job.
-        const captureWidth = Math.ceil(Math.max(page.clientWidth, page.scrollWidth));
-        const captureHeight = Math.ceil(Math.max(page.clientHeight, page.scrollHeight));
-        const printerDots = printPaper === "MM_58" ? 384 : 576;
-        const blob = await toBlob(page, {
-          width: captureWidth,
-          height: captureHeight,
-          pixelRatio: Math.min(2, Math.max(1, printerDots / captureWidth)),
-          backgroundColor: "#ffffff",
-          cacheBust: false,
-          style: { boxShadow: "none", overflow: "visible" },
-        });
-        if (!blob) {
-          toaster.error("Could not capture the receipt.");
-          printerOverrideRef.current = null;
-          if (directPrint) onCloseRef.current();
-          return true;
-        }
-        pngPages.push(new Uint8Array(await blob.arrayBuffer()));
-      }
+      const pngPages = await captureReceiptPages(node, printPaper);
       const result = await printThermalPngBatch(printerName, pngPages, printPaper, copies);
       const fail = thermalFailure(result);
       if (fail) {
@@ -257,7 +210,7 @@ export function PrintPreview({
         if (directPrint) onCloseRef.current();
         return true;
       }
-      toaster.success("Receipt sent to printer. You can keep using POS.");
+      toaster.success("Receipt sent to printer.");
       printerOverrideRef.current = null;
       if (directPrint) onCloseRef.current();
       return true;
@@ -279,9 +232,6 @@ export function PrintPreview({
     if (sendingRef.current) return;
     sendingRef.current = true;
     setBusy(true);
-    if (directPrint && desktop) {
-      toaster.info("Printing in background. You can keep using POS.");
-    }
     let attempts = 0;
     const tryPrint = () => {
       void runPrintJob().then((ok) => {
@@ -302,7 +252,7 @@ export function PrintPreview({
       });
     };
     tryPrint();
-  }, [desktop, directPrint, isUrdu, runPrintJob, setBusy]);
+  }, [directPrint, isUrdu, runPrintJob, setBusy]);
 
   const refreshSetupPrinters = useCallback(async () => {
     setLoadingPrinters(true);

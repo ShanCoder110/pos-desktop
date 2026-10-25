@@ -4,24 +4,14 @@ use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageReader};
 use serde::Serialize;
 use std::io::Cursor;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Command;
 use std::sync::Mutex;
 
 #[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
+mod windows;
 
 static PRINT_JOB_LOCK: Mutex<()> = Mutex::new(());
-
-#[cfg(target_os = "windows")]
-fn hidden_powershell() -> Command {
-    // This helper talks to the Windows RAW print spooler. In a GUI app,
-    // launching it without CREATE_NO_WINDOW flashes a console over the POS.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let mut command = Command::new("powershell.exe");
-    command.creation_flags(CREATE_NO_WINDOW);
-    command.arg("-NonInteractive");
-    command
-}
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::io::Write;
@@ -36,6 +26,7 @@ pub struct SystemPrinter {
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, err)]
 pub async fn list_system_printers() -> Result<Vec<SystemPrinter>, String> {
     tauri::async_runtime::spawn_blocking(list_system_printers_blocking)
         .await
@@ -53,7 +44,11 @@ fn list_system_printers_blocking() -> Result<Vec<SystemPrinter>, String> {
     }
     #[cfg(target_os = "windows")]
     {
-        list_windows_printers()
+        windows::list_printers().map(|rows| {
+            rows.into_iter()
+                .map(|(name, is_default)| SystemPrinter { name, is_default })
+                .collect()
+        })
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
@@ -124,40 +119,6 @@ fn list_cups_printers() -> Result<Vec<SystemPrinter>, String> {
             name,
         })
         .collect())
-}
-
-#[cfg(target_os = "windows")]
-fn list_windows_printers() -> Result<Vec<SystemPrinter>, String> {
-    let script = r#"
-$ErrorActionPreference = 'Stop'
-$default = (Get-CimInstance Win32_Printer | Where-Object { $_.Default }).Name
-Get-CimInstance Win32_Printer | ForEach-Object {
-  $isDefault = if ($default -and $_.Name -eq $default) { '1' } else { '0' }
-  Write-Output ($isDefault + "`t" + $_.Name)
-}
-"#;
-    let output = hidden_powershell()
-        .args(["-NoProfile", "-Command", script])
-        .output()
-        .map_err(|error| format!("Could not list printers: {error}"))?;
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut printers = Vec::new();
-    for line in text.lines() {
-        let mut parts = line.splitn(2, '\t');
-        let flag = parts.next().unwrap_or("0").trim();
-        let name = parts.next().unwrap_or("").trim();
-        if name.is_empty() {
-            continue;
-        }
-        printers.push(SystemPrinter {
-            name: name.to_owned(),
-            is_default: flag == "1",
-        });
-    }
-    Ok(printers)
 }
 
 fn require_printer_name(printer_name: &str) -> Result<&str, String> {
@@ -320,6 +281,27 @@ fn receipt_batch_payload(
 }
 
 fn send_raw(printer_name: &str, payload: &[u8]) -> Result<(), String> {
+    let started = std::time::Instant::now();
+    tracing::info!(
+        printer = printer_name,
+        bytes = payload.len(),
+        "Submitting thermal print job"
+    );
+    let result = send_raw_blocking(printer_name, payload);
+    match &result {
+        Ok(()) => tracing::info!(
+            printer = printer_name,
+            elapsed_ms = started.elapsed().as_millis(),
+            "Thermal print job accepted by spooler"
+        ),
+        Err(error) => {
+            tracing::error!(printer = printer_name, elapsed_ms = started.elapsed().as_millis(), %error, "Thermal print job failed")
+        }
+    }
+    result
+}
+
+fn send_raw_blocking(printer_name: &str, payload: &[u8]) -> Result<(), String> {
     let _guard = PRINT_JOB_LOCK
         .lock()
         .map_err(|_| "Printer queue is unavailable".to_owned())?;
@@ -349,7 +331,7 @@ fn send_raw(printer_name: &str, payload: &[u8]) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        send_raw_windows(printer_name, payload)
+        windows::send_raw(printer_name, payload)
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -359,102 +341,9 @@ fn send_raw(printer_name: &str, payload: &[u8]) -> Result<(), String> {
     }
 }
 
-#[cfg(target_os = "windows")]
-fn send_raw_windows(printer_name: &str, payload: &[u8]) -> Result<(), String> {
-    use std::fs;
-    let dir = std::env::temp_dir();
-    let job_id = uuid::Uuid::new_v4();
-    let bin_path = dir.join(format!("dukan-thermal-{job_id}.bin"));
-    let script_path = dir.join(format!("dukan-thermal-{job_id}.ps1"));
-    fs::write(&bin_path, payload)
-        .map_err(|error| format!("Could not write print file: {error}"))?;
-    let script = r#"
-param([string]$PrinterName, [string]$Path)
-$ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-public class DukanRawPrinter {
-  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-  public class DocInfo {
-    [MarshalAs(UnmanagedType.LPWStr)] public string pDocName;
-    [MarshalAs(UnmanagedType.LPWStr)] public string pOutputFile;
-    [MarshalAs(UnmanagedType.LPWStr)] public string pDataType;
-  }
-  [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
-  public static extern bool OpenPrinter(string name, out IntPtr handle, IntPtr defaults);
-  [DllImport("winspool.drv", SetLastError = true)]
-  public static extern bool ClosePrinter(IntPtr handle);
-  [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
-  public static extern bool StartDocPrinter(IntPtr handle, int level, [In] DocInfo doc);
-  [DllImport("winspool.drv", SetLastError = true)]
-  public static extern bool EndDocPrinter(IntPtr handle);
-  [DllImport("winspool.drv", SetLastError = true)]
-  public static extern bool StartPagePrinter(IntPtr handle);
-  [DllImport("winspool.drv", SetLastError = true)]
-  public static extern bool EndPagePrinter(IntPtr handle);
-  [DllImport("winspool.drv", SetLastError = true)]
-  public static extern bool WritePrinter(IntPtr handle, IntPtr bytes, int count, out int written);
-  public static void Send(string printer, byte[] bytes) {
-    IntPtr handle;
-    if (!OpenPrinter(printer, out handle, IntPtr.Zero)) throw new System.ComponentModel.Win32Exception();
-    var doc = new DocInfo { pDocName = "Dukan", pDataType = "RAW" };
-    if (!StartDocPrinter(handle, 1, doc)) { ClosePrinter(handle); throw new System.ComponentModel.Win32Exception(); }
-    if (!StartPagePrinter(handle)) { EndDocPrinter(handle); ClosePrinter(handle); throw new System.ComponentModel.Win32Exception(); }
-    IntPtr buffer = Marshal.AllocCoTaskMem(bytes.Length);
-    Marshal.Copy(bytes, 0, buffer, bytes.Length);
-    int written;
-    bool ok = true;
-    int offset = 0;
-    while (offset < bytes.Length) {
-      IntPtr chunk = IntPtr.Add(buffer, offset);
-      if (!WritePrinter(handle, chunk, bytes.Length - offset, out written) || written <= 0) {
-        ok = false;
-        break;
-      }
-      offset += written;
-    }
-    Marshal.FreeCoTaskMem(buffer);
-    EndPagePrinter(handle);
-    EndDocPrinter(handle);
-    ClosePrinter(handle);
-    if (!ok) throw new System.ComponentModel.Win32Exception();
-  }
-}
-"@
-$bytes = [System.IO.File]::ReadAllBytes($Path)
-[DukanRawPrinter]::Send($PrinterName, $bytes)
-"#;
-    fs::write(&script_path, script)
-        .map_err(|error| format!("Could not write print script: {error}"))?;
-    let output = hidden_powershell()
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            &script_path.display().to_string(),
-            "-PrinterName",
-            printer_name,
-            "-Path",
-            &bin_path.display().to_string(),
-        ])
-        .output();
-    let _ = fs::remove_file(&bin_path);
-    let _ = fs::remove_file(&script_path);
-    match output {
-        Ok(out) if out.status.success() => Ok(()),
-        Ok(out) => {
-            let err = String::from_utf8_lossy(&out.stderr);
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            Err(format!("Print job failed: {err}{stdout}"))
-        }
-        Err(error) => Err(format!("Print job failed: {error}")),
-    }
-}
-
 /// Feed a few lines then full-cut (ESC/POS).
 #[tauri::command]
+#[tracing::instrument(skip_all, err)]
 pub async fn cut_thermal_paper(printer_name: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let name = require_printer_name(&printer_name)?;
@@ -467,6 +356,7 @@ pub async fn cut_thermal_paper(printer_name: String) -> Result<(), String> {
 
 /// Silent receipt: PNG of one slip page → ESC/POS raster + cut. No print dialog.
 #[tauri::command]
+#[tracing::instrument(skip_all, err)]
 pub async fn print_thermal_receipt(
     printer_name: String,
     png_base64: String,
@@ -484,6 +374,7 @@ pub async fn print_thermal_receipt(
 
 /// Send all split pages and copies as one raw spool job.
 #[tauri::command]
+#[tracing::instrument(skip_all, err)]
 pub async fn print_thermal_receipt_batch(
     printer_name: String,
     png_base64_pages: Vec<String>,
@@ -505,6 +396,7 @@ pub async fn print_thermal_receipt_batch(
 
 /// Short text slip so Settings can confirm the saved printer without a dialog.
 #[tauri::command]
+#[tracing::instrument(skip_all, err)]
 pub async fn print_thermal_test(
     printer_name: String,
     paper_width: String,

@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "allow-print-thermal-receipt"
 description = "Allows sending a receipt PNG as a silent ESC/POS raster job to the selected printer."
-commands.allow = ["print_thermal_receipt"]
+commands.allow = ["print_thermal_receipt", "print_thermal_receipt_batch"]

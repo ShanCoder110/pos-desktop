@@ -61,24 +61,33 @@ impl ProductRepository {
         database: &DatabaseConnection,
         query: &ProductListQuery,
     ) -> Result<(Vec<ProductResponse>, u64), AppError> {
+        let started = std::time::Instant::now();
         let branch_id = query
             .branch_id
             .as_deref()
             .map(|value| parse_uuid(value, "branchId"))
             .transpose()?;
-        let (conditions, mut values) = build_conditions(query, None, branch_id)?;
+        let (conditions, mut values) = build_conditions(query, None)?;
+        let (count_join, mut count_values) =
+            if query.in_stock == Some(true) || query.low_stock == Some(true) {
+                stock_totals_join(branch_id)
+            } else {
+                (String::new(), Vec::new())
+            };
+        count_values.extend(values.clone());
         let count_sql = format!(
-            "SELECT COUNT(*) AS count FROM products p JOIN product_categories c ON c.id = p.category_id JOIN units u ON u.id = p.base_unit_id WHERE {conditions}"
+            "SELECT COUNT(*) AS count FROM products p JOIN product_categories c ON c.id = p.category_id JOIN units u ON u.id = p.base_unit_id {count_join} WHERE {conditions}"
         );
         let count = CountRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
             count_sql,
-            values.clone(),
+            count_values,
         ))
         .one(database)
         .await?
         .map(|row| std::cmp::max(row.count, 0) as u64)
         .unwrap_or(0);
+        let counted = started.elapsed();
 
         const BASE_MIN: &str = "COALESCE((SELECT pu.minimum_price FROM product_units pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.deleted_at IS NULL LIMIT 1), 0)";
         const BASE_WHOLESALE: &str = "COALESCE((SELECT pu.wholesale_price FROM product_units pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.deleted_at IS NULL LIMIT 1), 0)";
@@ -156,8 +165,26 @@ impl ProductRepository {
         ))
         .all(database)
         .await?;
-
-        Ok((hydrate(database, rows).await?, count))
+        let projected = started.elapsed();
+        let data = hydrate(database, rows).await?;
+        let elapsed = started.elapsed();
+        if elapsed.as_millis() >= 500 {
+            tracing::warn!(
+                rows = data.len(),
+                count_ms = counted.as_millis(),
+                projection_ms = (projected - counted).as_millis(),
+                hydrate_ms = (elapsed - projected).as_millis(),
+                "Slow product query"
+            );
+        }
+        tracing::debug!(
+            rows = data.len(),
+            count_ms = counted.as_millis(),
+            projection_ms = (projected - counted).as_millis(),
+            hydrate_ms = (elapsed - projected).as_millis(),
+            "Product query timing"
+        );
+        Ok((data, count))
     }
 
     pub async fn search(
@@ -187,7 +214,7 @@ impl ProductRepository {
         if let Some(branch_id) = branch_id {
             query.branch_id = Some(branch_id.to_string());
         }
-        let (conditions, mut values) = build_conditions(&query, Some(id), branch_id)?;
+        let (conditions, mut values) = build_conditions(&query, Some(id))?;
         let (projection, mut projection_values) = projection_sql(branch_id);
         let sql = format!("{projection} WHERE {conditions} LIMIT 1");
         projection_values.append(&mut values);
@@ -578,31 +605,30 @@ fn merge_unit(
     }
 }
 
-fn projection_sql(branch_id: Option<Uuid>) -> (String, Vec<sea_orm::Value>) {
-    let (stock_expr, damaged_expr, mut values) = if let Some(branch_id) = branch_id {
-        (
-            "CAST(COALESCE((SELECT SUM(bl.remaining_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND bl.branch_id = ?), 0) AS REAL)".to_owned(),
-            "CAST(COALESCE((SELECT SUM(bl.damaged_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND bl.branch_id = ?), 0) AS REAL)".to_owned(),
-            vec![branch_id.into(), branch_id.into()],
-        )
+fn stock_totals_join(branch_id: Option<Uuid>) -> (String, Vec<sea_orm::Value>) {
+    let (stock_filter, values) = if let Some(branch_id) = branch_id {
+        (" AND bl.branch_id = ?", vec![branch_id.into()])
     } else {
-        (
-            "CAST(COALESCE((SELECT SUM(bl.remaining_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL), 0) AS REAL)".to_owned(),
-            "CAST(COALESCE((SELECT SUM(bl.damaged_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL), 0) AS REAL)".to_owned(),
-            Vec::new(),
-        )
+        ("", Vec::new())
     };
+    (format!(" LEFT JOIN (SELECT pl.product_id, SUM(bl.remaining_base_quantity) AS stock, SUM(bl.damaged_base_quantity) AS damaged FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.deleted_at IS NULL{stock_filter} GROUP BY pl.product_id) stock_totals ON stock_totals.product_id = p.id"), values)
+}
+
+fn projection_sql(branch_id: Option<Uuid>) -> (String, Vec<sea_orm::Value>) {
+    let (stock_join, values) = stock_totals_join(branch_id);
+    // Aggregate once, not two branch-wide scans for every product in the catalog.
+    let stock_expr = "CAST(COALESCE(stock_totals.stock, 0) AS REAL)";
+    let damaged_expr = "CAST(COALESCE(stock_totals.damaged, 0) AS REAL)";
     let sql = format!(
         "SELECT p.id, p.category_id, p.base_unit_id, p.name, p.urdu_name, p.product_no, p.sku, p.barcode, p.product_type, p.minimum_stock, p.warranty_duration, p.warranty_unit, p.warranty_note, p.is_active, p.created_at, p.updated_at, c.name AS category, u.symbol AS unit_symbol, {stock_expr} AS stock, {damaged_expr} AS damaged, CAST(COALESCE((SELECT pl.purchase_price_per_base FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND pl.remaining_base_quantity > 0 ORDER BY pl.received_date ASC, pl.created_at ASC LIMIT 1), (SELECT pl.purchase_price_per_base FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL ORDER BY pl.received_date DESC, pl.created_at DESC LIMIT 1), 0) AS REAL) AS current_cost, (SELECT pl.supplier_id FROM product_lots pl WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND pl.remaining_base_quantity > 0 ORDER BY pl.received_date ASC, pl.created_at ASC LIMIT 1) AS supplier_id, COALESCE((SELECT COUNT(*) FROM warranty_claim_items wci WHERE wci.product_id = p.id), 0) AS claims FROM products p JOIN product_categories c ON c.id = p.category_id JOIN units u ON u.id = p.base_unit_id"
     );
-    let _ = &mut values;
+    let sql = format!("{sql}{stock_join}");
     (sql, values)
 }
 
 fn build_conditions(
     query: &ProductListQuery,
     id: Option<Uuid>,
-    branch_id: Option<Uuid>,
 ) -> Result<(String, Vec<sea_orm::Value>), AppError> {
     let mut parts = vec!["p.deleted_at IS NULL".to_owned()];
     let mut values = Vec::new();
@@ -658,10 +684,10 @@ fn build_conditions(
         true,
     );
     if query.in_stock == Some(true) {
-        parts.push(stock_compare(branch_id, &mut values, "> 0"));
+        parts.push("COALESCE(stock_totals.stock, 0) > 0".to_owned());
     }
     if query.low_stock == Some(true) {
-        parts.push(stock_compare(branch_id, &mut values, "< p.minimum_stock"));
+        parts.push("COALESCE(stock_totals.stock, 0) < p.minimum_stock".to_owned());
     }
     if let Some(min_price) = query.min_price {
         parts.push("EXISTS (SELECT 1 FROM product_units pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.retail_price >= ? AND pu.deleted_at IS NULL)".to_owned());
@@ -672,19 +698,6 @@ fn build_conditions(
         values.push(max_price.into());
     }
     Ok((parts.join(" AND "), values))
-}
-
-fn stock_compare(branch_id: Option<Uuid>, values: &mut Vec<sea_orm::Value>, op: &str) -> String {
-    if let Some(branch_id) = branch_id {
-        values.push(branch_id.into());
-        format!(
-            "COALESCE((SELECT SUM(bl.remaining_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL AND bl.branch_id = ?), 0) {op}"
-        )
-    } else {
-        format!(
-            "COALESCE((SELECT SUM(bl.remaining_base_quantity) FROM branch_lots bl JOIN product_lots pl ON pl.id = bl.product_lot_id WHERE pl.product_id = p.id AND pl.deleted_at IS NULL), 0) {op}"
-        )
-    }
 }
 
 async fn load_branch_stocks(
@@ -737,7 +750,7 @@ async fn hydrate(
         .filter(product_unit::Column::DeletedAt.is_null())
         .all(database)
         .await?;
-    let master_ids: Vec<Uuid> = unit_models.iter().map(|unit| unit.unit_id).collect();
+    let master_ids: HashSet<Uuid> = unit_models.iter().map(|unit| unit.unit_id).collect();
     let master_symbols: HashMap<Uuid, String> = Unit::find()
         .filter(unit::Column::Id.is_in(master_ids))
         .all(database)
@@ -885,4 +898,105 @@ fn is_linear_name(name: &str) -> bool {
 
 fn decimal(value: Decimal) -> f64 {
     value.to_f64().unwrap_or_default()
+}
+
+#[cfg(test)]
+mod performance_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stock_aggregation_preserves_branch_totals_and_filters() {
+        let mut options = sea_orm::ConnectOptions::new("sqlite::memory:");
+        options.max_connections(1).sqlx_logging(false);
+        let database = sea_orm::Database::connect(options).await.unwrap();
+        for sql in [
+            "CREATE TABLE products(id INTEGER, minimum_stock REAL, deleted_at TEXT)",
+            "CREATE TABLE product_lots(id INTEGER, product_id INTEGER, deleted_at TEXT)",
+            "CREATE TABLE branch_lots(product_lot_id INTEGER, branch_id BLOB, remaining_base_quantity REAL, damaged_base_quantity REAL)",
+            "INSERT INTO products VALUES(1, 6, NULL), (2, 1, NULL), (3, 1, NULL)",
+            "INSERT INTO product_lots VALUES(1, 1, NULL), (2, 1, NULL), (3, 1, 'deleted'), (4, 2, NULL)",
+            "INSERT INTO branch_lots VALUES(1, zeroblob(16), 2.5, 1), (2, zeroblob(16), 3, 0.5), (3, zeroblob(16), 999, 999), (4, zeroblob(16), 10, 0), (1, X'00000000000000000000000000000001', 7, 2)",
+        ] {
+            database.execute_unprepared(sql).await.unwrap();
+        }
+        for (branch, expected) in [(Some(Uuid::nil()), 5.5), (None, 12.5)] {
+            let (join, values) = stock_totals_join(branch);
+            let row = database
+                .query_one_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    format!(
+                        "SELECT stock_totals.stock AS stock FROM products p {join} WHERE p.id = 1"
+                    ),
+                    values,
+                ))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.try_get::<f64>("", "stock").unwrap(), expected);
+        }
+        for (in_stock, low_stock, expected) in [(true, false, 2), (false, true, 2), (true, true, 1)]
+        {
+            let query = ProductListQuery {
+                in_stock: Some(in_stock),
+                low_stock: Some(low_stock),
+                ..Default::default()
+            };
+            let (conditions, values) = build_conditions(&query, None).unwrap();
+            let (join, mut bindings) = stock_totals_join(Some(Uuid::nil()));
+            bindings.extend(values);
+            let row = database
+                .query_one_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    format!("SELECT COUNT(*) AS count FROM products p {join} WHERE {conditions}"),
+                    bindings,
+                ))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.try_get::<i64>("", "count").unwrap(), expected);
+        }
+    }
+
+    /// Run against a disposable SQLite backup, never a live shop database.
+    #[tokio::test]
+    #[ignore = "requires DUKAN_PERF_DB pointing to a SQLite backup"]
+    async fn benchmark_product_reads() {
+        let path = std::env::var("DUKAN_PERF_DB").expect("SQLite backup path");
+        let mut options = sea_orm::ConnectOptions::new(format!("sqlite:{path}?mode=ro"));
+        options.sqlx_logging(false);
+        let database = sea_orm::Database::connect(options).await.unwrap();
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_test_writer()
+            .try_init();
+        let branch = database
+            .query_one_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT id FROM branches WHERE deleted_at IS NULL LIMIT 1".to_owned(),
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get::<Uuid>("", "id")
+            .unwrap();
+        for _ in 0..3 {
+            let query = ProductListQuery {
+                branch_id: Some(branch.to_string()),
+                page: crate::backend::dto::PageQuery {
+                    per_page: 5000,
+                    sort_by: Some("name".into()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let started = std::time::Instant::now();
+            let (products, count) = ProductRepository::list(&database, &query).await.unwrap();
+            println!(
+                "PRODUCT_BENCH rows={} total={} elapsed_ms={}",
+                products.len(),
+                count,
+                started.elapsed().as_millis()
+            );
+        }
+    }
 }
