@@ -297,6 +297,7 @@ export function PrintPreview({
         }
         sendingRef.current = false;
         setBusy(false);
+        toaster.error("Receipt was not ready to print. Please try Print again.");
         if (directPrint) onCloseRef.current();
       });
     };

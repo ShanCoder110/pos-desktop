@@ -61,7 +61,8 @@ export function ProductSalesPage() {
         if (invoice.status !== "COMPLETED" || !dateInRange(invoice.createdAt, dateRange))
           return false;
         if (source === "paid") return invoice.paymentStatus === "PAID";
-        if (source === "credit") return invoice.paymentStatus === "CREDIT";
+        if (source === "credit")
+          return invoice.paymentStatus === "CREDIT" || invoice.paymentStatus === "UNPAID";
         if (source === "partial") return invoice.paymentStatus === "PARTIAL";
         return source === "all";
       }),

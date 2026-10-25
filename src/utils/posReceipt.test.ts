@@ -46,4 +46,30 @@ describe("saved invoice receipt", () => {
     expect(html).toContain("Subtotal");
     expect(html).not.toContain('class="receipt-col-price">100</td>');
   });
+
+  it("labels unpaid and partially paid walk-in invoices on the printed slip", () => {
+    const render = (paid: number) =>
+      renderToStaticMarkup(
+        createElement(InvoiceThermalReceipt, {
+          settings: {
+            ...defaultSettings,
+            receiptLanguage: "EN",
+            receiptPaymentStatusSize: "small",
+          },
+          customer: { id: "walk-in", name: "Walk-in", phone: "", balance: 0, isWalking: true },
+          lines: [],
+          total: 100,
+          discount: 0,
+          paid,
+          balanceBefore: 0,
+          balanceAfter: 0,
+          invoiceNumber: "INV-0002",
+        }),
+      );
+
+    expect(render(0)).toContain('is-unpaid" role="status">Unpaid');
+    expect(render(0)).toContain("Remaining Amount");
+    expect(render(40)).toContain('is-partial" role="status">Partially paid');
+    expect(render(100)).toContain('is-paid" role="status">Paid');
+  });
 });

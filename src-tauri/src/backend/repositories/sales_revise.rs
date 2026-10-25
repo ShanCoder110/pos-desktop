@@ -246,11 +246,22 @@ pub async fn revise_invoice(
     // Ledger SALE is the credit taken at this sale/revise (total − tenders), not the
     // remaining open credit after allocations.
     let sale_ledger_debit = money_value(total - sale_tender_applied);
-    if sale_ledger_debit > Decimal::ZERO && (customer_id.is_none() || is_walk_in) {
+    // Preserve the existing protection against moving an open named-customer
+    // debt to the shared walk-in account. A walk-in invoice can itself be
+    // created or revised with an unpaid amount; it has no customer ledger.
+    if sale_ledger_debit > Decimal::ZERO
+        && header.credit_amount > Decimal::ZERO
+        && header.customer_id != customer_id
+        && (customer_id.is_none() || is_walk_in)
+    {
         return Err(AppError::Validation(ERROR_WALK_IN_CREDIT.into()));
     }
     let payment_status = if credit_amount > Decimal::ZERO && applied_paid == Decimal::ZERO {
-        PAYMENT_STATUS_CREDIT
+        if is_walk_in {
+            PAYMENT_STATUS_UNPAID
+        } else {
+            PAYMENT_STATUS_CREDIT
+        }
     } else if credit_amount > Decimal::ZERO {
         PAYMENT_STATUS_PARTIAL
     } else if applied_paid == Decimal::ZERO {
@@ -414,7 +425,7 @@ pub async fn revise_invoice(
             .await?;
     }
 
-    if sale_ledger_debit > Decimal::ZERO {
+    if sale_ledger_debit > Decimal::ZERO && !is_walk_in {
         if let Some(customer_id) = customer_id {
             let note = format!("Revised credit sale {invoice_id}");
             LedgerRepository::post_entry(

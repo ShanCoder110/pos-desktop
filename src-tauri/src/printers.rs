@@ -7,7 +7,21 @@ use std::io::Cursor;
 use std::process::Command;
 use std::sync::Mutex;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 static PRINT_JOB_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(target_os = "windows")]
+fn hidden_powershell() -> Command {
+    // This helper talks to the Windows RAW print spooler. In a GUI app,
+    // launching it without CREATE_NO_WINDOW flashes a console over the POS.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut command = Command::new("powershell.exe");
+    command.creation_flags(CREATE_NO_WINDOW);
+    command.arg("-NonInteractive");
+    command
+}
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::io::Write;
@@ -122,7 +136,7 @@ Get-CimInstance Win32_Printer | ForEach-Object {
   Write-Output ($isDefault + "`t" + $_.Name)
 }
 "#;
-    let output = Command::new("powershell")
+    let output = hidden_powershell()
         .args(["-NoProfile", "-Command", script])
         .output()
         .map_err(|error| format!("Could not list printers: {error}"))?;
@@ -413,7 +427,7 @@ $bytes = [System.IO.File]::ReadAllBytes($Path)
 "#;
     fs::write(&script_path, script)
         .map_err(|error| format!("Could not write print script: {error}"))?;
-    let output = Command::new("powershell")
+    let output = hidden_powershell()
         .args([
             "-NoProfile",
             "-ExecutionPolicy",

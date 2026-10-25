@@ -98,6 +98,21 @@ export async function printThermalPngBatch(
     });
     return { ok: true };
   } catch (error) {
+    // A frontend hot reload can temporarily run against an older desktop
+    // backend that only knows the single-page command. Keep POS printing.
+    const message = error instanceof Error ? error.message : String(error);
+    const missingBatchCommand =
+      /(?:command.*(?:not found|unknown)|unknown.*command|not found.*command)/i.test(message) &&
+      message.includes("print_thermal_receipt_batch");
+    if (missingBatchCommand) {
+      for (let copy = 0; copy < copies; copy += 1) {
+        for (const page of pngPages) {
+          const result = await printThermalPng(name, page, paperWidth);
+          if (!result.ok) return result;
+        }
+      }
+      return { ok: true };
+    }
     return printError(error);
   }
 }

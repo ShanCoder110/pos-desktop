@@ -3330,6 +3330,68 @@ mod tests {
         .expect("credit sale");
         assert_eq!(sale.credit_amount, 30.0);
 
+        let walk_invoice = SalesService::complete(
+            &database,
+            &context,
+            CompleteSaleRequest {
+                client_request_id: "walk-unpaid-sale".into(),
+                customer_id: Some(walk_in.id.clone()),
+                items: vec![SaleItemInput {
+                    product_lot_id: None,
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::ONE,
+                    unit_price: Decimal::new(15, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("unpaid walk-in invoice");
+        assert_eq!(walk_invoice.payment_status, "UNPAID");
+        assert_eq!(walk_invoice.paid_amount, 0.0);
+        assert_eq!(walk_invoice.credit_amount, 15.0);
+        assert!(ledger_balances(&database, &walk_in.id).await.is_empty());
+
+        let revised_walk_invoice = SalesService::revise(
+            &database,
+            &context,
+            Uuid::parse_str(&walk_invoice.id).unwrap(),
+            CompleteSaleRequest {
+                client_request_id: "walk-unpaid-revise".into(),
+                customer_id: Some(walk_in.id.clone()),
+                items: vec![SaleItemInput {
+                    product_lot_id: None,
+                    product_id: product.id.clone(),
+                    product_unit_id: unit_id.clone(),
+                    quantity: Decimal::ONE,
+                    unit_price: Decimal::new(20, 0),
+                    price_mode: "RETAIL".into(),
+                    sold_below_minimum: false,
+                    authorized_by: None,
+                    discount: Decimal::ZERO,
+                    tax: Decimal::ZERO,
+                }],
+                payments: vec![],
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+                notes: None,
+            },
+        )
+        .await
+        .expect("revise unpaid walk-in invoice");
+        assert_eq!(revised_walk_invoice.payment_status, "UNPAID");
+        assert_eq!(revised_walk_invoice.credit_amount, 20.0);
+        assert!(ledger_balances(&database, &walk_in.id).await.is_empty());
+
         let err = SalesService::revise(
             &database,
             &context,

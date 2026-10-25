@@ -10,12 +10,12 @@ use crate::backend::{
     accounting::line_gross_profit,
     constants::{
         ERROR_BELOW_MINIMUM, ERROR_HOLD_NOT_FOUND, ERROR_INVOICE_ALREADY_VOIDED,
-        ERROR_INVOICE_NOT_FOUND, ERROR_INVOICE_RETURNED_CANNOT_VOID, ERROR_WALK_IN_CREDIT,
-        INVOICE_STATUS_CANCELLED, INVOICE_STATUS_COMPLETED, LEDGER_ADJUSTMENT, LEDGER_SALE,
-        MONEY_TYPE_SALE, MONEY_TYPE_VOID, PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT,
-        PAYMENT_STATUS_COMPLETED, PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID,
-        PAYMENT_STATUS_PARTIAL, PAYMENT_STATUS_PARTIALLY_RETURNED, PAYMENT_STATUS_RETURNED,
-        PAYMENT_STATUS_UNPAID, PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE, STOCK_MOVEMENT_SALE,
+        ERROR_INVOICE_NOT_FOUND, ERROR_INVOICE_RETURNED_CANNOT_VOID, INVOICE_STATUS_CANCELLED,
+        INVOICE_STATUS_COMPLETED, LEDGER_ADJUSTMENT, LEDGER_SALE, MONEY_TYPE_SALE, MONEY_TYPE_VOID,
+        PAYMENT_DIRECTION_IN, PAYMENT_DIRECTION_OUT, PAYMENT_STATUS_COMPLETED,
+        PAYMENT_STATUS_CREDIT, PAYMENT_STATUS_PAID, PAYMENT_STATUS_PARTIAL,
+        PAYMENT_STATUS_PARTIALLY_RETURNED, PAYMENT_STATUS_RETURNED, PAYMENT_STATUS_UNPAID,
+        PAYMENT_STATUS_VOIDED, REFERENCE_INVOICE, STOCK_MOVEMENT_SALE,
     },
     context::RequestContext,
     dto::{
@@ -284,11 +284,12 @@ impl SalesRepository {
         }
         let applied_paid = money_value(paid_amount.min(total));
         let credit_amount = money_value(total - applied_paid);
-        if credit_amount > Decimal::ZERO && (customer_id.is_none() || is_walk_in) {
-            return Err(AppError::Validation(ERROR_WALK_IN_CREDIT.into()));
-        }
         let payment_status = if credit_amount > Decimal::ZERO && applied_paid == Decimal::ZERO {
-            PAYMENT_STATUS_CREDIT
+            if is_walk_in {
+                PAYMENT_STATUS_UNPAID
+            } else {
+                PAYMENT_STATUS_CREDIT
+            }
         } else if credit_amount > Decimal::ZERO {
             PAYMENT_STATUS_PARTIAL
         } else if applied_paid == Decimal::ZERO {
@@ -457,7 +458,9 @@ impl SalesRepository {
                 .await?;
         }
 
-        if credit_amount > Decimal::ZERO {
+        // Walk-in invoices may be unpaid, but the shared walk-in customer must
+        // never accumulate a balance for unrelated shoppers.
+        if credit_amount > Decimal::ZERO && !is_walk_in {
             if let Some(customer_id) = customer_id {
                 let note = format!("Sale {invoice_number}");
                 LedgerRepository::post_entry(

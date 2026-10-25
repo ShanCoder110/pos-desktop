@@ -38,7 +38,9 @@ function InvoiceKpis() {
   const completed = invoices.filter((r) => r.status === "COMPLETED");
   const paid = invoices.filter((r) => r.paymentStatus === "PAID" && r.status === "COMPLETED");
   const partial = invoices.filter((r) => r.paymentStatus === "PARTIAL");
-  const credit = invoices.filter((r) => r.paymentStatus === "CREDIT");
+  const credit = invoices.filter(
+    (r) => r.paymentStatus === "CREDIT" || r.paymentStatus === "UNPAID",
+  );
   const cancelled = invoices.filter((r) => r.status === "CANCELLED");
 
   function toggle(id: string) {
@@ -75,7 +77,7 @@ function InvoiceKpis() {
         onClick={() => toggle("partial")}
       />
       <KpiCard
-        label="On credit"
+        label="Unpaid / credit"
         value={credit.length}
         hint={money(completed.reduce((s, r) => s + r.creditAmount, 0))}
         tone="warn"

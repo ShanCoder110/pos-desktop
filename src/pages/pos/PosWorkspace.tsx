@@ -7,6 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { isTauri } from "@tauri-apps/api/core";
 import {
   formatStockQty,
   normalizeSellUnits,
@@ -137,7 +138,25 @@ type HeldPayload = {
   discMode: DiscMode;
   discPct: number;
   note: string;
+  payMethod?: PayMethod;
+  received?: number;
+  cashAmt?: number;
+  onlineAmt?: number;
+  bank?: string;
+  returnChange?: boolean;
+  recoveryId?: string;
 };
+
+type PosRecovery = {
+  version: 1;
+  userId: string;
+  branchId: string;
+  savedAt: string;
+  payload: HeldPayload;
+};
+
+const POS_RECOVERY_KEY = "dukan:pos:unfinished-bill";
+const POS_AUTO_HELD_KEY = "dukan:pos:auto-held";
 
 type PosHeldBill = HeldBill & { payload: HeldPayload };
 
@@ -277,6 +296,79 @@ function readHeldPayload(payload: unknown): HeldPayload | null {
     discMode: value.discMode === "pct" ? "pct" : "rs",
     discPct: num(value.discPct ?? 0),
     note: value.note ?? "",
+    payMethod:
+      value.payMethod === "online" || value.payMethod === "split" ? value.payMethod : "cash",
+    received: num(value.received ?? 0),
+    cashAmt: num(value.cashAmt ?? 0),
+    onlineAmt: num(value.onlineAmt ?? 0),
+    bank: value.bank ?? BANKS[0],
+    returnChange: Boolean(value.returnChange),
+    recoveryId: value.recoveryId,
+  };
+}
+
+function readPosRecoveries(): PosRecovery[] {
+  try {
+    const raw = window.localStorage.getItem(POS_RECOVERY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Partial<PosRecovery> | Partial<PosRecovery>[];
+    return (Array.isArray(parsed) ? parsed : [parsed]).flatMap((value) => {
+      const payload = readHeldPayload(value.payload);
+      if (value.version !== 1 || !value.userId || !value.branchId || !payload?.cart.length) {
+        return [];
+      }
+      const savedAt = value.savedAt ?? new Date().toISOString();
+      return [
+        {
+          version: 1 as const,
+          userId: value.userId,
+          branchId: value.branchId,
+          savedAt,
+          payload: { ...payload, recoveryId: payload.recoveryId ?? savedAt },
+        },
+      ];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function writePosRecovery(recovery: PosRecovery) {
+  const others = readPosRecoveries().filter(
+    (item) => item.payload.recoveryId !== recovery.payload.recoveryId,
+  );
+  window.localStorage.setItem(POS_RECOVERY_KEY, JSON.stringify([...others, recovery]));
+}
+
+function clearPosRecovery(recoveryId: string) {
+  const remaining = readPosRecoveries().filter((item) => item.payload.recoveryId !== recoveryId);
+  if (remaining.length) window.localStorage.setItem(POS_RECOVERY_KEY, JSON.stringify(remaining));
+  else window.localStorage.removeItem(POS_RECOVERY_KEY);
+}
+
+function heldBillFromPayload(
+  id: string,
+  label: string,
+  customerId: string,
+  at: string,
+  payload: HeldPayload,
+): PosHeldBill {
+  return {
+    id,
+    label,
+    customerId,
+    at,
+    payload,
+    lines: payload.cart.map((line) => ({
+      id: line.id,
+      productId: line.productId,
+      name: line.name,
+      qty: line.qty,
+      unit: line.sellUnit,
+      price: line.unitPrice,
+      minFloor: line.minPrice,
+      lotsNote: line.lotsNote,
+    })),
   };
 }
 function listPrice(p: Product, mode: PriceMode, unitId?: string) {
@@ -403,6 +495,14 @@ export function PosWorkspace() {
   const [returnChange, setReturnChange] = useState(false);
   const [note, setNote] = useState("");
   const [holds, setHolds] = useState<PosHeldBill[]>([]);
+  const recoveryIdRef = useRef<string>("");
+  if (!recoveryIdRef.current) recoveryIdRef.current = crypto.randomUUID();
+  const holdInFlightRef = useRef<Promise<boolean> | null>(null);
+  const closeAllowedRef = useRef(false);
+  const closeHoldRef = useRef<() => Promise<boolean>>(async () => false);
+  const closeHasCartRef = useRef(false);
+  const closeIsEditingRef = useRef(false);
+  const recoveryWriteWarnedRef = useRef(false);
   const [invoices, setInvoices] = useState<
     {
       id: string;
@@ -451,6 +551,68 @@ export function PosWorkspace() {
   useEffect(() => {
     sessionBranchIdRef.current = sessionBranchId;
   }, [sessionBranchId]);
+
+  closeHasCartRef.current = cart.length > 0;
+  closeIsEditingRef.current = Boolean(editInvoiceId);
+
+  // This synchronous local copy survives a forced process kill, when neither
+  // a browser unload handler nor the desktop close event can run.
+  useEffect(() => {
+    if (!cart.length || !sessionUserId || !sessionBranchId || editInvoiceId) return;
+    const payload: HeldPayload = {
+      version: 1,
+      cart,
+      customerId,
+      guestName,
+      guestPhone,
+      priceMode,
+      billDiscount,
+      discMode,
+      discPct,
+      note,
+      payMethod,
+      received,
+      cashAmt,
+      onlineAmt,
+      bank,
+      returnChange,
+      recoveryId: recoveryIdRef.current,
+    };
+    try {
+      writePosRecovery({
+        version: 1,
+        userId: sessionUserId,
+        branchId: sessionBranchId,
+        savedAt: new Date().toISOString(),
+        payload,
+      });
+      recoveryWriteWarnedRef.current = false;
+    } catch {
+      if (!recoveryWriteWarnedRef.current) {
+        recoveryWriteWarnedRef.current = true;
+        toaster.error("Could not save this unfinished bill for crash recovery.");
+      }
+    }
+  }, [
+    cart,
+    sessionUserId,
+    sessionBranchId,
+    editInvoiceId,
+    customerId,
+    guestName,
+    guestPhone,
+    priceMode,
+    billDiscount,
+    discMode,
+    discPct,
+    note,
+    payMethod,
+    received,
+    cashAmt,
+    onlineAmt,
+    bank,
+    returnChange,
+  ]);
 
   /** Fresh stock for Left / oversell guards — edit load, post-sale, and tab focus. */
   async function reloadProducts(signal?: AbortSignal, branchId?: string) {
@@ -552,31 +714,58 @@ export function PosWorkspace() {
       if (walkIn) {
         setCustomerId((current) => current || walkIn.id);
       }
-      setHolds(
-        holdRows.flatMap((hold) => {
-          const payload = readHeldPayload(hold.payload);
-          if (!payload) return [];
-          return [
-            {
-              id: hold.id,
-              label: hold.label,
-              customerId: hold.customerId ?? "",
-              lines: payload.cart.map((line) => ({
-                id: line.id,
-                productId: line.productId,
-                name: line.name,
-                qty: line.qty,
-                unit: line.sellUnit,
-                price: line.unitPrice,
-                minFloor: line.minPrice,
-                lotsNote: line.lotsNote,
-              })),
-              at: hold.heldAt,
-              payload,
-            },
-          ];
-        }),
+      const loadedHolds = holdRows.flatMap((hold) => {
+        const payload = readHeldPayload(hold.payload);
+        return payload
+          ? [heldBillFromPayload(hold.id, hold.label, hold.customerId ?? "", hold.heldAt, payload)]
+          : [];
+      });
+      const matchingRecoveries = readPosRecoveries().filter(
+        (recovery) => recovery.userId === session.user.id && recovery.branchId === session.branchId,
       );
+      for (const recovery of matchingRecoveries) {
+        const alreadyHeld = loadedHolds.some(
+          (hold) => hold.payload.recoveryId === recovery.payload.recoveryId,
+        );
+        if (alreadyHeld) {
+          clearPosRecovery(recovery.payload.recoveryId ?? "");
+          continue;
+        }
+        const label = `Recovered unfinished bill · ${recovery.payload.cart.length} items`;
+        try {
+          const hold = await createHold({
+            label,
+            customerId: recovery.payload.customerId || null,
+            payload: recovery.payload,
+          });
+          loadedHolds.unshift(
+            heldBillFromPayload(
+              hold.id,
+              hold.label,
+              hold.customerId ?? "",
+              hold.heldAt,
+              recovery.payload,
+            ),
+          );
+          clearPosRecovery(recovery.payload.recoveryId ?? "");
+        } catch {
+          // Offline recovery remains on this device and can still be resumed.
+          loadedHolds.unshift(
+            heldBillFromPayload(
+              `recovered:${recovery.payload.recoveryId}`,
+              label,
+              recovery.payload.customerId,
+              recovery.savedAt,
+              recovery.payload,
+            ),
+          );
+        }
+      }
+      setHolds(loadedHolds);
+      if (matchingRecoveries.length || window.localStorage.getItem(POS_AUTO_HELD_KEY)) {
+        setHoldsOpen(true);
+      }
+      window.localStorage.removeItem(POS_AUTO_HELD_KEY);
       setInvoices(
         (invoiceRows?.data ?? []).map((invoice) => ({
           id: invoice.id,
@@ -928,7 +1117,6 @@ export function PosWorkspace() {
   const paymentOk = (() => {
     if (!cart.length) return false;
     if (cartOverStock) return false;
-    if (customer.isWalking) return amountPaid >= t.total - 0.001;
     return true;
   })();
 
@@ -1486,6 +1674,8 @@ export function PosWorkspace() {
   }
 
   function newBill(silent = false) {
+    clearPosRecovery(recoveryIdRef.current);
+    recoveryIdRef.current = crypto.randomUUID();
     setCart([]);
     setReceiptInvoiceNo("");
     setSelected(-1);
@@ -1519,20 +1709,16 @@ export function PosWorkspace() {
       return;
     }
     if (!window.confirm(`Remove all ${cart.length} item(s) from this bill?`)) return;
+    clearPosRecovery(recoveryIdRef.current);
+    recoveryIdRef.current = crypto.randomUUID();
     setCart([]);
     setSelected(-1);
     showToast("Cart cleared");
   }
 
-  async function holdInvoice() {
-    if (!cart.length) {
-      if (holds.length) {
-        setHoldsOpen(true);
-        return;
-      }
-      showToast("Cart is empty");
-      return;
-    }
+  async function saveCurrentAsHold(): Promise<boolean> {
+    if (holdInFlightRef.current) return holdInFlightRef.current;
+    if (!cart.length) return true;
     const payload: HeldPayload = {
       version: 1,
       cart,
@@ -1544,42 +1730,113 @@ export function PosWorkspace() {
       discMode,
       discPct,
       note,
+      payMethod,
+      received,
+      cashAmt,
+      onlineAmt,
+      bank,
+      returnChange,
+      recoveryId: recoveryIdRef.current,
     };
     setLoading((current) => ({ ...current, hold: true }));
-    try {
-      const hold = await createHold({
-        label: `${displayCustomer.name} · ${cart.length} items`,
-        customerId: customerId || null,
-        payload,
-      });
-      setHolds((prev) => [
-        {
-          id: hold.id,
-          label: hold.label,
-          customerId: hold.customerId ?? "",
-          lines: cart.map((line) => ({
-            id: line.id,
-            productId: line.productId,
-            name: line.name,
-            qty: line.qty,
-            unit: line.sellUnit,
-            price: line.unitPrice,
-            minFloor: line.minPrice,
-            lotsNote: line.lotsNote,
-          })),
-          at: hold.heldAt,
+    const action = (async () => {
+      try {
+        const hold = await createHold({
+          label: `${displayCustomer.name} · ${cart.length} items`,
+          customerId: customerId || null,
           payload,
-        },
-        ...prev,
-      ]);
-      newBill(true);
-      showToast("Invoice held");
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not hold invoice");
+        });
+        setHolds((prev) => [
+          heldBillFromPayload(hold.id, hold.label, hold.customerId ?? "", hold.heldAt, payload),
+          ...prev,
+        ]);
+        clearPosRecovery(recoveryIdRef.current);
+        return true;
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "Could not hold invoice");
+        return false;
+      } finally {
+        setLoading((current) => ({ ...current, hold: false }));
+      }
+    })();
+    holdInFlightRef.current = action;
+    try {
+      return await action;
     } finally {
-      setLoading((current) => ({ ...current, hold: false }));
+      holdInFlightRef.current = null;
     }
   }
+
+  async function holdInvoice() {
+    if (!cart.length) {
+      if (holds.length) setHoldsOpen(true);
+      else showToast("Cart is empty");
+      return;
+    }
+    if (editInvoiceId) {
+      toaster.warn("Finish this invoice edit before holding a new bill.");
+      return;
+    }
+    if (await saveCurrentAsHold()) {
+      newBill(true);
+      showToast("Invoice held");
+    }
+  }
+
+  closeHoldRef.current = saveCurrentAsHold;
+
+  async function leavePos(destination: string) {
+    if (!cart.length) {
+      navigate(destination);
+      return;
+    }
+    if (editInvoiceId) {
+      toaster.warn("Finish this invoice edit before leaving POS.");
+      return;
+    }
+    if (!(await saveCurrentAsHold())) return;
+    window.localStorage.setItem(POS_AUTO_HELD_KEY, "1");
+    navigate(destination);
+  }
+
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (closeAllowedRef.current || !closeHasCartRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    if (!isTauri()) return () => window.removeEventListener("beforeunload", beforeUnload);
+
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+      if (!active) return;
+      void getCurrentWindow()
+        .onCloseRequested(async (event) => {
+          if (closeAllowedRef.current || !closeHasCartRef.current) return;
+          event.preventDefault();
+          if (closeIsEditingRef.current) {
+            toaster.warn("Finish this invoice edit before closing Dukan.");
+            return;
+          }
+          if (!window.confirm("This bill is not saved. Hold it and close Dukan?")) return;
+          if (!(await closeHoldRef.current())) return;
+          window.localStorage.setItem(POS_AUTO_HELD_KEY, "1");
+          closeAllowedRef.current = true;
+          await getCurrentWindow().close();
+        })
+        .then((stop) => {
+          if (active) unlisten = stop;
+          else stop();
+        });
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+      window.removeEventListener("beforeunload", beforeUnload);
+    };
+  }, []);
 
   function applyExact() {
     if (!t.total) {
@@ -1703,10 +1960,7 @@ export function PosWorkspace() {
       showToast("Cart exceeds available stock");
       return null;
     }
-    if (!paymentOk) {
-      showToast(customer.isWalking ? "Walk-in must pay in full" : "Payment incomplete");
-      return null;
-    }
+    if (!paymentOk) return null;
     const payments =
       payMethod === "split"
         ? [
@@ -2643,7 +2897,7 @@ export function PosWorkspace() {
                       className="rounded-md border-0 bg-transparent px-3 py-2 text-left text-[12px] font-semibold text-ink hover:bg-bg"
                       onClick={() => {
                         setQuickOpen(false);
-                        navigate(routes.products);
+                        void leavePos(routes.products);
                       }}
                     >
                       Add product
@@ -2672,7 +2926,7 @@ export function PosWorkspace() {
               <button
                 type="button"
                 className="head-btn"
-                onClick={() => navigate(routes.dashboard)}
+                onClick={() => void leavePos(routes.dashboard)}
                 title="Leave POS"
               >
                 Dashboard
@@ -2876,14 +3130,16 @@ export function PosWorkspace() {
             >
               <span>
                 {customer.isWalking
-                  ? "Pay in full"
+                  ? unpaid > 0.009
+                    ? "Unpaid on this bill"
+                    : "Paid on this bill"
                   : balanceAfter < 0
                     ? "Due after bill"
                     : balanceAfter > 0
                       ? "Credit after bill"
                       : "Settled after bill"}
               </span>
-              <strong>{customer.isWalking ? money(t.total) : money(Math.abs(balanceAfter))}</strong>
+              <strong>{customer.isWalking ? money(unpaid) : money(Math.abs(balanceAfter))}</strong>
             </div>
           </div>
 
@@ -3057,11 +3313,7 @@ export function PosWorkspace() {
                 ? ""
                 : cartOverStock
                   ? "Reduce qty — not enough stock"
-                  : paymentOk
-                    ? `${paymentStatusDetail} · Ready to complete`
-                    : customer.isWalking
-                      ? `${paymentStatusDetail} · Pay in full required`
-                      : `${paymentStatusDetail} · Account sale allowed`}
+                  : `${paymentStatusDetail} · Ready to complete`}
             </div>
           </div>
 
@@ -3233,6 +3485,7 @@ export function PosWorkspace() {
                     key={h.id}
                     className="list-row [display:grid] [grid-template-columns:1fr_auto] [gap:8px] [padding:7px_6px] [border-bottom:1px_solid_#f1f5f9] [cursor:pointer] [align-items:center] [border-radius:5px] [transition:background_.08s]"
                     onClick={() => {
+                      recoveryIdRef.current = h.payload.recoveryId ?? crypto.randomUUID();
                       const restored = h.payload.cart.map((line) => {
                         if (line.productUnitId) return recompute(line);
                         const product = products.find((item) => item.id === line.productId);
@@ -3250,7 +3503,18 @@ export function PosWorkspace() {
                       setDiscMode(h.payload.discMode);
                       setDiscPct(h.payload.discPct);
                       setNote(h.payload.note);
+                      setPayMethod(h.payload.payMethod ?? "cash");
+                      setReceived(h.payload.received ?? 0);
+                      setCashAmt(h.payload.cashAmt ?? 0);
+                      setOnlineAmt(h.payload.onlineAmt ?? 0);
+                      setBank(h.payload.bank ?? BANKS[0]);
+                      setReturnChange(h.payload.returnChange ?? false);
                       setHoldsOpen(false);
+                      if (h.id.startsWith("recovered:")) {
+                        setHolds((current) => current.filter((item) => item.id !== h.id));
+                        showToast("Unfinished bill recovered");
+                        return;
+                      }
                       setLoading((current) => ({ ...current, hold: true }));
                       void deleteHold(h.id)
                         .then(() => {
@@ -3475,8 +3739,8 @@ export function PosWorkspace() {
         onClose={() => setShortcutsOpen(false)}
         onFunction={(key) => fnRef.current[key]?.()}
         onAddCustomer={() => setAddCustomerOpen(true)}
-        onAddProduct={() => navigate(routes.products)}
-        onDashboard={() => navigate(routes.dashboard)}
+        onAddProduct={() => void leavePos(routes.products)}
+        onDashboard={() => void leavePos(routes.dashboard)}
       />
 
       <PrintPreview

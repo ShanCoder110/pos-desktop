@@ -122,7 +122,8 @@ export function InvoicesPage() {
       if (sectionKpi === "paid" && !(r.paymentStatus === "PAID" && r.status === "COMPLETED"))
         return false;
       if (sectionKpi === "partial" && r.paymentStatus !== "PARTIAL") return false;
-      if (sectionKpi === "credit" && r.paymentStatus !== "CREDIT") return false;
+      if (sectionKpi === "credit" && r.paymentStatus !== "CREDIT" && r.paymentStatus !== "UNPAID")
+        return false;
       if (sectionKpi === "cancelled" && r.status !== "CANCELLED") return false;
 
       for (const chip of chips) {

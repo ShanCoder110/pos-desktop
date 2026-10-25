@@ -179,6 +179,18 @@ export function InvoiceThermalReceipt({
   const totalBill = showPreviousBalance ? total + balanceBefore : total;
   const due = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
+  const paymentState = due <= 0.009 ? "paid" : paid <= 0.009 ? "unpaid" : "partial";
+  const paymentStateLabel = isUrdu
+    ? paymentState === "paid"
+      ? "ادا شدہ"
+      : paymentState === "partial"
+        ? "جزوی ادائیگی"
+        : "غیر ادا شدہ"
+    : paymentState === "paid"
+      ? "Paid"
+      : paymentState === "partial"
+        ? "Partially paid"
+        : "Unpaid";
   const remainingAmount = customer.isWalking ? due : totalBill - paid;
   const showRemaining = customer.isWalking ? due > 0.009 || change > 0.009 : true;
   const now = new Date();
@@ -299,6 +311,15 @@ export function InvoiceThermalReceipt({
         {showBrandHeader && duplicate ? (
           <div className="receipt-duplicate-bill" role="note">
             {isUrdu ? "نقل شدہ بل" : RECEIPT_BRANDING.duplicateBillLabel}
+          </div>
+        ) : null}
+
+        {showBrandHeader ? (
+          <div
+            className={`receipt-payment-banner receipt-payment-banner--${settings.receiptPaymentStatusSize} is-${paymentState}`}
+            role="status"
+          >
+            {paymentStateLabel}
           </div>
         ) : null}
 

@@ -4,7 +4,7 @@ import { emptyPrices } from "@/pages/products/productQty";
 
 export { fifoLot, fifoLots } from "@/pages/products/productFifo";
 
-/** New product starts as Roll inventory + blank Gaz (1 Roll contains N Gaz). */
+/** New products start with Piece as their inventory and selling unit. */
 export function blankProduct(): Product {
   return {
     id: crypto.randomUUID(),
@@ -14,7 +14,7 @@ export function blankProduct(): Product {
     urduName: "",
     barcode: "",
     category: "",
-    unit: "roll",
+    unit: "pc",
     supplierId: "",
     minimumStock: 0,
     isLinear: false,
@@ -37,8 +37,8 @@ export function blankProduct(): Product {
     sellUnits: [
       {
         id: crypto.randomUUID(),
-        name: "Roll",
-        symbol: "roll",
+        name: "Piece",
+        symbol: "pc",
         kind: "base",
         contains: 1,
         factorDirection: "multiply",
@@ -47,19 +47,6 @@ export function blankProduct(): Product {
         priceManual: {},
         isBase: true,
         isDefault: true,
-      },
-      {
-        id: crypto.randomUUID(),
-        name: "Gaz",
-        symbol: "gaz",
-        kind: "smaller",
-        contains: 0,
-        factorDirection: "divide",
-        ...emptyPrices(),
-        barcode: "",
-        priceManual: {},
-        isBase: false,
-        isDefault: false,
       },
     ],
   };
