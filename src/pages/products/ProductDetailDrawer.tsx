@@ -18,6 +18,7 @@ import {
   baseUnit,
   formatStockQty,
   lotCostInStockUnit,
+  preferredUnit,
   priceBreakdown,
   productBasePricing,
   qtyUnits,
@@ -46,7 +47,7 @@ function compactRs(n: number) {
 
 function retailDisplay(product: Product) {
   const units = product.sellUnits?.length ? qtyUnits(product.sellUnits) : [];
-  const stockUnitObj = units.find((u) => u.symbol === product.unit) ?? baseUnit(units);
+  const stockUnitObj = preferredUnit(units) ?? baseUnit(units);
   const mainRetail = stockUnitObj?.price ?? productBasePricing(product).retail;
   const otherUnits = units.filter((u) => u.id !== stockUnitObj?.id);
   const sub =

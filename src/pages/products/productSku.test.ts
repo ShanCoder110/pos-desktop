@@ -99,3 +99,40 @@ describe("custom SKU rules", () => {
     expect(payload?.sku).toBe("PMX-002");
   });
 });
+
+describe("product unit payload", () => {
+  it("keeps Piece as inventory and Pack as the default sale unit", () => {
+    const piece = sampleProduct().sellUnits![0];
+    const product = sampleProduct({
+      sellUnits: [
+        { ...piece, isDefault: false },
+        {
+          ...piece,
+          id: "su-pack",
+          name: "Pack",
+          symbol: "pk",
+          kind: "bigger",
+          contains: 24,
+          factorDirection: "multiply",
+          cost: 240,
+          min: 288,
+          wholesale: 336,
+          price: 384,
+          isBase: false,
+          isDefault: true,
+        },
+      ],
+    });
+    const payload = buildUpdateProductPayload(product, {
+      categoryId: "c1",
+      units: [
+        { id: "u1", symbol: "pc", name: "Piece" },
+        { id: "u-pack", symbol: "pk", name: "Pack" },
+      ],
+    });
+    const sellUnits = payload?.sellUnits as { isBase: boolean; isDefault: boolean }[];
+    expect(sellUnits).toHaveLength(2);
+    expect(sellUnits[0]).toMatchObject({ isBase: false, isDefault: true });
+    expect(sellUnits[1]).toMatchObject({ isBase: true, isDefault: false });
+  });
+});

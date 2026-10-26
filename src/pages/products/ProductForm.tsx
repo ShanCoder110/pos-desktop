@@ -51,31 +51,28 @@ import { getProduct } from "@/services/products";
 import { listAllBranches } from "@/services/org";
 import {
   applyDerivedPrices,
-  applyBaseUnitChange,
   biggerUnit,
   canonicalUnit,
-  containsLabel,
-  containsRelationHint,
   conversionFactor,
   deriveAll,
-  extraKind,
-  factorDirectionForContains,
+  editUnitRate,
   formatMixedQty,
   formatStockQty,
+  inventoryPerSellUnit,
   isLinearStockUnit,
-  isBiggerSymbol,
-  isSubdivisionSymbol,
   normalizeSellUnits,
   preferredUnit,
   priceFromStock,
-  pricePerStock,
   productSellUnits,
   qtyUnits,
+  setInventoryBaseUnit,
+  setStockRelativeContains,
   sellUnitOptionValue,
   sellUnitOptions,
   setPreferredUnit,
   suggestedExtraUnit,
   unitInStock,
+  unitHierarchySummary,
   unitLabel,
   validateOpeningStock,
   validateSellUnits,
@@ -142,7 +139,7 @@ function defaultSellUnits(product: Product): ProductSellUnit[] {
     barcode: product.barcode ?? "",
     priceManual: {},
     isBase: true,
-    isDefault: true,
+    isDefault: !packN,
   };
   if (!packN) return [base];
   return normalizeSellUnits([
@@ -160,7 +157,7 @@ function defaultSellUnits(product: Product): ProductSellUnit[] {
       barcode: "",
       priceManual: {},
       isBase: false,
-      isDefault: false,
+      isDefault: true,
     },
   ]);
 }
@@ -337,18 +334,17 @@ export function ProductForm({
   ]);
 
   const [lotDraft, setLotDraft] = useState(() => lots.filter((l) => l.productId === product.id));
-  const [priceLotId, setPriceLotId] = useState("");
   const [lotOpened, setLotOpened] = useState<
-    Record<string, { remaining: number; damaged: number }>
+    Record<string, { remaining: number; damaged: number; purchasePrice: number }>
   >({});
   const sellUnits = qtyUnits(defaultSellUnits(product));
+  const unitSummary = unitHierarchySummary(sellUnits);
   const unitLayoutKey = sellUnits
     .map((unit) => `${unit.id}:${unit.kind}:${unit.contains}:${unit.isBase ? 1 : 0}`)
     .join("|");
   const base = preferredUnit(sellUnits) ?? sellUnits[0];
   const inventory = canonicalUnit(sellUnits) ?? base;
   const stockSymbol = inventory?.symbol || product.unit || "pc";
-  const priceLot = lotDraft.find((l) => l.id === priceLotId);
   const activeSuppliers = useMemo(() => {
     const ids = [
       ...new Set(
@@ -363,7 +359,6 @@ export function ProductForm({
         .map((l) => l.lotNumber),
     }));
   }, [lotDraft, suppliers]);
-  const openPriceLots = lotDraft.filter((l) => l.remainingQuantity > 0 || l.damagedQuantity > 0);
   const sellingLot = fifoLot(lotDraft);
   const queuedLots = fifoLots(lotDraft).slice(1);
   const branchStock = useMemo(
@@ -395,25 +390,30 @@ export function ProductForm({
     const mine = lots.filter((l) => l.productId === product.id);
     if (mine.length) {
       setLotDraft(mine);
-      setPriceLotId((fifoLot(mine) ?? mine[0]).id);
       setLotOpened(
         Object.fromEntries(
-          mine.map((l) => [l.id, { remaining: l.remainingQuantity, damaged: l.damagedQuantity }]),
+          mine.map((l) => [
+            l.id,
+            {
+              remaining: l.remainingQuantity,
+              damaged: l.damagedQuantity,
+              purchasePrice: l.purchasePrice,
+            },
+          ]),
         ),
       );
     } else if (!isNew && product.stock > 0) {
       const created = openingLot(product, lots);
       setLotDraft([created]);
-      setPriceLotId(created.id);
       setLotOpened({
         [created.id]: {
           remaining: created.remainingQuantity,
           damaged: created.damagedQuantity,
+          purchasePrice: created.purchasePrice,
         },
       });
     } else {
       setLotDraft([]);
-      setPriceLotId("");
       setLotOpened({});
     }
     if (!product.sellUnits?.length) {
@@ -430,39 +430,6 @@ export function ProductForm({
       if (!root) return;
       focusField(root, "name");
     });
-    if (product.sellUnits?.some((unit) => isSubdivisionSymbol(unit.symbol) && unit.contains > 1)) {
-      const current = defaultSellUnits(product);
-      const derived = deriveAll(current);
-      const sellUnits = current.map((unit) => {
-        if (!isSubdivisionSymbol(unit.symbol) || !(unit.contains > 1)) return unit;
-        return derived.find((row) => row.id === unit.id) ?? unit;
-      });
-      const changed = sellUnits.some((unit) => {
-        const prev = current.find((row) => row.id === unit.id);
-        return (
-          !!prev &&
-          (prev.cost !== unit.cost ||
-            prev.min !== unit.min ||
-            prev.wholesale !== unit.wholesale ||
-            prev.price !== unit.price)
-        );
-      });
-      if (changed) {
-        const preferred = preferredUnit(sellUnits);
-        onChange({
-          ...product,
-          sellUnits,
-          ...(preferred
-            ? {
-                cost: preferred.cost,
-                min: preferred.min,
-                wholesale: preferred.wholesale,
-                retail: preferred.price,
-              }
-            : {}),
-        });
-      }
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset form state when product.id changes
   }, [product.id]);
 
@@ -687,10 +654,8 @@ export function ProductForm({
                 ...unit,
                 symbol: nextUnit.symbol,
                 name: nextUnit.name,
-                kind: extraKind(nextUnit.symbol),
-                factorDirection: isSubdivisionSymbol(nextUnit.symbol)
-                  ? ("divide" as const)
-                  : ("multiply" as const),
+                kind: unit.kind,
+                factorDirection: unit.factorDirection,
               }
             : unit,
         );
@@ -722,18 +687,57 @@ export function ProductForm({
   }
 
   function setDefaultSaleUnit(unitId: string) {
-    const target = sellUnits.find((unit) => unit.id === unitId);
-    if (!target) return;
-    const inventory = canonicalUnit(sellUnits);
-    // Make default also promotes inventory (Contains = 1) so the previous stock
-    // unit becomes the bigger "1 Roll contains" row and stays editable.
-    const next =
-      inventory?.id === target.id
-        ? setPreferredUnit(sellUnits, unitId)
-        : applyBaseUnitChange(sellUnits, unitId);
-    const nextPreferred = preferredUnit(next) ?? target;
+    if (!sellUnits.some((unit) => unit.id === unitId)) return;
+    setUnits(setPreferredUnit(sellUnits, unitId));
+  }
+
+  function applyPromotedUnits(next: ProductSellUnit[]) {
+    const nextPreferred = preferredUnit(next) ?? canonicalUnit(next) ?? next[0];
+    if (!nextPreferred) return;
     const nextInventory = canonicalUnit(next) ?? nextPreferred;
+    const previousInventory = canonicalUnit(sellUnits);
     const current = productRef.current;
+    const previousInNext = next.find((unit) => unit.id === previousInventory?.id);
+    const candidateFactor =
+      previousInventory?.id !== nextInventory.id && previousInNext
+        ? 1 / inventoryPerSellUnit(previousInNext)
+        : 1;
+    const factor = Number.isFinite(candidateFactor) && candidateFactor > 0 ? candidateFactor : 1;
+    const rebaseQty = (value: number) => Math.round((value / factor) * 1e6) / 1e6;
+    const rebaseMoney = (value: number) => Math.round(value * factor * 100) / 100;
+    if (factor > 0 && factor !== 1) {
+      setLotDraft((rows) =>
+        rows.map((lot) => ({
+          ...lot,
+          originalQuantity: rebaseQty(lot.originalQuantity),
+          remainingQuantity: rebaseQty(lot.remainingQuantity),
+          damagedQuantity: rebaseQty(lot.damagedQuantity),
+          soldQuantity: lot.soldQuantity === undefined ? undefined : rebaseQty(lot.soldQuantity),
+          shrunkQuantity:
+            lot.shrunkQuantity === undefined ? undefined : rebaseQty(lot.shrunkQuantity),
+          purchasePrice: rebaseMoney(lot.purchasePrice),
+          minimumPrice: rebaseMoney(lot.minimumPrice),
+          wholesalePrice: rebaseMoney(lot.wholesalePrice),
+          retailPrice: rebaseMoney(lot.retailPrice),
+          branchAllocations: lot.branchAllocations?.map((row) => ({
+            ...row,
+            quantity: rebaseQty(row.quantity),
+          })),
+        })),
+      );
+      setLotOpened((rows) =>
+        Object.fromEntries(
+          Object.entries(rows).map(([id, row]) => [
+            id,
+            {
+              remaining: rebaseQty(row.remaining),
+              damaged: rebaseQty(row.damaged),
+              purchasePrice: rebaseMoney(row.purchasePrice),
+            },
+          ]),
+        ),
+      );
+    }
 
     onChange({
       ...current,
@@ -741,10 +745,17 @@ export function ProductForm({
       sellUnits: next,
       unit: nextInventory.symbol || current.unit,
       isLinear: isLinearStockUnit(nextInventory.symbol),
-      cost: nextPreferred.cost,
-      min: nextPreferred.min,
-      wholesale: nextPreferred.wholesale,
-      retail: nextPreferred.price,
+      stock: rebaseQty(current.stock),
+      damaged: rebaseQty(current.damaged),
+      minimumStock: rebaseQty(current.minimumStock ?? 0),
+      branchStock: current.branchStock?.map((row) => ({
+        ...row,
+        quantity: rebaseQty(row.quantity),
+      })),
+      cost: nextInventory.cost,
+      min: nextInventory.min,
+      wholesale: nextInventory.wholesale,
+      retail: nextInventory.price,
     });
   }
 
@@ -756,44 +767,17 @@ export function ProductForm({
     const currentInventory = canonicalUnit(sellUnits);
     let next: ProductSellUnit[];
     if (existing) {
-      next = applyBaseUnitChange(sellUnits, existing.id);
-    } else if (
-      currentInventory &&
-      sellUnits.length === 1 &&
-      ((isBiggerSymbol(currentInventory.symbol) && isSubdivisionSymbol(v)) ||
-        (isSubdivisionSymbol(currentInventory.symbol) && isBiggerSymbol(v)))
-    ) {
-      // Don't rename Roll → Gaz (loses the bigger unit). Demote current + add new inventory.
-      const createdId = crypto.randomUUID();
-      const demoted: ProductSellUnit = {
-        ...currentInventory,
-        contains: 0,
-        factorDirection: isSubdivisionSymbol(currentInventory.symbol)
-          ? ("divide" as const)
-          : ("multiply" as const),
-        isBase: false,
-        isDefault: false,
-        kind: isSubdivisionSymbol(currentInventory.symbol)
-          ? ("smaller" as const)
-          : ("bigger" as const),
-      };
-      const created: ProductSellUnit = {
-        id: createdId,
-        name: displayName,
-        symbol: v,
-        kind: "base",
-        contains: 1,
-        factorDirection: "multiply",
-        cost: demoted.cost,
-        min: demoted.min,
-        wholesale: demoted.wholesale,
-        price: demoted.price,
-        barcode: "",
-        priceManual: {},
-        isBase: true,
-        isDefault: true,
-      };
-      next = deriveAll([created, demoted]);
+      if (existing.id === currentInventory?.id) return;
+      if (!(existing.contains > 0)) {
+        toaster.warn("Enter this unit's conversion before using it for stock.");
+        return;
+      }
+      if (inventoryPerSellUnit(existing) >= 1) {
+        toaster.warn("Stock must use the smallest unit. Choose a smaller unit.");
+        return;
+      }
+      applyPromotedUnits(setInventoryBaseUnit(sellUnits, existing.id));
+      return;
     } else {
       next = sellUnits.map((unit) =>
         unit.id === currentInventory?.id
@@ -818,62 +802,36 @@ export function ProductForm({
       sellUnits: next,
       unit: inventory.symbol || current.unit,
       isLinear: isLinearStockUnit(inventory.symbol || current.unit),
-      cost: nextPreferred.cost,
-      min: nextPreferred.min,
-      wholesale: nextPreferred.wholesale,
-      retail: nextPreferred.price,
+      cost: inventory.cost,
+      min: inventory.min,
+      wholesale: inventory.wholesale,
+      retail: inventory.price,
     });
   }
 
   function setBaseField(key: PriceKey, value: number) {
     const preferred = preferredUnit(sellUnits);
     if (!preferred) return;
-    const updated = sellUnits.map((u) => (u.id === preferred.id ? { ...u, [key]: value } : u));
-    const derived = deriveAll(updated);
-    const nextPreferred = preferredUnit(derived) ?? preferred;
+    const priced = editUnitRate(sellUnits, preferred.id, key, value);
+    const inventory = canonicalUnit(priced) ?? preferred;
     onChange({
       ...product,
-      sellUnits: derived,
-      cost: nextPreferred.cost,
-      min: nextPreferred.min,
-      wholesale: nextPreferred.wholesale,
-      retail: nextPreferred.price,
+      sellUnits: priced,
+      cost: inventory.cost,
+      min: inventory.min,
+      wholesale: inventory.wholesale,
+      retail: inventory.price,
     });
-  }
-
-  function setExtraField(id: string, patchRow: Partial<ProductSellUnit>, manual?: PriceKey) {
-    if (patchRow.kind || patchRow.symbol || patchRow.contains !== undefined)
-      changedUnitId.current = id;
-    const updated = sellUnits.map((u) =>
-      u.id === id
-        ? {
-            ...u,
-            ...patchRow,
-            ...(patchRow.contains !== undefined
-              ? {
-                  factorDirection: factorDirectionForContains(
-                    u.factorDirection,
-                    patchRow.contains,
-                    patchRow.symbol ?? u.symbol,
-                  ),
-                }
-              : {}),
-            priceManual: manual ? { ...u.priceManual, [manual]: true } : u.priceManual,
-          }
-        : u,
-    );
-    const needsDerive =
-      patchRow.contains !== undefined ||
-      patchRow.kind !== undefined ||
-      patchRow.symbol !== undefined;
-    setUnits(needsDerive && !manual ? deriveAll(updated) : updated);
   }
 
   function editContains(row: ProductSellUnit, raw: string) {
     setContainsDrafts((current) => ({ ...current, [row.id]: raw }));
     const value = Number(raw);
-    if (raw.trim() && Number.isFinite(value) && value > 0) {
-      setExtraField(row.id, { contains: value });
+    if (raw.trim() && Number.isFinite(value) && value > 1) {
+      changedUnitId.current = row.id;
+      setUnits(
+        setStockRelativeContains(sellUnits, row.id, value, row.factorDirection ?? "multiply"),
+      );
     }
   }
 
@@ -881,11 +839,12 @@ export function ProductForm({
     const raw = containsDrafts[row.id];
     if (raw === undefined) return;
     const value = Number(raw);
-    if (!raw.trim() || !Number.isFinite(value) || value <= 0) {
+    if (!raw.trim() || !Number.isFinite(value) || value <= 1) {
       setError("unitFactorInvalid");
       return;
     }
-    setExtraField(row.id, { contains: value });
+    changedUnitId.current = row.id;
+    setUnits(setStockRelativeContains(sellUnits, row.id, value, row.factorDirection ?? "multiply"));
     setContainsDrafts((current) => {
       const next = { ...current };
       delete next[row.id];
@@ -896,23 +855,11 @@ export function ProductForm({
 
   function setUnitPrice(row: ProductSellUnit, key: PriceKey, value: number) {
     const isPreferred = preferredUnit(sellUnits)?.id === row.id;
-    if (priceLot && key === "cost") {
-      setLotDraft((prev) =>
-        prev.map((l) =>
-          l.id === priceLot.id
-            ? { ...l, purchasePrice: pricePerStock(sellUnits, stockSymbol, value, row) }
-            : l,
-        ),
-      );
-      return;
-    }
     if (isPreferred) setBaseField(key, value);
-    else setExtraField(row.id, { [key]: value }, key);
+    else setUnits(editUnitRate(sellUnits, row.id, key, value));
   }
 
   function unitPrice(row: ProductSellUnit, key: PriceKey) {
-    if (priceLot && key === "cost")
-      return priceFromStock(sellUnits, stockSymbol, priceLot.purchasePrice, row);
     return row[key];
   }
 
@@ -1007,7 +954,7 @@ export function ProductForm({
       const raw = containsDrafts[unit.id];
       if (raw === undefined) return false;
       const value = Number(raw);
-      return !raw.trim() || !Number.isFinite(value) || value <= 0;
+      return !raw.trim() || !Number.isFinite(value) || value <= 1;
     });
     if (invalidDraft) {
       setError("unitFactorInvalid");
@@ -1080,7 +1027,8 @@ export function ProductForm({
           if (!opened) return false;
           return (
             Math.abs(lot.remainingQuantity - opened.remaining) > 1e-6 ||
-            Math.abs(lot.damagedQuantity - opened.damaged) > 1e-6
+            Math.abs(lot.damagedQuantity - opened.damaged) > 1e-6 ||
+            Math.abs(lot.purchasePrice - opened.purchasePrice) > 0.001
           );
         });
         for (const lot of adjusted) {
@@ -1658,35 +1606,10 @@ export function ProductForm({
           ref={unitsPaneRef}
           className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]"
         >
-          {!isNew && openPriceLots.length > 0 ? (
-            <Field label="Lot">
-              <SearchableSelect
-                value={priceLotId}
-                onChange={setPriceLotId}
-                placeholder="Choose lot"
-                searchPlaceholder="Search lots"
-                clearable={false}
-                options={fifoLots(openPriceLots).map((l) => ({
-                  value: l.id,
-                  label: `${l.lotNumber} · ${formatMixedQty(product, l.remainingQuantity)} left · cost ${l.purchasePrice} · ${l.receivedAt.slice(0, 10)}`,
-                }))}
-              />
-            </Field>
-          ) : null}
-          {priceLot ? (
-            <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
-              <strong>{priceLot.lotNumber}</strong>
-              <span>
-                Supplier {supplierName(priceLot.supplierId) || "—"}. Cost is this lot’s buy price.
-                Min / wholesale / retail are sell prices.
-              </span>
-            </p>
-          ) : (
-            <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
-              <strong>Units & prices</strong>
-              <span>{PRODUCT_COPY.unitsHint}</span>
-            </p>
-          )}
+          <p className="product-note [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
+            Stock: <strong>{inventory?.name || unitLabel(stockSymbol)}</strong>
+            {unitSummary ? <span> · {unitSummary}</span> : null}
+          </p>
           <div className="product-small-list [display:grid] [gap:10px]">
             {sellUnits.map((row) => {
               const isPreferred = preferredUnit(sellUnits)?.id === row.id;
@@ -1697,8 +1620,10 @@ export function ProductForm({
                 containsDraft !== undefined &&
                 (!containsDraft.trim() ||
                   !Number.isFinite(draftContainsValue) ||
-                  draftContainsValue <= 0);
-              const relationHint = invalidContainsDraft ? "" : containsRelationHint(sellUnits, row);
+                  draftContainsValue <= 1);
+              const direction = row.factorDirection ?? "multiply";
+              const rowName = row.name || unitLabel(row.symbol || "") || "unit";
+              const stockName = inventory?.name || unitLabel(stockSymbol);
               return (
                 <div
                   key={row.id}
@@ -1711,24 +1636,10 @@ export function ProductForm({
                       : "product-small-card relative [display:grid] [gap:8px] [padding:10px] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)]"
                   }
                 >
-                  <div
-                    className="product-small-top grid items-start gap-3"
-                    style={{
-                      gridTemplateColumns: isCanonical
-                        ? "minmax(0, 1.2fr) minmax(120px, 0.8fr) 150px"
-                        : "minmax(0, 1.2fr) minmax(140px, 0.8fr) 150px 36px",
-                    }}
-                  >
+                  <div className="product-small-top">
                     <Field
-                      label={
-                        isCanonical
-                          ? isPreferred
-                            ? "Inventory · default sale"
-                            : "Inventory unit"
-                          : isPreferred
-                            ? "Default sale unit"
-                            : "Sell as"
-                      }
+                      label={isCanonical ? "Stock unit" : "Unit"}
+                      className="product-unit-name-field"
                     >
                       <SearchableSelect
                         name={isPreferred ? "product-unit" : "sell-as"}
@@ -1744,10 +1655,8 @@ export function ProductForm({
                                   ...unit,
                                   symbol: v,
                                   name: unitLabel(v),
-                                  kind: extraKind(v),
-                                  factorDirection: isSubdivisionSymbol(v)
-                                    ? ("divide" as const)
-                                    : ("multiply" as const),
+                                  kind: unit.kind,
+                                  factorDirection: unit.factorDirection,
                                 }
                               : unit,
                           );
@@ -1766,41 +1675,74 @@ export function ProductForm({
                         createLabel="Add unit"
                       />
                     </Field>
-                    {isCanonical ? (
-                      <Field label="Contains">
-                        <span className="product-unit-inventory-pill">1</span>
-                      </Field>
-                    ) : (
-                      <Field
-                        label={containsLabel(sellUnits, row)}
-                        hint={relationHint || undefined}
-                        error={
-                          invalidContainsDraft && error === "unitFactorInvalid"
-                            ? PRODUCT_COPY.unitFactorInvalid
-                            : undefined
-                        }
-                      >
-                        <TextInput
-                          inputMode="decimal"
-                          maxLength={FIELD_LIMITS.qty}
-                          placeholder={isSubdivisionSymbol(row.symbol) ? "90" : "12"}
-                          value={containsDraft ?? (row.contains > 0 ? String(row.contains) : "")}
-                          endIcon={
-                            row.name || row.symbol ? (
-                              <span className="product-unit-factor-suffix">
-                                {row.name || unitLabel(row.symbol || "")}
-                              </span>
-                            ) : undefined
+                    {!isCanonical ? (
+                      <div className="product-unit-conversion">
+                        <Field label="Size">
+                          <select
+                            className="field-select"
+                            aria-label={`${rowName} size relative to ${stockName}`}
+                            value={direction}
+                            onChange={(event) => {
+                              const nextDirection = event.target.value as "multiply" | "divide";
+                              const next = sellUnits.map((unit) =>
+                                unit.id === row.id
+                                  ? {
+                                      ...unit,
+                                      contains: 0,
+                                      factorDirection: nextDirection,
+                                      kind:
+                                        nextDirection === "divide"
+                                          ? ("smaller" as const)
+                                          : ("bigger" as const),
+                                    }
+                                  : unit,
+                              );
+                              setUnits(next);
+                              setContainsDrafts((current) => {
+                                const copy = { ...current };
+                                delete copy[row.id];
+                                return copy;
+                              });
+                            }}
+                          >
+                            <option value="multiply">Larger</option>
+                            <option value="divide">Smaller</option>
+                          </select>
+                        </Field>
+                        <Field
+                          label={
+                            direction === "divide"
+                              ? `1 ${stockName} contains`
+                              : `1 ${rowName} contains`
                           }
-                          onChange={(e) => editContains(row, e.target.value)}
-                          onBlur={() => finishContains(row)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") event.currentTarget.blur();
-                          }}
-                        />
-                      </Field>
-                    )}
-                    <Field label={"\u00A0"}>
+                          error={
+                            invalidContainsDraft && error === "unitFactorInvalid"
+                              ? PRODUCT_COPY.unitFactorInvalid
+                              : undefined
+                          }
+                        >
+                          <TextInput
+                            inputMode="decimal"
+                            maxLength={FIELD_LIMITS.qty}
+                            placeholder="Qty"
+                            value={containsDraft ?? (row.contains > 0 ? String(row.contains) : "")}
+                            endIcon={
+                              row.name || row.symbol ? (
+                                <span className="product-unit-factor-suffix">
+                                  {direction === "divide" ? rowName : stockName}
+                                </span>
+                              ) : undefined
+                            }
+                            onChange={(e) => editContains(row, e.target.value)}
+                            onBlur={() => finishContains(row)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") event.currentTarget.blur();
+                            }}
+                          />
+                        </Field>
+                      </div>
+                    ) : null}
+                    <div className="product-unit-actions">
                       <Button
                         type="button"
                         size="sm"
@@ -1814,38 +1756,51 @@ export function ProductForm({
                         icon={<Check size={13} strokeWidth={2.5} />}
                         onClick={() => setDefaultSaleUnit(row.id)}
                       >
-                        {isPreferred ? PRODUCT_COPY.stockUnit : PRODUCT_COPY.makeStockUnit}
+                        {isPreferred ? "POS default" : "Set POS default"}
                       </Button>
-                    </Field>
-                    {isCanonical ? (
-                      <span className="product-small-spacer" />
-                    ) : (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="product-small-remove [margin-top:22px]"
-                        aria-label="Remove unit"
-                        onClick={() => {
-                          const remaining = sellUnits.filter((u) => u.id !== row.id);
-                          if (!remaining.length) {
-                            setUnits(remaining);
-                            return;
+                      {!isCanonical && direction === "divide" && row.contains > 0 ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setInventoryUnit(
+                              row.symbol || "",
+                              row.name || unitLabel(row.symbol || ""),
+                            )
                           }
-                          const fallbackId =
-                            preferredUnit(remaining)?.id ??
-                            canonicalUnit(remaining)?.id ??
-                            remaining[0]?.id ??
-                            "";
-                          setUnits(
-                            isPreferred && fallbackId
-                              ? setPreferredUnit(remaining, fallbackId)
-                              : remaining,
-                          );
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </Button>
-                    )}
+                        >
+                          Use for stock
+                        </Button>
+                      ) : null}
+                      {!isCanonical ? (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="product-small-remove"
+                          aria-label="Remove unit"
+                          onClick={() => {
+                            const remaining = sellUnits.filter((u) => u.id !== row.id);
+                            if (!remaining.length) {
+                              setUnits(remaining);
+                              return;
+                            }
+                            const fallbackId =
+                              preferredUnit(remaining)?.id ??
+                              canonicalUnit(remaining)?.id ??
+                              remaining[0]?.id ??
+                              "";
+                            setUnits(
+                              isPreferred && fallbackId
+                                ? setPreferredUnit(remaining, fallbackId)
+                                : remaining,
+                            );
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="product-small-prices [display:grid] [grid-template-columns:1fr_1fr] [gap:8px_10px]">
                     {(
@@ -1978,6 +1933,7 @@ export function ProductForm({
                   const opened = lotOpened[lot.id] ?? {
                     remaining: lot.remainingQuantity,
                     damaged: lot.damagedQuantity,
+                    purchasePrice: lot.purchasePrice,
                   };
                   const changed =
                     Math.abs(lot.remainingQuantity - opened.remaining) > 1e-6 ||
@@ -2008,6 +1964,20 @@ export function ProductForm({
                           disabled={creatingSupplier}
                           onCreate={(label) => void addSupplier(label, lot.id)}
                           createLabel={SUPPLIER_COPY.addInSelect}
+                        />
+                      </Field>
+                      <Field label={`Buy cost per ${unitLabel(stockSymbol)}`}>
+                        <MoneyInput
+                          value={numStr(lot.purchasePrice)}
+                          onChange={(event) =>
+                            setLotDraft((prev) =>
+                              prev.map((row) =>
+                                row.id === lot.id
+                                  ? { ...row, purchasePrice: numVal(event.target.value) }
+                                  : row,
+                              ),
+                            )
+                          }
                         />
                       </Field>
                       <UnitQtyFields

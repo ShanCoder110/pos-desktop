@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ProductSellUnit } from "@/shared/types";
+import { blankProduct, openingLot } from "@/pages/products/productLots";
+import { fifoCostForProduct } from "@/pages/products/productFifo";
 import { displayToBaseQty } from "@/utils/salePricing";
 import {
   applyBaseUnitChange,
+  adjacentContains,
   assignBaseSymbol,
   baseChangeCostFactor,
   canonicalUnit,
@@ -10,16 +13,28 @@ import {
   containsRelationHint,
   deriveAll,
   derivePricesBetween,
+  editUnitRate,
   factorDirectionForContains,
   formatLinkedQty,
   formatMixedQty,
+  inventoryPerSellUnit,
   normalizeSellUnits,
+  lotCostInStockUnit,
+  priceBreakdown,
   priceFromStock,
   pricePerStock,
+  preferredUnit,
+  promoteUnitToInventory,
+  qtyUnits,
   sellUnitOptionValue,
   sellUnitOptions,
+  setAdjacentContains,
   setPreferredUnit,
+  setInventoryBaseUnit,
+  setStockRelativeContains,
   suggestedExtraUnit,
+  synchronizeUnitCosts,
+  unitHierarchySummary,
   validateOpeningStock,
   validateSellUnits,
 } from "@/pages/products/productQty";
@@ -68,6 +83,25 @@ const gaz = unit({
 });
 
 describe("gaz in 1 roll prices", () => {
+  it("keeps saved custom unit prices when a different unit is edited", () => {
+    const units = [
+      { ...roll, price: 240, wholesale: 220 },
+      { ...gaz, contains: 24, price: 15, wholesale: 10, factorDirection: "divide" as const },
+    ];
+    const changed = editUnitRate(units, "roll", "price", 260);
+    expect(changed.find((row) => row.id === "roll")?.price).toBe(260);
+    expect(changed.find((row) => row.id === "gaz")?.price).toBe(15);
+    expect(normalizeSellUnits(changed).find((row) => row.id === "gaz")?.price).toBe(15);
+  });
+
+  it("updates prices inherited by another unit", () => {
+    const units = [
+      roll,
+      { ...gaz, contains: 90, factorDirection: "divide" as const, price: 61.11 },
+    ];
+    const changed = editUnitRate(units, "roll", "price", 6300);
+    expect(changed.find((row) => row.id === "gaz")?.price).toBe(70);
+  });
   it("prices one gaz as the roll price divided by 90", () => {
     const prices = derivePricesBetween(roll, gaz);
     expect(prices.cost).toBe(55.56);
@@ -243,7 +277,7 @@ describe("gaz in 1 roll prices", () => {
       symbol: "gaz",
       name: "Gaz",
       contains: 0.011111,
-      factorDirection: "multiply",
+      factorDirection: undefined,
     });
     expect(derivePricesBetween(roll, gazFraction).price).toBe(61.11);
   });
@@ -271,6 +305,177 @@ describe("gaz in 1 roll prices", () => {
     expect(containsRelationHint(next, stock)).toBe("1 Roll = 90 Gaz");
   });
 
+  it("promotes Pack above Piece and keeps twelve Pieces per Pack", () => {
+    const piece = unit({
+      id: "piece",
+      symbol: "pc",
+      name: "Piece",
+      isBase: true,
+      isDefault: true,
+      cost: 67,
+      min: 70,
+      wholesale: 75,
+      price: 100,
+    });
+    const pack = unit({
+      id: "pack",
+      symbol: "pk",
+      name: "Pack",
+      contains: 12,
+      factorDirection: "divide", // legacy wrong direction after changing a unit name
+      isBase: false,
+      isDefault: false,
+    });
+    expect(factorDirectionForContains("divide", 12, "pk")).toBe("multiply");
+    const promoted = promoteUnitToInventory([piece, pack], "pack");
+    expect(qtyUnits(promoted).map((row) => row.id)).toEqual(["pack", "piece"]);
+    expect(canonicalUnit(promoted)).toMatchObject({
+      id: "pack",
+      contains: 1,
+      isBase: true,
+      isDefault: true,
+      cost: 804,
+      price: 1200,
+    });
+    expect(promoted.find((row) => row.id === "piece")).toMatchObject({
+      contains: 12,
+      factorDirection: "divide",
+      cost: 67,
+      price: 100,
+    });
+    expect(
+      containsRelationHint(
+        promoted,
+        promoted.find((row) => row.id === "piece")!,
+      ),
+    ).toBe("1 Pack = 12 Piece");
+  });
+
+  it("infers a missing legacy Piece direction beneath Pack", () => {
+    const pack = unit({
+      id: "pack",
+      symbol: "pk",
+      name: "Pack",
+      contains: 1,
+      isBase: true,
+      isDefault: true,
+      cost: 120,
+      price: 240,
+    });
+    const piece = unit({
+      id: "piece",
+      symbol: "pc",
+      name: "Piece",
+      contains: 12,
+      factorDirection: undefined,
+    });
+    const normalized = normalizeSellUnits([piece, pack]);
+    expect(qtyUnits(normalized).map((row) => row.id)).toEqual(["pack", "piece"]);
+    expect(normalized.find((row) => row.id === "piece")?.factorDirection).toBe("divide");
+    expect(normalized.find((row) => row.id === "piece")?.cost).toBe(10);
+    expect(normalized.find((row) => row.id === "piece")?.price).toBe(20);
+    expect(adjacentContains(normalized, normalized[0])).toBe(12);
+  });
+
+  it("shows Box, Pack, and Piece as adjacent steps but stores stock-relative factors", () => {
+    const piece = unit({
+      id: "piece",
+      symbol: "pc",
+      name: "Piece",
+      contains: 1,
+      isBase: true,
+      isDefault: true,
+      cost: 5,
+      min: 6,
+      wholesale: 7,
+      price: 8,
+    });
+    const pack = unit({
+      id: "pack",
+      symbol: "pk",
+      name: "Pack",
+      contains: 0,
+      isBase: false,
+      isDefault: false,
+    });
+    const box = unit({
+      id: "box",
+      symbol: "box",
+      name: "Box",
+      contains: 0,
+      isBase: false,
+      isDefault: false,
+    });
+    const withPack = setStockRelativeContains([piece, pack, box], "pack", 10, "multiply");
+    const withBox = setStockRelativeContains(withPack, "box", 30, "multiply");
+    expect(withBox.find((row) => row.id === "pack")?.contains).toBe(10);
+    expect(withBox.find((row) => row.id === "box")?.contains).toBe(30);
+    expect(withBox.find((row) => row.id === "box")?.cost).toBe(150);
+
+    const promoted = promoteUnitToInventory(withBox, "box");
+    const ordered = qtyUnits(promoted);
+    expect(ordered.map((row) => row.id)).toEqual(["box", "pack", "piece"]);
+    expect(ordered.map((row) => row.contains)).toEqual([1, 3, 30]);
+    expect(ordered.map((row) => row.factorDirection)).toEqual(["multiply", "divide", "divide"]);
+    expect(adjacentContains(promoted, ordered[1])).toBe(3);
+    expect(adjacentContains(promoted, ordered[2])).toBe(10);
+    expect(containsLabel(promoted, ordered[2])).toBe("1 Pack contains");
+    expect(containsRelationHint(promoted, ordered[2])).toBe("1 Pack = 10 Piece");
+    expect(unitHierarchySummary(promoted)).toBe("1 Box = 3 Pack = 30 Piece");
+
+    const changed = setAdjacentContains(promoted, "pack", 6);
+    expect(changed.find((row) => row.id === "pack")?.contains).toBe(6);
+    expect(changed.find((row) => row.id === "piece")?.contains).toBe(60);
+    expect(
+      adjacentContains(
+        changed,
+        changed.find((row) => row.id === "piece")!,
+      ),
+    ).toBe(10);
+  });
+
+  it("uses conversions rather than names and keeps the POS default separate from stock", () => {
+    const each = unit({
+      id: "each",
+      symbol: "custom-a",
+      name: "Each",
+      contains: 1,
+      isBase: true,
+      isDefault: true,
+      cost: 5,
+    });
+    const inner = unit({
+      id: "inner",
+      symbol: "custom-b",
+      name: "Inner",
+      contains: 0,
+      isBase: false,
+      isDefault: false,
+    });
+    const caseUnit = unit({
+      id: "case",
+      symbol: "custom-c",
+      name: "Case",
+      contains: 0,
+      isBase: false,
+      isDefault: false,
+    });
+    const withInner = setStockRelativeContains([each, inner, caseUnit], "inner", 10, "multiply");
+    const withCase = setStockRelativeContains(withInner, "case", 30, "multiply");
+    const preferredCase = setPreferredUnit(withCase, "case");
+    expect(qtyUnits(preferredCase).map((row) => row.id)).toEqual(["case", "inner", "each"]);
+    expect(canonicalUnit(preferredCase)?.id).toBe("each");
+    expect(preferredUnit(preferredCase)?.id).toBe("case");
+    expect(preferredCase.find((row) => row.id === "case")?.cost).toBe(150);
+    expect(unitHierarchySummary(preferredCase)).toBe("1 Case = 3 Inner = 30 Each");
+
+    const withHalf = setStockRelativeContains(preferredCase, "inner", 2, "divide");
+    const rebased = setInventoryBaseUnit(withHalf, "inner");
+    expect(canonicalUnit(rebased)?.id).toBe("inner");
+    expect(preferredUnit(rebased)?.id).toBe("case");
+    expect(inventoryPerSellUnit(rebased.find((row) => row.id === "case")!)).toBe(60);
+  });
+
   it("leaves Roll contains blank when promoting a Gaz with no factor yet", () => {
     const gazCard = unit({
       id: "gaz",
@@ -286,7 +491,6 @@ describe("gaz in 1 roll prices", () => {
     expect(canonicalUnit(next)?.id).toBe("gaz");
     expect(stock.contains).toBe(0);
     expect(stock.factorDirection).toBe("multiply");
-    expect(containsLabel(next, stock)).toBe("1 Roll contains");
   });
 
   it("treats typed 7 on Gaz as how many Gaz in 1 Roll", () => {
@@ -414,5 +618,86 @@ describe("gaz in 1 roll prices", () => {
     // 99980.2 Pack would be wrong; mixed must floor packs.
     expect(formatLinkedQty(product, 1_199_762)).toBe("99980 Pack + 2 Piece");
     expect(formatLinkedQty(product, 1_199_762)).not.toMatch(/99980\.2/);
+  });
+});
+
+describe("inventory unit cost", () => {
+  it("preserves the entered pack cost when deriving a rounded piece cost", () => {
+    const pack = unit({
+      id: "pack",
+      symbol: "pk",
+      contains: 1,
+      isBase: true,
+      cost: 194,
+    });
+    const piece = unit({
+      id: "piece",
+      symbol: "pc",
+      contains: 24,
+      factorDirection: "divide",
+      cost: 0,
+    });
+    const priced = synchronizeUnitCosts([pack, piece], "pack", 194);
+    expect(priced.map((row) => row.cost)).toEqual([194, 8.08]);
+    const corrected = deriveAll([pack, { ...piece, cost: 194, priceManual: { cost: true } }]);
+    expect(corrected.map((row) => row.cost)).toEqual([194, 8.08]);
+  });
+
+  it("uses the recorded pack cost even when a piece reference cost is stale", () => {
+    const product = {
+      ...blankProduct(),
+      id: "cost-case",
+      unit: "pk",
+      cost: 194,
+      min: 205,
+      wholesale: 220,
+      retail: 240,
+      sellUnits: [
+        unit({
+          id: "pack",
+          symbol: "pk",
+          name: "Pack",
+          contains: 1,
+          isBase: true,
+          isDefault: true,
+          cost: 194,
+          min: 205,
+          wholesale: 220,
+          price: 240,
+        }),
+        unit({
+          id: "piece",
+          symbol: "pc",
+          name: "Piece",
+          contains: 24,
+          factorDirection: "divide",
+          cost: 194,
+          priceManual: { cost: true },
+          min: 9,
+          wholesale: 10,
+          price: 15,
+        }),
+      ],
+    };
+    const lot = { ...openingLot(product, []), purchasePrice: 194, remainingQuantity: 1 };
+    const cost = fifoCostForProduct(product, [lot]);
+    expect(cost).toBe(194);
+    expect(priceBreakdown(product, cost).map((row) => row.value)).toEqual([194, 8.08]);
+    expect((product.retail - cost) / product.retail).toBeCloseTo(46 / 240);
+  });
+
+  it("does not guess the unit of a low purchase cost from the selling price", () => {
+    const product = {
+      ...blankProduct(),
+      unit: "pk",
+      min: 205,
+      retail: 240,
+      sellUnits: [
+        unit({ id: "pack", symbol: "pk", isBase: true, isDefault: true, contains: 1 }),
+        unit({ id: "piece", symbol: "pc", contains: 24, factorDirection: "divide" }),
+      ],
+    };
+    expect(lotCostInStockUnit(product, 50)).toBe(50);
+    expect(priceBreakdown(product, 50).map((row) => row.value)).toEqual([50, 2.08]);
   });
 });

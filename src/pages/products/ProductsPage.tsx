@@ -62,8 +62,10 @@ import {
   formatMixedQty,
   formatStockQty,
   isLinearStockUnit,
+  preferredUnit,
   priceBreakdown,
-  productBasePricing,
+  priceFromStock,
+  productSellUnits,
   qtyUnits,
   unitLabel,
 } from "@/pages/products/productQty";
@@ -190,15 +192,27 @@ function UnitPrice({ row, field }: { row: Product; field: PriceField }) {
   );
 }
 
-function marginPct(row: Product, lots: ProductLotRow[]) {
+function defaultUnitPricing(row: Product, lots: ProductLotRow[]) {
+  const units = productSellUnits(row);
+  const preferred = preferredUnit(units);
   const cost = fifoCostForProduct(row, lots);
-  const { retail } = productBasePricing(row);
+  return preferred
+    ? {
+        cost: priceFromStock(units, row.unit, cost, preferred),
+        min: preferred.min,
+        wholesale: preferred.wholesale,
+        retail: preferred.price,
+      }
+    : { cost, min: row.min, wholesale: row.wholesale, retail: row.retail };
+}
+
+function marginPct(row: Product, lots: ProductLotRow[]) {
+  const { cost, retail } = defaultUnitPricing(row, lots);
   return profitMarginPercent(retail, cost);
 }
 
 function unitProfit(row: Product, lots: ProductLotRow[]) {
-  const cost = fifoCostForProduct(row, lots);
-  const { retail } = productBasePricing(row);
+  const { cost, retail } = defaultUnitPricing(row, lots);
   return retail - cost;
 }
 
@@ -1198,11 +1212,11 @@ export function ProductsPage() {
                       <h4 className="mb-3 text-[11px] font-bold text-ink">Pricing</h4>
                       <div className="grid gap-2 text-[10px]">
                         {(() => {
-                          const pricing = productBasePricing(chartProduct);
+                          const pricing = defaultUnitPricing(chartProduct, lots);
                           return [
-                            ["Cost", fifoCostForProduct(chartProduct, lots)],
-                            ["Minimum", chartProduct.min],
-                            ["Wholesale", chartProduct.wholesale],
+                            ["Cost", pricing.cost],
+                            ["Minimum", pricing.min],
+                            ["Wholesale", pricing.wholesale],
                             ["Retail", pricing.retail],
                             [PRODUCT_COPY.unitProfit, unitProfit(chartProduct, lots)],
                           ];

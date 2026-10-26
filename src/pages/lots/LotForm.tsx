@@ -12,6 +12,7 @@ import {
   toaster,
 } from "@/components/common";
 import { LotBranchFields, type LotBranchRow } from "@/pages/lots/LotBranchFields";
+import { editLotUnitPrice, seedLotUnits, type LotUnitPriceKey } from "@/pages/lots/lotUnitPricing";
 import { LotUnitLines } from "@/pages/products/LotFields";
 import {
   baseUnit,
@@ -20,10 +21,6 @@ import {
   emptyPrices,
   extraKind,
   formatStockQty,
-  lotCostInStockUnit,
-  priceFromStock,
-  pricePerStock,
-  resolveStockUnitCost,
   productSellUnits,
   roundStockQty,
   unitLabel,
@@ -97,42 +94,16 @@ function historicalPrices(previous: ProductLotRow | null, product: Product | und
   };
 }
 
-type UnitPriceKey = "cost" | "min" | "wholesale" | "price";
-
 function lotPricesFromUnits(units: ProductSellUnit[], stockSymbol: string) {
   const stock = units.find((unit) => unit.symbol === stockSymbol) ?? baseUnit(units);
   if (!stock) return {};
-  const purchasePrice = resolveStockUnitCost(units, stockSymbol, stock.cost);
+  const purchasePrice = stock.cost;
   return {
     purchasePrice,
     minimumPrice: stock.min,
     wholesalePrice: stock.wholesale,
     retailPrice: stock.price,
   };
-}
-
-function seedPricedUnits(
-  product: Product,
-  overlay?: {
-    purchasePrice: number;
-    minimumPrice: number;
-    wholesalePrice: number;
-    retailPrice: number;
-  },
-) {
-  const units = productSellUnits(product);
-  if (!overlay) return units.map((unit) => ({ ...unit }));
-  const cost = lotCostInStockUnit(product, overlay.purchasePrice || 0) || overlay.purchasePrice;
-  const min = overlay.minimumPrice || 0;
-  const wholesale = overlay.wholesalePrice || 0;
-  const retail = overlay.retailPrice || 0;
-  return units.map((unit) => ({
-    ...unit,
-    cost: cost ? priceFromStock(units, product.unit, cost, unit) : unit.cost,
-    min: min ? priceFromStock(units, product.unit, min, unit) : unit.min,
-    wholesale: wholesale ? priceFromStock(units, product.unit, wholesale, unit) : unit.wholesale,
-    price: retail ? priceFromStock(units, product.unit, retail, unit) : unit.price,
-  }));
 }
 
 const emptyDraftPrices = { cost: 0, min: 0, wholesale: 0, price: 0 };
@@ -189,6 +160,7 @@ export function LotForm({
   const [newUnitContains, setNewUnitContains] = useState("");
   const [newUnitPrices, setNewUnitPrices] = useState(emptyDraftPrices);
   const [pricedUnits, setPricedUnits] = useState<ProductSellUnit[]>([]);
+  const pricedLotId = useRef(lot.id);
   const product = products.find((item) => item.id === lot.productId);
   const catalogUnits = product ? productSellUnits(product) : [];
   const catalogSig = catalogUnits.map((unit) => unit.id).join("|");
@@ -336,9 +308,11 @@ export function LotForm({
       setPricedUnits([]);
       return;
     }
-    const catalog = productSellUnits(product);
+    const catalog = seedLotUnits(product, lotRef.current);
+    const changedLot = pricedLotId.current !== lot.id;
+    pricedLotId.current = lot.id;
     setPricedUnits((current) => {
-      if (!current.length) return catalog.map((unit) => ({ ...unit }));
+      if (changedLot || !current.length) return catalog;
       const kept = new Map(current.map((unit) => [unit.id, unit]));
       return catalog.map((unit) => {
         const prior = kept.get(unit.id);
@@ -351,11 +325,11 @@ export function LotForm({
               price: prior.price,
               priceManual: prior.priceManual,
             }
-          : { ...unit };
+          : unit;
       });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- catalogSig tracks sell-unit catalog for product.id
-  }, [product?.id, catalogSig]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- catalogSig tracks sell-unit catalog; lot.id resets another lot
+  }, [product?.id, catalogSig, lot.id]);
 
   useEffect(() => {
     if (!draftUnit) return;
@@ -379,7 +353,7 @@ export function LotForm({
     const candidate = { ...lot, productId: nextProduct.id, supplierId };
     const history = previousSupplierLot(lots, candidate);
     const overlay = historicalPrices(history, nextProduct);
-    const seeded = seedPricedUnits(nextProduct, overlay);
+    const seeded = seedLotUnits(nextProduct, overlay);
     setPricedUnits(seeded);
     patch({
       productId: nextProduct.id,
@@ -393,40 +367,13 @@ export function LotForm({
     const candidate = { ...lot, supplierId };
     const history = previousSupplierLot(lots, candidate);
     const overlay = historicalPrices(history, product);
-    const seeded = product
-      ? seedPricedUnits(product, overlay).map((unit) => {
-          const prior = pricedUnits.find((row) => row.id === unit.id);
-          if (!prior || unit.kind === "base") return unit;
-          return {
-            ...unit,
-            cost: prior.cost,
-            min: prior.min,
-            wholesale: prior.wholesale,
-            price: prior.price,
-            priceManual: prior.priceManual,
-          };
-        })
-      : pricedUnits;
+    const seeded = product ? seedLotUnits(product, overlay) : pricedUnits;
     setPricedUnits(seeded);
     patch({ supplierId, ...lotPricesFromUnits(seeded, stockSymbol) });
   }
 
-  function setUnitPrice(unitId: string, key: UnitPriceKey, value: number) {
-    const source = units.find((unit) => unit.id === unitId);
-    if (!source) return;
-    const stockPrice = pricePerStock(units, stockSymbol, value, source);
-    let next = units.map((unit) => ({
-      ...unit,
-      [key]: priceFromStock(units, stockSymbol, stockPrice, unit),
-      priceManual: unit.id === unitId ? { ...unit.priceManual, [key]: true } : unit.priceManual,
-    }));
-    if (key === "cost") {
-      const resolved = resolveStockUnitCost(next, stockSymbol, stockPrice);
-      next = next.map((unit) => ({
-        ...unit,
-        cost: priceFromStock(units, stockSymbol, resolved, unit),
-      }));
-    }
+  function setUnitPrice(unitId: string, key: LotUnitPriceKey, value: number) {
+    const next = editLotUnitPrice(units, stockSymbol, unitId, key, value);
     setPricedUnits(next);
     patch(lotPricesFromUnits(next, stockSymbol));
   }

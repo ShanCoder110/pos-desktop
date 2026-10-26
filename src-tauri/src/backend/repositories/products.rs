@@ -450,8 +450,11 @@ impl ProductRepository {
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                "UPDATE product_lots SET original_base_quantity = original_base_quantity / ?, remaining_base_quantity = remaining_base_quantity / ?, damaged_base_quantity = damaged_base_quantity / ?, purchase_price_per_base = purchase_price_per_base * ?, version = version + 1, updated_at = ? WHERE product_id = ? AND deleted_at IS NULL",
+                "UPDATE product_lots SET original_base_quantity = original_base_quantity / ?, remaining_base_quantity = remaining_base_quantity / ?, damaged_base_quantity = damaged_base_quantity / ?, purchase_price_per_base = purchase_price_per_base * ?, minimum_price = minimum_price * ?, wholesale_price = wholesale_price * ?, retail_price = retail_price * ?, version = version + 1, updated_at = ? WHERE product_id = ? AND deleted_at IS NULL",
                 [
+                    factor.into(),
+                    factor.into(),
+                    factor.into(),
                     factor.into(),
                     factor.into(),
                     factor.into(),
@@ -484,6 +487,54 @@ impl ProductRepository {
         units: Vec<product_unit::ActiveModel>,
     ) -> Result<(), AppError> {
         let now = chrono::Utc::now();
+        let existing = ProductUnit::find()
+            .filter(product_unit::Column::ProductId.eq(product_id))
+            .all(transaction)
+            .await?;
+        // A lot rate equal to the old stock-unit rate was inherited from the
+        // catalog. Follow catalog edits for those rates, but retain supplier-
+        // specific overrides. Invoice items have their own price snapshots.
+        if let (Some(old_stock), Some(new_stock)) = (
+            existing
+                .iter()
+                .find(|row| row.is_base && row.deleted_at.is_none()),
+            units
+                .iter()
+                .find(|row| active_value(&row.is_base) == Some(true)),
+        ) {
+            if Some(old_stock.unit_id) == active_value(&new_stock.unit_id) {
+                for (column, previous, next) in [
+                    (
+                        "minimum_price",
+                        old_stock.minimum_price,
+                        active_value(&new_stock.minimum_price),
+                    ),
+                    (
+                        "wholesale_price",
+                        old_stock.wholesale_price,
+                        active_value(&new_stock.wholesale_price),
+                    ),
+                    (
+                        "retail_price",
+                        old_stock.retail_price,
+                        active_value(&new_stock.retail_price),
+                    ),
+                ] {
+                    if let Some(next) = next.filter(|next| *next != previous) {
+                        let sql = format!(
+                            "UPDATE product_lots SET {column} = ?, version = version + 1, updated_at = ? WHERE product_id = ? AND deleted_at IS NULL AND {column} = ?"
+                        );
+                        transaction
+                            .execute_raw(Statement::from_sql_and_values(
+                                DbBackend::Sqlite,
+                                sql,
+                                [next.into(), now.into(), product_id.into(), previous.into()],
+                            ))
+                            .await?;
+                    }
+                }
+            }
+        }
         // Clear stock-unit flags first. The real flag is set after every row is written.
         transaction
             .execute_raw(Statement::from_sql_and_values(
@@ -491,10 +542,6 @@ impl ProductRepository {
                 "UPDATE product_units SET is_base = 0, is_default_sale_unit = 0, updated_at = ? WHERE product_id = ?",
                 [now.into(), product_id.into()],
             ))
-            .await?;
-        let existing = ProductUnit::find()
-            .filter(product_unit::Column::ProductId.eq(product_id))
-            .all(transaction)
             .await?;
         let mut kept_ids = HashSet::new();
         let mut base_id = None;

@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
+  canonicalUnit,
   formatStockQty,
   normalizeSellUnits,
   priceFromStock,
@@ -106,6 +107,7 @@ type CartLine = {
   lotNumber?: string;
   lotSupplierName?: string;
   lotRemaining?: number;
+  lotCost?: number;
   lotRetailPrice?: number;
   lotWholesalePrice?: number;
   name: string;
@@ -249,11 +251,22 @@ function formatSellUnitLabel(unit: ProductSellUnit | undefined, fallback = "Unit
 
 function cartLotPrice(line: CartLine, product: Product, unitId: string, mode: PriceMode) {
   const unit = resolveSellUnit(product, unitId);
+  if (unit && hasCustomUnitRate(product, unit, mode))
+    return cartLineTierPrices(product, unitId, mode).listPrice;
   const stockPrice =
     mode === "wholesale" ? line.lotWholesalePrice || line.lotRetailPrice : line.lotRetailPrice;
   return unit && stockPrice
     ? priceFromStock(sellUnitsFor(product), product.unit, stockPrice, unit)
     : cartLineTierPrices(product, unitId, mode).listPrice;
+}
+
+function hasCustomUnitRate(product: Product, unit: ProductSellUnit, mode: PriceMode) {
+  const units = sellUnitsFor(product);
+  const stock = canonicalUnit(units);
+  if (!stock || stock.id === unit.id) return false;
+  const stockRate = mode === "wholesale" ? stock.wholesale || stock.price : stock.price;
+  const unitRate = mode === "wholesale" ? unit.wholesale || unit.price : unit.price;
+  return Math.abs(unitRate - priceFromStock(units, product.unit, stockRate, unit)) > 0.011;
 }
 
 function packOf(p: Product) {
@@ -1339,11 +1352,12 @@ export function PosWorkspace() {
     const lotWholesale = selectedLot?.wholesalePrice
       ? priceFromStock(lotUnits, pending.unit, selectedLot.wholesalePrice, productUnit)
       : 0;
-    const chosenPrice = selectedLot
-      ? priceMode === "wholesale"
-        ? lotWholesale || lotRetail || sellPrice
-        : lotRetail || sellPrice
-      : sellPrice;
+    const chosenPrice =
+      selectedLot && !hasCustomUnitRate(pending, productUnit, priceMode)
+        ? priceMode === "wholesale"
+          ? lotWholesale || lotRetail || sellPrice
+          : lotRetail || sellPrice
+        : sellPrice;
     const minSell = tierMin || lot.minFloor;
     const sellU = productUnit.name || productUnit.symbol || pending.unit;
     const packN = stockPerUnit(productUnit);
@@ -1382,6 +1396,7 @@ export function PosWorkspace() {
           ? supplierNames[selectedLot.supplierId] || "No supplier"
           : undefined,
         lotRemaining: selectedLot?.remainingQuantity,
+        lotCost: selectedLot?.purchasePrice,
         lotRetailPrice: selectedLot?.retailPrice,
         lotWholesalePrice: selectedLot?.wholesalePrice,
         name: pending.name,
@@ -2208,12 +2223,17 @@ export function PosWorkspace() {
           unitLabel: formatSellUnitLabel(unit, prettyUnit(product.unit)),
           availableLabel: `${qtyStr(available)} ${formatSellUnitLabel(unit, product.unit)}`,
           priceLabel: money(listPrice(product, priceMode, unit?.id)),
-          tierPrices: unit ?? {
-            cost: product.cost,
-            min: product.min,
-            wholesale: product.wholesale,
-            price: product.retail,
-          },
+          tierPrices: unit
+            ? {
+                ...unit,
+                cost: priceFromStock(sellUnitsFor(product), product.unit, product.cost, unit),
+              }
+            : {
+                cost: product.cost,
+                min: product.min,
+                wholesale: product.wholesale,
+                price: product.retail,
+              },
           stockTitle: posStockLabel(product, sessionBranchId),
           low: lowStock(product, left),
           out: available <= 0,
@@ -2537,7 +2557,17 @@ export function PosWorkspace() {
                           <span className="item-name [font-weight:600] [display:flex] [align-items:center] [gap:6px] [min-width:0]">
                             <CmwrPriceTip
                               unit={
-                                activeUnit ??
+                                (activeUnit && product
+                                  ? {
+                                      ...activeUnit,
+                                      cost: priceFromStock(
+                                        sellUnitsFor(product),
+                                        product.unit,
+                                        item.lotCost ?? product.cost,
+                                        activeUnit,
+                                      ),
+                                    }
+                                  : null) ??
                                 (product
                                   ? {
                                       cost: product.cost,
@@ -3610,7 +3640,18 @@ export function PosWorkspace() {
                           {selectedUnit?.name || pending?.unit || "unit"}
                         </strong>
                         <span className="text-xs text-muted">
-                          Cost Rs {money(lotRow.purchasePrice)} / {pending?.unit || "unit"}
+                          Cost Rs{" "}
+                          {money(
+                            pending && selectedUnit
+                              ? priceFromStock(
+                                  sellUnitsFor(pending),
+                                  pending.unit,
+                                  lotRow.purchasePrice,
+                                  selectedUnit,
+                                )
+                              : lotRow.purchasePrice,
+                          )}{" "}
+                          / {selectedUnit?.name || pending?.unit || "unit"}
                         </span>
                       </span>
                     </button>

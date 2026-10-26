@@ -467,6 +467,7 @@ impl ProductService {
 
         let transaction = database.begin().await?;
         let now = chrono::Utc::now();
+        let previous_base_unit_id = model.base_unit_id;
         let mut active: product::ActiveModel = model.into();
         active.base_unit_id = Set(base_unit_id);
         if let Some(name) = request.name {
@@ -501,25 +502,31 @@ impl ProductService {
         active.update(&transaction).await?;
 
         if let Some(sell_units) = request.sell_units {
-            let previous = ProductRepository::list_units(&transaction, id).await?;
             if let Some(new_stock) = sell_units.iter().find(|unit| unit.is_base) {
                 let new_unit_id = parse_uuid(&new_stock.unit_id, "sellUnits.unitId")?;
-                if let Some(old) = previous
-                    .iter()
-                    .find(|row| row.unit_id == new_unit_id && !row.is_base)
-                {
-                    let per_new = crate::backend::qty::to_base_qty(
-                        Decimal::ONE,
-                        old.conversion_to_base,
-                        &old.factor_direction,
-                    );
-                    if per_new > Decimal::ZERO && per_new != Decimal::ONE {
-                        ProductRepository::rescale_inventory_for_base_change(
-                            &transaction,
-                            id,
-                            per_new,
-                        )
-                        .await?;
+                if new_unit_id != previous_base_unit_id {
+                    if let Some(old_as_new) = sell_units
+                        .iter()
+                        .find(|row| row.unit_id == previous_base_unit_id.to_string())
+                    {
+                        // The submitted old-stock row tells us how many NEW stock
+                        // units one OLD stock unit represents. This also works when
+                        // the promoted unit was added in the same edit.
+                        let old_per_new = if old_as_new.factor_direction.as_deref()
+                            == Some(crate::backend::qty::FACTOR_DIVIDE)
+                        {
+                            old_as_new.contains
+                        } else {
+                            Decimal::ONE / old_as_new.contains
+                        };
+                        if old_per_new > Decimal::ZERO {
+                            ProductRepository::rescale_inventory_for_base_change(
+                                &transaction,
+                                id,
+                                old_per_new,
+                            )
+                            .await?;
+                        }
                     }
                 }
             }
@@ -966,6 +973,8 @@ async fn load_category_names(
 
 #[cfg(test)]
 mod tests {
+    use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+
     use rust_decimal::Decimal;
     use sea_orm::{Database, DatabaseConnection};
     use uuid::Uuid;
@@ -1659,6 +1668,14 @@ mod tests {
         assert_eq!(updated.sell_units.len(), 1);
         assert_eq!(updated.sell_units[0].id, unit_row_id);
         assert_eq!(updated.sell_units[0].cost, 11.0);
+        assert_eq!(updated.sell_units[0].price, 17.0);
+        let inherited_lot = product_lot::Entity::find()
+            .filter(product_lot::Column::ProductId.eq(product_id))
+            .one(&database)
+            .await
+            .expect("load opening lot")
+            .expect("opening lot exists");
+        assert_eq!(inherited_lot.retail_price, Decimal::new(17, 0));
 
         let updated_again = ProductService::update(
             &database,
@@ -1697,6 +1714,82 @@ mod tests {
         assert_eq!(updated_again.sell_units.len(), 1);
         assert_eq!(updated_again.sell_units[0].id, unit_row_id);
         assert_eq!(updated_again.sell_units[0].cost, 12.0);
+
+        let pack = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("load Pack master")
+            .data
+            .into_iter()
+            .find(|row| row.symbol.as_deref() == Some("pk"))
+            .expect("seeded Pack");
+        let promoted = ProductService::update(
+            &database,
+            &context,
+            product_id,
+            UpdateProductRequest {
+                urdu_name: None,
+                name: None,
+                category_id: None,
+                sku: None,
+                minimum_stock: Some(Decimal::new(25, 2)),
+                warranty_qty: None,
+                warranty_unit: None,
+                warranty_note: None,
+                is_active: None,
+                sell_units: Some(vec![
+                    ProductUnitInput {
+                        id: None,
+                        unit_id: pack.id,
+                        name: "Pack".into(),
+                        contains: Decimal::ONE,
+                        cost: Decimal::new(120, 0),
+                        min: Decimal::new(140, 0),
+                        wholesale: Decimal::new(160, 0),
+                        price: Decimal::new(180, 0),
+                        barcode: None,
+                        factor_direction: Some("multiply".into()),
+                        is_base: true,
+                        is_default: true,
+                    },
+                    ProductUnitInput {
+                        id: Some(unit_row_id),
+                        unit_id: unit.id,
+                        name: "Piece".into(),
+                        contains: Decimal::new(12, 0),
+                        cost: Decimal::new(10, 0),
+                        min: Decimal::new(12, 0),
+                        wholesale: Decimal::new(14, 0),
+                        price: Decimal::new(16, 0),
+                        barcode: None,
+                        factor_direction: Some("divide".into()),
+                        is_base: false,
+                        is_default: false,
+                    },
+                ]),
+            },
+        )
+        .await
+        .expect("promote newly added Pack");
+        assert!((promoted.stock - 5.0 / 12.0).abs() < 1e-6);
+        assert_eq!(promoted.cost, 120.0);
+        assert!(promoted.sell_units[0].is_base);
+        let lot = database
+            .query_one_raw(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Sqlite,
+                "SELECT purchase_price_per_base, remaining_base_quantity, minimum_price FROM product_lots WHERE product_id = ? AND deleted_at IS NULL",
+                [product_id.into()],
+            ))
+            .await
+            .expect("load rebased lot")
+            .expect("opening lot");
+        let cost: Decimal = lot.try_get("", "purchase_price_per_base").expect("cost");
+        let quantity: Decimal = lot
+            .try_get("", "remaining_base_quantity")
+            .expect("quantity");
+        let minimum: Decimal = lot.try_get("", "minimum_price").expect("minimum");
+        assert_eq!(cost, Decimal::new(120, 0));
+        assert_eq!(quantity.round_dp(6), Decimal::new(416667, 6));
+        assert_eq!(minimum, Decimal::new(168, 0));
     }
 
     #[tokio::test]
@@ -1818,6 +1911,7 @@ mod tests {
             .iter()
             .find(|unit| unit.is_base)
             .expect("piece unit");
+        assert!(piece_unit.is_default, "explicit default remains Piece");
         let pack_unit = created
             .sell_units
             .iter()
@@ -1836,7 +1930,7 @@ mod tests {
                 .sell_units
                 .iter()
                 .any(|unit| unit.id == piece_unit.id && unit.is_default),
-            "piece remains the default sale unit"
+            "adding a Pack does not silently change the default"
         );
 
         let by_pack = ProductService::search(&database, PACK_BARCODE, Some(context.branch_id))

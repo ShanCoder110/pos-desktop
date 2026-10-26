@@ -3474,6 +3474,47 @@ input[type="number"]::-webkit-outer-spin-button {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
+.product-small-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px 10px;
+}
+
+.product-unit-name-field {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.product-unit-conversion {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+}
+
+.product-unit-conversion > :first-child {
+  flex: 0 0 105px;
+}
+.product-unit-conversion > :last-child {
+  flex: 1 1 130px;
+  min-width: 0;
+}
+
+.product-unit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.product-unit-actions .product-stock-unit-btn {
+  width: auto;
+}
+
 .product-unit-inventory-pill {
   display: flex;
   align-items: center;
