@@ -84,6 +84,25 @@ export function ProductUnitPricingCard({
           <strong>{name}</strong>
           <span>{unitKindLabel(unit, units)}</span>
         </div>
+      </header>
+      <dl className="product-detail-unit-grid">
+        {tiers.map(([key, label]) => (
+          <div
+            key={key}
+            className={cn("product-detail-unit-tier", key === "price" ? "is-retail" : `is-${key}`)}
+          >
+            <dt>{label}</dt>
+            <dd>{compactRs(unit[key])}</dd>
+          </div>
+        ))}
+      </dl>
+      <details className="product-detail-profit-details">
+        <summary>
+          Profit details{" "}
+          <span className={retail.healthy ? "text-success" : "text-danger"}>
+            {retail.pct.toFixed(1)}% retail margin
+          </span>
+        </summary>
         <div className="product-detail-profit-pair">
           <span
             className={cn("product-detail-profit-stack", wholesale.healthy ? "is-ok" : "is-bad")}
@@ -104,18 +123,7 @@ export function ProductUnitPricingCard({
             </small>
           </span>
         </div>
-      </header>
-      <dl className="product-detail-unit-grid">
-        {tiers.map(([key, label]) => (
-          <div
-            key={key}
-            className={cn("product-detail-unit-tier", key === "price" ? "is-retail" : `is-${key}`)}
-          >
-            <dt>{label}</dt>
-            <dd>{compactRs(unit[key])}</dd>
-          </div>
-        ))}
-      </dl>
+      </details>
     </article>
   );
 }

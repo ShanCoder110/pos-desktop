@@ -1,3 +1,4 @@
+import { KpiRow } from "@/components/common/KpiRow";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { BookPlus, CreditCard, LayoutGrid, Pencil, Trash2 } from "lucide-react";
@@ -679,7 +680,7 @@ export function CreditSalesPage() {
       </p>
 
       {/* Overview KPI Cards */}
-      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
+      <KpiRow className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
         <KpiCard
           label={CREDIT_COPY.owedToShop}
           value={money(toCollect)}
@@ -718,7 +719,7 @@ export function CreditSalesPage() {
           active={balanceChip === CUSTOMER_BALANCE_SETTLED}
           onClick={() => applyKpi("settled")}
         />
-      </div>
+      </KpiRow>
 
       <TabSheet
         tabs={

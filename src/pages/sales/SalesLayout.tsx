@@ -1,3 +1,4 @@
+import { KpiRow } from "@/components/common/KpiRow";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Ban, CheckCircle2, Clock, Gift, Package, Receipt, RotateCcw, Wallet } from "lucide-react";
@@ -48,7 +49,7 @@ function InvoiceKpis() {
   }
 
   return (
-    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
+    <KpiRow className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
       <KpiCard
         label="Bills"
         value={completed.length}
@@ -94,7 +95,7 @@ function InvoiceKpis() {
         active={sectionKpi === "cancelled"}
         onClick={() => toggle("cancelled")}
       />
-    </div>
+    </KpiRow>
   );
 }
 
@@ -110,7 +111,7 @@ function ReturnKpis() {
   }
 
   return (
-    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
+    <KpiRow className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
       <KpiCard
         label="Tickets"
         value={returns.length}
@@ -152,7 +153,7 @@ function ReturnKpis() {
         tone="stale"
         icon={<Receipt size={16} />}
       />
-    </div>
+    </KpiRow>
   );
 }
 
@@ -168,7 +169,7 @@ function ClaimKpis() {
   }
 
   return (
-    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
+    <KpiRow className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
       <KpiCard
         label="Claimed"
         value={claimed.length}
@@ -208,7 +209,7 @@ function ClaimKpis() {
         tone="info"
         icon={<Package size={16} />}
       />
-    </div>
+    </KpiRow>
   );
 }
 
@@ -231,7 +232,7 @@ function ProductSalesKpis() {
   const margin = totals.sales > 0 ? (totals.profit / totals.sales) * 100 : 0;
 
   return (
-    <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
+    <KpiRow className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
       <KpiCard
         label="Sales"
         value={money(totals.sales)}
@@ -267,7 +268,7 @@ function ProductSalesKpis() {
         tone="stale"
         icon={<Package size={16} />}
       />
-    </div>
+    </KpiRow>
   );
 }
 

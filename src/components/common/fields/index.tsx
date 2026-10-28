@@ -3,6 +3,7 @@ import {
   isValidElement,
   useEffect,
   useLayoutEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -19,6 +20,7 @@ import { SearchableSelect, type SelectOption } from "@/components/common/Searcha
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { PK_MOBILE_COPY, PK_MOBILE_PLACEHOLDER } from "@/shared/constants/phone";
 import { cn, limitMoneyDraft, moneyNum } from "@/utils/format";
+import { FieldContext, useFieldControl } from "./FieldContext";
 import {
   caretForDigitCount,
   deletePkMobileDigit,
@@ -65,29 +67,53 @@ export function Field({
   children: ReactNode;
   className?: string;
 }) {
+  const id = useId();
   return (
-    <div
-      className={cn(
-        "field [display:grid] [min-width:0] [gap:6px]",
-        error && "is-invalid",
-        className,
-      )}
+    <FieldContext.Provider
+      value={{
+        id,
+        labelId: `${id}-label`,
+        descriptionId: error || hint ? `${id}-description` : undefined,
+        invalid: Boolean(error),
+        required,
+      }}
     >
-      <span className="field-label [font-size:12px] [font-weight:600] [color:var(--sub)]">
-        {label}
-        {required ? (
-          <span className="field-required ms-0.5 text-danger" aria-hidden="true">
-            *
+      <div
+        className={cn(
+          "field [display:grid] [min-width:0] [gap:6px]",
+          error && "is-invalid",
+          className,
+        )}
+      >
+        <span
+          id={`${id}-label`}
+          className="field-label [font-size:12px] [font-weight:600] [color:var(--sub)]"
+        >
+          {label}
+          {required ? (
+            <span className="field-required ms-0.5 text-danger" aria-hidden="true">
+              *
+            </span>
+          ) : null}
+        </span>
+        {children}
+        {error ? (
+          <span
+            id={`${id}-description`}
+            className="field-error [font-size:11px] [color:var(--danger)]"
+          >
+            {error}
+          </span>
+        ) : hint ? (
+          <span
+            id={`${id}-description`}
+            className="field-hint [font-size:11px] [color:var(--muted)]"
+          >
+            {hint}
           </span>
         ) : null}
-      </span>
-      {children}
-      {error ? (
-        <span className="field-error [font-size:11px] [color:var(--danger)]">{error}</span>
-      ) : hint ? (
-        <span className="field-hint [font-size:11px] [color:var(--muted)]">{hint}</span>
-      ) : null}
-    </div>
+      </div>
+    </FieldContext.Provider>
   );
 }
 
@@ -104,6 +130,7 @@ export function TextInput({
   endIcon?: ReactNode;
   inputRef?: Ref<HTMLInputElement>;
 }) {
+  const fieldControl = useFieldControl(props["aria-label"]);
   // Never hand-roll password inputs — always go through PasswordInput (eye toggle).
   if (type === "password") {
     return (
@@ -121,6 +148,7 @@ export function TextInput({
   if (!startIcon && !endIcon) {
     return (
       <input
+        {...fieldControl}
         ref={inputRef}
         type={type}
         maxLength={length}
@@ -146,6 +174,7 @@ export function TextInput({
         </span>
       ) : null}
       <input
+        {...fieldControl}
         ref={inputRef}
         type={type}
         maxLength={length}
@@ -176,6 +205,7 @@ export function PasswordInput({
   inputRef?: Ref<HTMLInputElement>;
 }) {
   const [visible, setVisible] = useState(false);
+  const fieldControl = useFieldControl(props["aria-label"]);
   const length = defaultMaxLength("password", maxLength);
 
   return (
@@ -191,6 +221,7 @@ export function PasswordInput({
         </span>
       ) : null}
       <input
+        {...fieldControl}
         ref={inputRef}
         type={visible ? "text" : "password"}
         maxLength={length}
@@ -271,8 +302,10 @@ export function TextArea({
   maxLength,
   ...props
 }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const fieldControl = useFieldControl(props["aria-label"]);
   return (
     <textarea
+      {...fieldControl}
       maxLength={maxLength ?? FIELD_LIMITS.notes}
       className={cn(
         "field-textarea [width:100%] [height:38px] [min-height:38px] [box-sizing:border-box] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [color:var(--ink)] [padding:0_12px] [font-size:13.5px] [outline:none] [transition:border-color_0.15s,_box-shadow_0.15s,_background_0.15s] [height:88px] [padding:10px_12px] [resize:none]",
@@ -295,6 +328,7 @@ export function MoneyInput({
   ...props
 }: InputHTMLAttributes<HTMLInputElement>) {
   const controlled = value !== undefined;
+  const fieldControl = useFieldControl(props["aria-label"]);
   const [draft, setDraft] = useState(() => String(value ?? ""));
   const editing = useRef(false);
   const locked = Boolean(disabled || readOnly);
@@ -312,6 +346,7 @@ export function MoneyInput({
     >
       <span>Rs</span>
       <input
+        {...fieldControl}
         className={cn(
           "field-input [width:100%] [height:38px] [min-height:38px] [box-sizing:border-box] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)] [color:var(--ink)] [padding:0_12px] [font-size:13.5px] [outline:none] [transition:border-color_0.15s,_box-shadow_0.15s,_background_0.15s]",
           className,

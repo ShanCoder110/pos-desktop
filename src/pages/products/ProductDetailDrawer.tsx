@@ -30,7 +30,11 @@ import type { ProductLotRow } from "@/shared/domain/types";
 import type { Product } from "@/shared/types";
 import { ensureSession } from "@/services/auth";
 import { cn, formatDetailDate, money } from "@/utils/format";
-import { productBranchStockRows, productTotalStock } from "@/utils/productStock";
+import {
+  productBranchStockRows,
+  productTotalStock,
+  productStockStatus,
+} from "@/utils/productStock";
 
 function compactAmount(n: number) {
   const rounded = Math.round(n * 100) / 100;
@@ -180,8 +184,8 @@ export function ProductDetailDrawer({
       (a, b) => a.receivedAt.localeCompare(b.receivedAt) || a.lotNumber.localeCompare(b.lotNumber),
     );
   const retail = retailDisplay(product);
-  const stockTone =
-    stock <= 0 ? "is-danger" : stock < (product.minimumStock ?? 20) ? "is-warn" : "is-ok";
+  const availability = productStockStatus(product, stock);
+  const stockTone = `is-${availability.tone}`;
   const heroMeta = [
     product.productNo && product.productNo > 0 ? `#${product.productNo}` : null,
     product.sku,
@@ -212,7 +216,7 @@ export function ProductDetailDrawer({
             Edit product
           </DetailToolbarButton>
           <DetailToolbarButton
-            variant="accent"
+            variant={stock > 0 ? "accent" : "edit"}
             icon={<ShoppingCart size={15} />}
             onClick={() => {
               onClose();
@@ -222,7 +226,7 @@ export function ProductDetailDrawer({
             {REORDER_COPY.createAction}
           </DetailToolbarButton>
           <DetailToolbarButton
-            variant="edit"
+            variant={stock <= 0 ? "accent" : "edit"}
             icon={<Layers size={15} />}
             onClick={() => {
               onClose();
@@ -252,10 +256,11 @@ export function ProductDetailDrawer({
 
         <div className="product-detail-stats is-pair">
           <article className={cn("product-detail-stat", stockTone)}>
-            <span>{PRODUCT_COPY.detailCurrentStock}</span>
+            <span>Available quantity</span>
             <strong>
               <DetailQtyDisplay product={product} qty={stock} />
             </strong>
+            <small>{availability.label}</small>
           </article>
           <article className="product-detail-stat">
             <span>{PRODUCT_COPY.detailRetailPrice}</span>
@@ -269,7 +274,6 @@ export function ProductDetailDrawer({
             <header className="product-detail-card-head">
               <Receipt size={14} />
               <h4>{PRODUCT_COPY.detailUnitsTitle}</h4>
-              <span className="product-detail-card-hint">{PRODUCT_COPY.detailVsCost}</span>
             </header>
             <ProductUnitPricingList units={units} />
           </section>

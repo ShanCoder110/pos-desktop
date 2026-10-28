@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Plus, X } from "lucide-react";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { cn } from "@/utils/format";
+import { useFieldControl } from "@/components/common/fields/FieldContext";
 
 const MENU_GAP = 6;
-const MENU_Z = 80;
+const MENU_Z = 100;
 
 export type SelectOption = { value: string; label: string };
 
@@ -40,6 +41,8 @@ export function SearchableSelect({
   createLabel?: string;
   searchable?: boolean;
 }) {
+  const fieldControl = useFieldControl();
+  const listId = useId();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [hi, setHi] = useState(0);
@@ -211,6 +214,12 @@ export function SearchableSelect({
       >
         {searchable ? (
           <input
+            {...fieldControl}
+            role="combobox"
+            aria-expanded={open}
+            aria-controls={open ? listId : undefined}
+            aria-autocomplete="list"
+            aria-activedescendant={open && filtered[hi] ? `${listId}-${hi}` : undefined}
             ref={inputRef}
             className="ui-combo-input [flex:1] [min-width:0] [height:100%] [margin:0] [padding:0] [border:0] [border-radius:0] [background:transparent] [box-shadow:none] [outline:none] [font-size:13.5px] [color:var(--ink)]"
             disabled={disabled}
@@ -229,12 +238,14 @@ export function SearchableSelect({
           />
         ) : (
           <button
+            {...fieldControl}
             type="button"
             className="ui-combo-input flex h-full min-w-0 flex-1 items-center border-0 bg-transparent p-0 text-left text-[13.5px] text-ink outline-none"
             disabled={disabled}
             data-field={name}
             aria-haspopup="listbox"
             aria-expanded={open}
+            aria-controls={open ? listId : undefined}
             onMouseDown={(e) => {
               if (disabled) return;
               e.preventDefault();
@@ -292,6 +303,7 @@ export function SearchableSelect({
       {open
         ? createPortal(
             <div
+              id={listId}
               ref={menuRef}
               className="ui-combo-menu [position:fixed] [border:1px_solid_var(--line)] [border-radius:10px] [background:var(--paper)] [box-shadow:0_12px_28px_rgba(15,_23,_42,_0.12)] [overflow:hidden]"
               role="listbox"
@@ -321,6 +333,8 @@ export function SearchableSelect({
                 ) : (
                   filtered.map((opt, i) => (
                     <button
+                      id={`${listId}-${i}`}
+                      tabIndex={-1}
                       key={opt.value}
                       type="button"
                       role="option"

@@ -32,6 +32,7 @@ export function SearchInput({
         <Search size={15} strokeWidth={2} />
       </span>
       <input
+        aria-label={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}

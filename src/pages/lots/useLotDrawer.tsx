@@ -570,6 +570,7 @@ export function useLotDrawer() {
 
       <Drawer
         open={nested === "product" && Boolean(nestedProduct)}
+        className="product-edit-drawer"
         size="xl"
         form
         stackLevel={1}

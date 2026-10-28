@@ -1,3 +1,4 @@
+import { KpiRow } from "@/components/common/KpiRow";
 import { useEffect, useMemo, useState } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 import {
@@ -998,7 +999,7 @@ export function CustomersPage() {
           {CUSTOMER_COPY.add}
         </Button>
       </PageHead>
-      <div className="ui-kpi-row grid shrink-0 grid-cols-4 gap-2.5">
+      <KpiRow className="ui-kpi-row grid shrink-0 grid-cols-4 gap-2.5">
         <KpiCard
           label="All customers"
           value={counts.all}
@@ -1032,7 +1033,7 @@ export function CustomersPage() {
           active={kpi === "advance"}
           onClick={() => applyKpi("advance")}
         />
-      </div>
+      </KpiRow>
 
       <TabSheet
         tabs={

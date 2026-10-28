@@ -18,6 +18,14 @@ export function productTotalStock(product: Product) {
   return product.stock;
 }
 
+/** One availability rule for the catalog, overview filters and detail drawers. */
+export function productStockStatus(product: Product, quantity = product.stock) {
+  if (quantity <= 0) return { label: "Out of stock", tone: "danger" as const };
+  if (quantity <= (product.minimumStock ?? 20))
+    return { label: "Low stock", tone: "warn" as const };
+  return { label: "In stock", tone: "ok" as const };
+}
+
 export function productBranchStock(product: Product, branchId?: string) {
   if (!branchId) return product.stock;
   const row = productBranchStockRows(product).find((entry) => entry.branchId === branchId);

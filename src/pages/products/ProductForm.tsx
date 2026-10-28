@@ -1151,10 +1151,10 @@ export function ProductForm({
       <div className="product-form-nav [display:flex] [align-items:center] [justify-content:space-between] [gap:8px] [padding:0_16px] [border-bottom:1px_solid_var(--line)] [flex-shrink:0] [min-width:0]">
         <Tabs
           variant="line"
-          skipTabOrder
+          idPrefix={`product-${product.id}`}
+          panelId={`product-${product.id}-panel-${section}`}
           value={section}
           onChange={(id) => {
-            if (id !== section) focusPane.current = true;
             setSection(id as ProductFormSection);
           }}
           items={sections.map((id) => ({
@@ -1193,8 +1193,14 @@ export function ProductForm({
       </div>
 
       {section === "details" ? (
-        <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
+        <div
+          role="tabpanel"
+          id={`product-${product.id}-panel-${section}`}
+          aria-labelledby={`product-${product.id}-tab-${section}`}
+          className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]"
+        >
           <div className="product-form-grid [display:grid] [grid-template-columns:1fr_1fr] [gap:10px_14px]">
+            <h3 className="product-form-section-title is-full">Product details</h3>
             <Field
               label="Name"
               className="is-full"
@@ -1287,6 +1293,7 @@ export function ProductForm({
                 />
               </Field>
             ) : null}
+            <h3 className="product-form-section-title is-full">Inventory</h3>
             {isNew ? (
               <Field
                 label="Opening stock"
@@ -1318,7 +1325,7 @@ export function ProductForm({
               </Field>
             )}
             {lowStockField}
-            <Field label="Product type">
+            <Field label="Product type" className="product-type-field">
               <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Product type">
                 {(
                   [
@@ -1402,7 +1409,7 @@ export function ProductForm({
               </div>
             ) : null}
             {isNew ? (
-              <div className="is-full grid grid-cols-2 gap-x-3.5 gap-y-2.5 rounded-xl border border-line bg-[color-mix(in_srgb,var(--bg)_45%,var(--paper))] p-3">
+              <div className="product-opening-prices is-full grid grid-cols-2 gap-x-3.5 gap-y-2.5 rounded-xl border border-line bg-[color-mix(in_srgb,var(--bg)_45%,var(--paper))] p-3">
                 <div className="col-span-2 flex items-center justify-between">
                   <strong className="text-[12px] text-ink">Prices</strong>
                   <span className="rounded-full bg-paper px-2 py-1 text-[10px] font-semibold text-muted">
@@ -1528,7 +1535,12 @@ export function ProductForm({
       ) : null}
 
       {section === "branches" && isNew ? (
-        <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
+        <div
+          role="tabpanel"
+          id={`product-${product.id}-panel-${section}`}
+          aria-labelledby={`product-${product.id}-tab-${section}`}
+          className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]"
+        >
           {product.stock > 0 ? (
             <ProductBranchAllocation
               branches={branches}
@@ -1550,6 +1562,9 @@ export function ProductForm({
       {section === "units" ? (
         <div
           ref={unitsPaneRef}
+          role="tabpanel"
+          id={`product-${product.id}-panel-${section}`}
+          aria-labelledby={`product-${product.id}-tab-${section}`}
           className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]"
         >
           <p className="product-note [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
@@ -1795,7 +1810,12 @@ export function ProductForm({
       ) : null}
 
       {section === "recipe" ? (
-        <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
+        <div
+          role="tabpanel"
+          id={`product-${product.id}-panel-${section}`}
+          aria-labelledby={`product-${product.id}-tab-${section}`}
+          className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]"
+        >
           <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
             Select a component, choose its unit when needed, then enter the quantity.
           </p>
@@ -1850,7 +1870,12 @@ export function ProductForm({
       ) : null}
 
       {section === "lots" ? (
-        <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
+        <div
+          role="tabpanel"
+          id={`product-${product.id}-panel-${section}`}
+          aria-labelledby={`product-${product.id}-tab-${section}`}
+          className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]"
+        >
           <p className="product-note [display:grid] [gap:2px] [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
             <strong>Open lots</strong>
             <span>
@@ -1955,7 +1980,12 @@ export function ProductForm({
       ) : null}
 
       {section === "warranty" ? (
-        <div className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]">
+        <div
+          role="tabpanel"
+          id={`product-${product.id}-panel-${section}`}
+          aria-labelledby={`product-${product.id}-tab-${section}`}
+          className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]"
+        >
           <div className="product-flag [display:flex] [align-items:center] [padding:8px_12px] [border:1px_solid_var(--line)] [border-radius:8px] [background:var(--paper)]">
             <Toggle
               checked={Boolean(product.warrantyEnabled)}
@@ -2006,10 +2036,12 @@ export function ProductForm({
           )}
         </div>
       ) : null}
-
       <div className="product-form-foot [display:flex] [align-items:center] [justify-content:space-between] [flex-wrap:wrap] [gap:10px] [padding:10px_16px] [border-top:1px_solid_var(--line)] [background:var(--paper)] [flex-shrink:0] [position:relative] [z-index:1] [min-width:0]">
         {isNew ? (
-          <label className="product-keep [display:flex] [align-items:flex-start] [gap:8px] [min-width:0] [cursor:pointer]">
+          <label
+            title="Save this product and immediately open a fresh form."
+            className="product-keep [display:flex] [align-items:flex-start] [gap:8px] [min-width:0] [cursor:pointer]"
+          >
             <Checkbox checked={keepAdding} onChange={(e) => setKeep(e.target.checked)} />
             <span>
               <strong>Keep adding after save</strong>

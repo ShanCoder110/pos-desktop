@@ -1,3 +1,4 @@
+import { KpiRow } from "@/components/common/KpiRow";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import {
@@ -264,7 +265,7 @@ export function ShopsPage() {
         STORE sells. WAREHOUSE holds bulk lots. REPAIR and PRODUCTION consume components. Branch
         code is generated from the name when you create a branch.
       </p>
-      <div className="ui-kpi-row grid grid-cols-5 gap-2.5">
+      <KpiRow className="ui-kpi-row grid grid-cols-5 gap-2.5">
         <KpiCard
           label="Active"
           value={branches.filter((b) => b.isActive).length}
@@ -283,7 +284,7 @@ export function ShopsPage() {
           hint="Oldest lots first"
           tone="warn"
         />
-      </div>
+      </KpiRow>
       <Table>
         <THead>
           <tr>

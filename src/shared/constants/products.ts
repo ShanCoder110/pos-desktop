@@ -80,13 +80,17 @@ export type ProductInsightMetric = (typeof PRODUCT_INSIGHT_METRICS)[number]["id"
 export type ProductHealth = "healthy" | "risk" | "dead" | "phantom";
 
 export const PRODUCT_HEALTH_LABEL: Record<ProductHealth, string> = {
-  healthy: "Healthy",
-  risk: "At risk",
-  dead: "Dead",
-  phantom: "Phantom",
+  healthy: "In stock",
+  risk: "Low stock",
+  dead: "Out of stock",
+  phantom: "Sold by length",
 };
 
 export const PRODUCT_HEALTH_FROM_LABEL: Record<string, ProductHealth> = {
+  "In stock": "healthy",
+  "Low stock": "risk",
+  "Out of stock": "dead",
+  "Sold by length": "phantom",
   Healthy: "healthy",
   "At risk": "risk",
   Dead: "dead",

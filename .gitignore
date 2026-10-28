@@ -42,3 +42,14 @@ src-tauri/bindings/
 src-tauri/.env
 src-tauri/.env.local
 dukan.db
+
+# Local agent / design tooling (not the app)
+.agents/
+.impeccable/
+.cursor/agents/
+.cursor/hooks.json
+.cursor/skills/impeccable/
+.github/agents/
+.github/hooks/
+.github/skills/
+PRODUCT.md

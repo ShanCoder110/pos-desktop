@@ -122,7 +122,7 @@ import { profitMarginPercent } from "@/utils/margin";
 import { ProductCostDisplay } from "@/pages/products/ProductCostDisplay";
 import { compareNewestProducts } from "@/pages/products/productOrder";
 import { fifoCostForProduct, openLotStockValue } from "@/pages/products/productFifo";
-import { branchStockTooltip, productTotalStock } from "@/utils/productStock";
+import { branchStockTooltip, productTotalStock, productStockStatus } from "@/utils/productStock";
 
 type PriceField = "cost" | "min" | "wholesale" | "retail";
 
@@ -319,15 +319,11 @@ function isLowStock(row: Product) {
 }
 
 function stockTone(row: Product): "ok" | "warn" | "danger" {
-  if (row.stock <= 0) return "danger";
-  if (isLowStock(row)) return "warn";
-  return "ok";
+  return productStockStatus(row).tone;
 }
 
 function stockLabel(row: Product) {
-  if (row.stock <= 0) return "Out of stock";
-  if (isLowStock(row)) return "Low stock";
-  return "In stock";
+  return productStockStatus(row).label;
 }
 
 function minAmount(raw: string) {
@@ -1531,9 +1527,12 @@ export function ProductsPage() {
                           <span>
                             {formatStockQty(productTotalStock(row))} {unitLabel(row.unit)}
                           </span>
-                          <span className="text-[11px] text-muted">
-                            {formatMixedQty(row, productTotalStock(row))}
-                          </span>
+                          {formatMixedQty(row, productTotalStock(row)) !==
+                          `${formatStockQty(productTotalStock(row))} ${unitLabel(row.unit)}` ? (
+                            <span className="text-[11px] text-muted">
+                              {formatMixedQty(row, productTotalStock(row))}
+                            </span>
+                          ) : null}
                           {(row.branchStock?.length ?? 0) > 1 ? (
                             <small className="text-muted">
                               {row.branchStock?.filter((entry) => entry.quantity > 0).length ?? 0}{" "}
@@ -1655,6 +1654,7 @@ export function ProductsPage() {
 
       <Drawer
         open={Boolean(edit)}
+        className="product-edit-drawer"
         size="lg"
         form
         dim={false}

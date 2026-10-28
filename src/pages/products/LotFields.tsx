@@ -208,7 +208,7 @@ export function LotUnitLines({
               : "product-small-card relative grid gap-2 rounded-[10px] border border-line bg-paper p-2.5"
           }
         >
-          <div className="flex items-center justify-between gap-2">
+          <div className="lot-unit-heading flex items-center justify-between gap-2">
             <strong className="text-[12px] font-bold text-ink">
               {unit.name || unitLabel(unit.symbol || stockSymbol)}
             </strong>
@@ -222,12 +222,15 @@ export function LotUnitLines({
           </div>
           {showQuantity ? (
             <div
-              className="grid gap-2"
+              className="lot-unit-quantity grid gap-2"
               style={{
                 gridTemplateColumns: `repeat(${showLeft ? 3 : 2}, minmax(0, 1fr))`,
               }}
             >
-              <Field label="Qty" required={!lockReceived}>
+              <Field
+                label={`${unit.name || unitLabel(unit.symbol || stockSymbol)} Qty`}
+                required={!lockReceived}
+              >
                 <TextInput
                   inputMode="decimal"
                   maxLength={FIELD_LIMITS.qty}
@@ -246,7 +249,7 @@ export function LotUnitLines({
                 {lockReceived ? receivedLockedHint() : null}
               </Field>
               {showLeft ? (
-                <Field label="Left">
+                <Field label={`${unit.name || unitLabel(unit.symbol || stockSymbol)} Left`}>
                   <TextInput
                     inputMode="decimal"
                     maxLength={FIELD_LIMITS.qty}
@@ -271,7 +274,7 @@ export function LotUnitLines({
                   />
                 </Field>
               ) : null}
-              <Field label="Damaged">
+              <Field label={`${unit.name || unitLabel(unit.symbol || stockSymbol)} Damaged`}>
                 <TextInput
                   inputMode="decimal"
                   maxLength={FIELD_LIMITS.qty}
@@ -299,6 +302,7 @@ export function LotUnitLines({
                   )}
                 >
                   <MoneyInput
+                    aria-label={`${unit.name || unitLabel(unit.symbol || stockSymbol)} ${field.label}`}
                     placeholder="0.00"
                     value={numStr(unit[field.key])}
                     onChange={(event) =>

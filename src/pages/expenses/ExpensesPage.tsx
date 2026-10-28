@@ -1,3 +1,4 @@
+import { KpiRow } from "@/components/common/KpiRow";
 import { useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import {
@@ -277,7 +278,7 @@ export function ExpensesPage() {
         Saving writes Expense and a Transaction EXPENSE with direction OUT. Categories are
         ExpenseCategory.
       </p>
-      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
+      <KpiRow className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
         <KpiCard
           label="This month"
           value={money(rows.reduce((s, r) => s + r.amount, 0))}
@@ -300,7 +301,7 @@ export function ExpensesPage() {
           hint="OUT bank"
           tone="stale"
         />
-      </div>
+      </KpiRow>
       <TabSheet
         tabs={
           <Tabs

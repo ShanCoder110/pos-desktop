@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, X } from "lucide-react";
 import { Button } from "@/components/common/Button";
@@ -16,6 +16,19 @@ const SIZE_CLASS: Record<DrawerSize, string> = {
 };
 
 const CLOSE_MS = 200;
+const drawerStack: HTMLElement[] = [];
+let backgroundInert = false;
+let backgroundOverflow = "";
+
+function topDrawer() {
+  const ordered = [...drawerStack].sort((a, b) => Number(a.style.zIndex) - Number(b.style.zIndex));
+  return ordered[ordered.length - 1];
+}
+
+function syncDrawerAccessibility() {
+  const top = topDrawer();
+  for (const panel of drawerStack) panel.inert = panel !== top;
+}
 
 function closeDuration() {
   if (typeof window === "undefined") return CLOSE_MS;
@@ -61,10 +74,27 @@ export function Drawer({
 }) {
   const [present, setPresent] = useState(open);
   const [leaving, setLeaving] = useState(false);
+  const titleId = useId();
+  const panelRef = useRef<HTMLElement>(null);
+  const openerRef = useRef<HTMLElement | null>(
+    typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
   const resolvedSize: DrawerSize = wide ? "lg" : size;
   const widthPx = DRAWER_SIZES[resolvedSize];
   const panelZ = 80 + stackLevel * 2;
   const backZ = panelZ - 1;
+
+  useEffect(() => {
+    if (present) return;
+    const rememberOpener = (event: FocusEvent) => {
+      if (event.target instanceof HTMLElement && !event.target.closest(".ui-drawer"))
+        openerRef.current = event.target;
+    };
+    document.addEventListener("focusin", rememberOpener);
+    return () => document.removeEventListener("focusin", rememberOpener);
+  }, [present]);
 
   useEffect(() => {
     if (open) {
@@ -83,10 +113,69 @@ export function Drawer({
 
   useEffect(() => {
     if (!present) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const panel = panelRef.current;
+    if (!panel) return;
+    const returnFocus = openerRef.current;
+    const app = document.getElementById("root");
+    const firstDrawer = drawerStack.length === 0;
+    if (firstDrawer) {
+      backgroundInert = app?.inert ?? false;
+      backgroundOverflow = document.body.style.overflow;
+      if (app) app.inert = true;
+      document.body.style.overflow = "hidden";
+    }
+    drawerStack.push(panel);
+    syncDrawerAccessibility();
+    const focusable = () =>
+      [
+        ...panel.querySelectorAll<HTMLElement>(
+          "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]",
+        ),
+      ].filter(
+        (node) =>
+          node.tabIndex >= 0 && !node.closest("[inert]") && node.getClientRects().length > 0,
+      );
+    const focusFrame = requestAnimationFrame(() => {
+      if (topDrawer() === panel && !panel.contains(document.activeElement)) {
+        (focusable()[0] ?? panel).focus();
+      }
+    });
+    function onTab(event: KeyboardEvent) {
+      if (event.key !== "Tab" || topDrawer() !== panel || document.querySelector(".ui-modal"))
+        return;
+      const fields = focusable();
+      const first = fields[0];
+      const last = fields[fields.length - 1];
+      if (!first || !last) {
+        event.preventDefault();
+        panel?.focus();
+        return;
+      }
+      if (
+        event.shiftKey &&
+        (document.activeElement === first || !panel?.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (document.activeElement === last || !panel?.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", onTab, true);
     return () => {
-      document.body.style.overflow = previous;
+      cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", onTab, true);
+      drawerStack.splice(drawerStack.indexOf(panel), 1);
+      syncDrawerAccessibility();
+      if (!drawerStack.length) {
+        if (app) app.inert = backgroundInert;
+        document.body.style.overflow = backgroundOverflow;
+      }
+      if (returnFocus?.isConnected && !returnFocus.closest("[inert]")) returnFocus.focus();
     };
   }, [present]);
 
@@ -125,9 +214,12 @@ export function Drawer({
         aria-hidden="true"
       />
       <aside
+        ref={panelRef}
+        tabIndex={-1}
         className={cn("ui-drawer", SIZE_CLASS[resolvedSize], leaving && "is-leaving", className)}
         style={panelStyle}
         role="dialog"
+        aria-labelledby={titleId}
         aria-modal="true"
         aria-hidden={leaving}
       >
@@ -145,13 +237,14 @@ export function Drawer({
                 Back
               </Button>
             ) : null}
-            <h2 className="ui-drawer-title">{title}</h2>
+            <h2 id={titleId} className="ui-drawer-title">
+              {title}
+            </h2>
             {subtitle}
           </div>
           <Button
             size="icon"
             variant="ghost"
-            tabIndex={form ? -1 : undefined}
             disabled={leaving || closeDisabled}
             onClick={onBack ?? onClose}
             aria-label={onBack ? "Back to previous" : "Close"}

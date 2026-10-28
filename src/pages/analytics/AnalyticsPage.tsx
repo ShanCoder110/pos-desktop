@@ -1,3 +1,4 @@
+import { KpiRow } from "@/components/common/KpiRow";
 import { useEffect, useMemo, useState } from "react";
 import { FileDown } from "lucide-react";
 import {
@@ -230,7 +231,7 @@ export function AnalyticsPage() {
       </PageHead>
       <p className="ui-note text-[12px] leading-snug text-muted">{REPORT_COPY.hint}</p>
 
-      <div className="grid shrink-0 grid-cols-5 gap-2.5">
+      <KpiRow className="grid shrink-0 grid-cols-5 gap-2.5">
         {loading.report ? (
           Array.from({ length: 5 }, (_, i) => (
             <Skeleton key={i} className="h-[92px] rounded-[10px]" />
@@ -275,7 +276,7 @@ export function AnalyticsPage() {
             />
           </>
         )}
-      </div>
+      </KpiRow>
 
       <div className="grid shrink-0 grid-cols-4 gap-2.5">
         {[

@@ -1,3 +1,4 @@
+import { KpiRow } from "@/components/common/KpiRow";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ChevronRight, Eye, Pencil, Plus, Store, Trash2 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -395,7 +396,7 @@ export function RepairPage() {
           </Badge>
         </div>
 
-        <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:10px]">
+        <KpiRow className="ui-kpi-row [display:grid] [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:10px]">
           <KpiCard
             label="Stock held"
             value={formatStockQty(shopStock)}
@@ -420,7 +421,7 @@ export function RepairPage() {
             hint="Expected value less cost"
             tone={totals.profit > 0 ? "warn" : "info"}
           />
-        </div>
+        </KpiRow>
 
         <Table>
           <THead>

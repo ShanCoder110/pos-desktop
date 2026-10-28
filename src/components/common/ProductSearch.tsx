@@ -6,6 +6,7 @@ import { money, cn } from "@/utils/format";
 import { FIELD_LIMITS } from "@/shared/constants/fields";
 import { toaster } from "@/components/common/Toast";
 import { compareProductSearch } from "@/utils/salePricing";
+import { useFieldControl } from "@/components/common/fields/FieldContext";
 
 export function ProductSearch({
   products,
@@ -43,6 +44,7 @@ export function ProductSearch({
   className?: string;
 }) {
   const listId = useId();
+  const fieldControl = useFieldControl();
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
@@ -110,6 +112,7 @@ export function ProductSearch({
       >
         <Search className="shrink-0 text-muted" size={16} aria-hidden="true" />
         <input
+          {...fieldControl}
           ref={inputRef}
           data-field={name}
           autoFocus={autoFocus}

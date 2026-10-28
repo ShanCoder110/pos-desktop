@@ -1,3 +1,4 @@
+import { KpiRow } from "@/components/common/KpiRow";
 import { useEffect, useMemo, useState } from "react";
 import {
   Badge,
@@ -88,7 +89,7 @@ export function TransactionsPage() {
         Real money only. Invoice credit does not appear here until someone pays. Types:
         SALE_PAYMENT, CUSTOMER_PAYMENT, REFUND, EXPENSE, COMMISSION.
       </p>
-      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
+      <KpiRow className="ui-kpi-row [display:grid] [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:10px] [width:100%] [flex-shrink:0]">
         <KpiCard label="In" value={money(inn)} hint="Cash / bank received" tone="ok" />
         <KpiCard label="Out" value={money(out)} hint="Refunds, bills, commission" tone="danger" />
         <KpiCard
@@ -97,7 +98,7 @@ export function TransactionsPage() {
           hint="Drawer"
           tone={inn - out >= 0 ? "ok" : "warn"}
         />
-      </div>
+      </KpiRow>
       <TabSheet
         tabs={
           <Tabs

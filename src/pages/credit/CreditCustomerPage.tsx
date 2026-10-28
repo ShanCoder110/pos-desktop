@@ -1,3 +1,4 @@
+import { KpiRow } from "@/components/common/KpiRow";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, CreditCard, Eye, History, Pencil, Plus, Receipt, Trash2 } from "lucide-react";
@@ -403,7 +404,7 @@ export function CreditCustomerPage() {
         </Badge>
       </div>
 
-      <div className="ui-kpi-row [display:grid] [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:10px]">
+      <KpiRow className="ui-kpi-row [display:grid] [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:10px]">
         <KpiCard
           label="Balance"
           value={balance.text}
@@ -428,7 +429,7 @@ export function CreditCustomerPage() {
           hint={`Realized: ${money(invoiceSummary.totalRealizedProfit)}`}
           tone={invoiceSummary.totalProfitOnHold > 0 ? "warn" : "info"}
         />
-      </div>
+      </KpiRow>
 
       <TabSheet
         tabs={

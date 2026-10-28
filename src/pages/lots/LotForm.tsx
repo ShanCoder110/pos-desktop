@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Package, Plus } from "lucide-react";
 import {
   Button,
@@ -19,9 +19,11 @@ import {
   conversionReferenceUnits,
   emptyPrices,
   extraKind,
+  formatMixedQty,
   formatStockQty,
   inventoryPerSellUnit,
   productSellUnits,
+  qtyInUnit,
   roundStockQty,
   setUnitConversionFromReference,
   smallestConversionUnit,
@@ -35,7 +37,7 @@ import { LOT_COPY } from "@/shared/constants/products";
 import type { ProductLotRow, SupplierRow } from "@/shared/domain/types";
 import { SUPPLIER_COPY } from "@/shared/constants/suppliers";
 import type { Product, ProductSellUnit } from "@/shared/types";
-import { cn } from "@/utils/format";
+import { cn, money } from "@/utils/format";
 import { resolveStockBranchId } from "@/utils/stockBranch";
 
 type ErrorField = "product" | "supplier" | "quantity" | null;
@@ -147,6 +149,7 @@ export function LotForm({
   onClose: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const tabsId = useId();
   const draftUnitRef = useRef<HTMLDivElement>(null);
   /** Latest lot — branch load is async and must not reset qty entered while it was in flight. */
   const lotRef = useRef(lot);
@@ -200,6 +203,18 @@ export function LotForm({
     return lots.find((row) => row.id === supplierFromLotId) ?? null;
   }, [lots, supplierFromLotId]);
   const availableQty = Math.max(0, lot.originalQuantity - lot.damagedQuantity);
+  const summaryQuantity = (quantity: number) =>
+    product
+      ? formatMixedQty({ ...product, sellUnits: units }, quantity)
+      : `${formatStockQty(quantity)} ${unitLabel(stockSymbol)}`;
+  const receiptQuantity = (quantity: number) =>
+    units.map(
+      (unit) =>
+        `${formatStockQty(qtyInUnit(units, stockSymbol, unit, quantity))} ${unit.name || unitLabel(unit.symbol || stockSymbol)}`,
+    );
+  const receivedEquivalents = receiptQuantity(lot.originalQuantity);
+  const receivedMain = `${formatStockQty(lot.originalQuantity)} ${unitLabel(stockSymbol)}`;
+  const total = lot.originalQuantity * lot.purchasePrice;
   const allocated = branchRows.reduce((sum, row) => sum + row.quantity, 0);
   const branchCap = isNew ? lot.originalQuantity : lot.remainingQuantity;
   const unallocated = roundStockQty(branchCap - allocated);
@@ -610,10 +625,12 @@ export function LotForm({
       aria-busy={saving}
     >
       <div
-        className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-4"
+        className="lot-form-nav flex shrink-0 items-center justify-between gap-3 border-b border-line px-4"
         inert={saving}
       >
         <Tabs
+          idPrefix={tabsId}
+          panelId={`${tabsId}-panel`}
           variant="line"
           ariaLabel="Lot sections"
           value={tab}
@@ -622,7 +639,7 @@ export function LotForm({
             { id: "lot", label: "Lot" },
             {
               id: "warning",
-              label: lot.expiryDate ? "Warning · expiry" : "Warning",
+              label: "Expiry & alerts",
             },
             {
               id: "branches",
@@ -638,7 +655,13 @@ export function LotForm({
         />
       </div>
 
-      <div className="lot-form-pane drawer-form min-h-0 flex-1 px-4 py-3 pb-6" inert={saving}>
+      <div
+        id={`${tabsId}-panel`}
+        role="tabpanel"
+        aria-labelledby={`${tabsId}-tab-${tab}`}
+        className="lot-form-pane drawer-form min-h-0 flex-1 px-4 py-3 pb-6"
+        inert={saving}
+      >
         {tab === "lot" ? (
           <>
             <FormSection
@@ -724,10 +747,10 @@ export function LotForm({
             </FormSection>
 
             {product && units.length ? (
-              <FormSection title="Units" icon={<Package size={14} />}>
+              <FormSection className="lot-units-section" title="Units" icon={<Package size={14} />}>
                 <p className="m-0 text-[11px] text-muted">
-                  Each unit has its own cost, min, wholesale, and retail — same as the product
-                  drawer. Quantity is shared across the units added to this product.
+                  Quantities are linked: edit any unit to update the others. They represent the same
+                  stock, not additional quantities. Prices are per unit.
                 </p>
                 <div className={cn(error === "quantity" && "lot-quantity")}>
                   <LotUnitLines
@@ -753,6 +776,11 @@ export function LotForm({
                     onUnitPrice={setUnitPrice}
                   />
                 </div>
+                {error === "quantity" ? (
+                  <p role="alert" className="field-error">
+                    Enter a received quantity greater than zero.
+                  </p>
+                ) : null}
                 {draftUnit && onAddProductUnit ? (
                   <div
                     ref={draftUnitRef}
@@ -929,15 +957,39 @@ export function LotForm({
         )}
       </div>
 
-      <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-line bg-paper px-4 py-2.5">
+      <footer className="lot-form-foot">
+        {product ? (
+          <section
+            className="lot-receipt-summary"
+            aria-label="Receipt summary"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <div className="lot-receipt-received">
+              <span>Received</span>
+              <strong>{receivedMain}</strong>
+              {receivedEquivalents.filter((value) => value !== receivedMain).length ? (
+                <small>
+                  = {receivedEquivalents.filter((value) => value !== receivedMain).join(" = ")}
+                </small>
+              ) : null}
+            </div>
+            <div>
+              <span>Damaged</span>
+              <strong>{summaryQuantity(lot.damagedQuantity)}</strong>
+            </div>
+            <div>
+              <span>{isNew ? "Stock added" : "Stock left"}</span>
+              <strong>{summaryQuantity(isNew ? availableQty : lot.remainingQuantity)}</strong>
+            </div>
+            <div>
+              <span>Receipt total</span>
+              <strong>{money(total)}</strong>
+            </div>
+          </section>
+        ) : null}
         {isNew && lot.supplierId ? (
-          <div className="mr-auto grid grid-cols-3 gap-2 text-[12px]">
-            <Field label="Total">
-              <MoneyInput
-                value={String(Math.round(lot.originalQuantity * lot.purchasePrice * 100) / 100)}
-                disabled
-              />
-            </Field>
+          <div className="lot-payment-fields">
             <Field label="Paid now">
               <MoneyInput
                 value={lot.paidNow ? String(lot.paidNow) : ""}
@@ -964,18 +1016,20 @@ export function LotForm({
             </Field>
           </div>
         ) : null}
-        <Button onClick={onClose} disabled={saving}>
-          Cancel
-        </Button>
-        <Button
-          className="lot-save"
-          variant="primary"
-          disabled={saving || (branchRows.length > 0 && Math.abs(unallocated) > 1e-6)}
-          onClick={save}
-        >
-          {saving ? "Saving…" : isNew ? "Add lot" : "Save lot"}
-          <kbd className="ui-kbd">F12</kbd>
-        </Button>
+        <div className="lot-form-actions">
+          <Button onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button
+            className="lot-save"
+            variant="primary"
+            disabled={saving || (branchRows.length > 0 && Math.abs(unallocated) > 1e-6)}
+            onClick={save}
+          >
+            {saving ? "Saving…" : isNew ? "Add lot" : "Save lot"}
+            <kbd className="ui-kbd">F12</kbd>
+          </Button>
+        </div>
       </footer>
     </div>
   );

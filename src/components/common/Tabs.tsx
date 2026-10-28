@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/utils/format";
 
@@ -18,6 +18,8 @@ export function Tabs({
   variant = "folder",
   ariaLabel = "Tabs",
   skipTabOrder = false,
+  idPrefix,
+  panelId,
 }: {
   items: readonly TabItem[];
   value?: string;
@@ -25,7 +27,12 @@ export function Tabs({
   variant?: "folder" | "line";
   ariaLabel?: string;
   skipTabOrder?: boolean;
+  idPrefix?: string;
+  panelId?: string;
 }) {
+  const generatedId = useId();
+  const tabsId = idPrefix ?? generatedId;
+  const noSelection = !items.some((item) => item.id === value);
   return (
     <nav
       className={cn(
@@ -34,8 +41,32 @@ export function Tabs({
       )}
       role="tablist"
       aria-label={ariaLabel}
+      onKeyDown={(event) => {
+        if (
+          !onChange ||
+          !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key) ||
+          event.ctrlKey ||
+          event.metaKey
+        )
+          return;
+        const buttons = [
+          ...event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role="tab"]'),
+        ];
+        const current = buttons.indexOf(event.target as HTMLButtonElement);
+        if (current < 0) return;
+        event.preventDefault();
+        const next =
+          event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? buttons.length - 1
+              : (current + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+        const id = buttons[next]?.dataset.tabId;
+        if (id) onChange(id);
+        requestAnimationFrame(() => buttons[next]?.focus());
+      }}
     >
-      {items.map((item) => {
+      {items.map((item, index) => {
         const label = (
           <>
             {item.label}
@@ -69,8 +100,11 @@ export function Tabs({
             key={item.id}
             type="button"
             role="tab"
+            id={`${tabsId}-tab-${item.id}`}
+            data-tab-id={item.id}
+            aria-controls={on ? panelId : undefined}
             aria-selected={on}
-            tabIndex={skipTabOrder ? -1 : on ? 0 : -1}
+            tabIndex={skipTabOrder ? -1 : on || (noSelection && index === 0) ? 0 : -1}
             className={cn(
               "ui-tab [position:relative] [display:inline-flex] [align-items:center] [gap:6px] [height:36px] [padding:0] [border:0] [background:transparent] [color:var(--ink)] [font-size:13px] [font-weight:600] [cursor:pointer] [text-decoration:none] [white-space:nowrap]",
               on && "is-on",

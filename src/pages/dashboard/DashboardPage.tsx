@@ -1,3 +1,4 @@
+import { KpiRow } from "@/components/common/KpiRow";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -177,7 +178,7 @@ export function DashboardPage() {
         </p>
       ) : null}
 
-      <div className="ui-kpi-row grid shrink-0 grid-cols-4 gap-2.5">
+      <KpiRow className="ui-kpi-row grid shrink-0 grid-cols-4 gap-2.5">
         {loading.page ? (
           Array.from({ length: 4 }, (_, i) => (
             <Skeleton key={i} className="h-[92px] rounded-[10px]" />
@@ -222,7 +223,7 @@ export function DashboardPage() {
             />
           </>
         )}
-      </div>
+      </KpiRow>
 
       <div className="dashboard-mini-grid grid shrink-0 grid-cols-4 gap-2.5">
         {[

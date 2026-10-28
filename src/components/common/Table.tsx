@@ -24,7 +24,9 @@ export function Table({
       {note ? <div className="ui-table-note">{note}</div> : null}
       {body ?? (
         <div className="ui-table-wrap [flex:1] [min-height:0] [overflow:auto] [scrollbar-width:none]">
-          <table className="ui-table [width:100%] [border-collapse:collapse]">{children}</table>
+          <div className="ui-table-scroll-content">
+            <table className="ui-table [width:100%] [border-collapse:collapse]">{children}</table>
+          </div>
         </div>
       )}
       {body ? null : footer}

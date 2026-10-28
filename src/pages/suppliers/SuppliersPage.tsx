@@ -1,3 +1,4 @@
+import { KpiRow } from "@/components/common/KpiRow";
 import { useEffect, useMemo, useState } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { BookOpen, Building2, Pencil, Plus, Scale, Trash2, Wallet } from "lucide-react";
@@ -796,7 +797,7 @@ export function SuppliersPage() {
           Add supplier
         </Button>
       </PageHead>
-      <div className="ui-kpi-row grid shrink-0 grid-cols-4 gap-2.5">
+      <KpiRow className="ui-kpi-row grid shrink-0 grid-cols-4 gap-2.5">
         <KpiCard
           label="All suppliers"
           value={counts.all}
@@ -830,7 +831,7 @@ export function SuppliersPage() {
           active={kpi === "advance"}
           onClick={() => applyKpi("advance")}
         />
-      </div>
+      </KpiRow>
 
       <TabSheet
         tabs={
