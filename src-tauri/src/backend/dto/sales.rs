@@ -210,7 +210,7 @@ fn validate_complete_sale(value: &CompleteSaleRequest) -> Result<(), ValidationE
             return Err(ValidationError::new("below_minimum_unauthorized"));
         }
         let mode = item.price_mode.trim().to_uppercase();
-        if mode != "RETAIL" && mode != "WHOLESALE" {
+        if mode != "RETAIL" && mode != "WHOLESALE" && mode != "MINIMUM" {
             return Err(ValidationError::new("invalid_price_mode"));
         }
     }

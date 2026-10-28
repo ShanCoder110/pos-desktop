@@ -44,7 +44,12 @@ export function PosShortcutsDrawer({
     functionAction("discount", "Bill discount", "Focus the discount field", "F8"),
     functionAction("print", "Preview and print", "Open the receipt preview", "F9"),
     functionAction("split-print", "Split print", "Toggle split printing", "F10"),
-    functionAction("prices", "Retail / Wholesale", "Switch prices for every cart line", "F11"),
+    functionAction(
+      "prices",
+      "Retail / Wholesale / MIN",
+      "Switch prices for every cart line",
+      "F11",
+    ),
     functionAction("complete", "Complete sale", "Validate and save the invoice", "F12"),
     {
       id: "add-customer",

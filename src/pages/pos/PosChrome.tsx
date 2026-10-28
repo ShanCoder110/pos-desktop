@@ -38,7 +38,7 @@ const FUNCTION_KEYS = [
   ["F8", "Discount"],
   ["F9", "Print"],
   ["F10", "Split"],
-  ["F11", "W / R"],
+  ["F11", "R/W/MIN"],
   ["F12", "Sale"],
 ] as const;
 

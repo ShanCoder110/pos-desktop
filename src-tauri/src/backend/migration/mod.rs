@@ -30,6 +30,7 @@ mod m20261021_000027_lot_sell_prices;
 mod m20261024_000028_query_indexes;
 mod m20261025_000029_product_read_indexes;
 mod m20261025_000030_default_larger_unit;
+mod m20261028_000031_minimum_sale_price_mode;
 
 pub struct Migrator;
 
@@ -67,6 +68,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261024_000028_query_indexes::Migration),
             Box::new(m20261025_000029_product_read_indexes::Migration),
             Box::new(m20261025_000030_default_larger_unit::Migration),
+            Box::new(m20261028_000031_minimum_sale_price_mode::Migration),
         ]
     }
 }

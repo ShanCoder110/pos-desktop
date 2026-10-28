@@ -31,6 +31,7 @@ import {
   priceModeForCustomerSwitch,
   unitTierPrice,
   unitsForProduct,
+  type PosPriceMode,
 } from "@/utils/salePricing";
 import { PrintPreview } from "@/components/print/PrintPreview";
 import { CmwrPriceTip } from "@/components/common/CmwrPriceTip";
@@ -94,7 +95,7 @@ import {
   listInvoices,
 } from "@/services/sales";
 
-type PriceMode = "retail" | "wholesale";
+type PriceMode = PosPriceMode;
 type PayMethod = "cash" | "online" | "split";
 type DiscMode = "rs" | "pct";
 type SellUnit = "base" | "pack";
@@ -110,6 +111,7 @@ type CartLine = {
   lotCost?: number;
   lotRetailPrice?: number;
   lotWholesalePrice?: number;
+  lotMinimumPrice?: number;
   name: string;
   urduName?: string;
   sku: string;
@@ -254,7 +256,11 @@ function cartLotPrice(line: CartLine, product: Product, unitId: string, mode: Pr
   if (unit && hasCustomUnitRate(product, unit, mode))
     return cartLineTierPrices(product, unitId, mode).listPrice;
   const stockPrice =
-    mode === "wholesale" ? line.lotWholesalePrice || line.lotRetailPrice : line.lotRetailPrice;
+    mode === "minimum"
+      ? line.lotMinimumPrice
+      : mode === "wholesale"
+        ? line.lotWholesalePrice || line.lotRetailPrice
+        : line.lotRetailPrice;
   return unit && stockPrice
     ? priceFromStock(sellUnitsFor(product), product.unit, stockPrice, unit)
     : cartLineTierPrices(product, unitId, mode).listPrice;
@@ -264,8 +270,8 @@ function hasCustomUnitRate(product: Product, unit: ProductSellUnit, mode: PriceM
   const units = sellUnitsFor(product);
   const stock = canonicalUnit(units);
   if (!stock || stock.id === unit.id) return false;
-  const stockRate = mode === "wholesale" ? stock.wholesale || stock.price : stock.price;
-  const unitRate = mode === "wholesale" ? unit.wholesale || unit.price : unit.price;
+  const stockRate = unitTierPrice(stock, mode) || (mode === "wholesale" ? stock.price : 0);
+  const unitRate = unitTierPrice(unit, mode) || (mode === "wholesale" ? unit.price : 0);
   return Math.abs(unitRate - priceFromStock(units, product.unit, stockRate, unit)) > 0.011;
 }
 
@@ -303,7 +309,8 @@ function readHeldPayload(payload: unknown): HeldPayload | null {
     customerId: value.customerId ?? "",
     guestName: value.guestName ?? "",
     guestPhone: value.guestPhone ?? "",
-    priceMode: value.priceMode === "wholesale" ? "wholesale" : "retail",
+    priceMode:
+      value.priceMode === "minimum" || value.priceMode === "wholesale" ? value.priceMode : "retail",
     billDiscount: num(value.billDiscount ?? 0),
     discMode: value.discMode === "pct" ? "pct" : "rs",
     discPct: num(value.discPct ?? 0),
@@ -385,6 +392,7 @@ function heldBillFromPayload(
 }
 function listPrice(p: Product, mode: PriceMode, unitId?: string) {
   const unit = resolveSellUnit(p, unitId);
+  if (mode === "minimum") return unit ? unitTierPrice(unit, "minimum") : p.min;
   if (mode === "wholesale") {
     const wholesale = unitTierPrice(unit, "wholesale");
     if (wholesale > 0) return wholesale;
@@ -871,7 +879,11 @@ export function PosWorkspace() {
       const product = products.find((p) => p.id === item.productId);
       if (!product) continue;
       const mode: PriceMode =
-        item.priceMode?.toUpperCase() === "WHOLESALE" ? "wholesale" : "retail";
+        item.priceMode?.toUpperCase() === "MINIMUM"
+          ? "minimum"
+          : item.priceMode?.toUpperCase() === "WHOLESALE"
+            ? "wholesale"
+            : "retail";
       const units = sellUnitsFor(product);
       const unitRow = units.find((u) => u.id === item.productUnitId) ?? sellUnitOf(product, "base");
       if (!unitRow?.id) continue;
@@ -1352,11 +1364,16 @@ export function PosWorkspace() {
     const lotWholesale = selectedLot?.wholesalePrice
       ? priceFromStock(lotUnits, pending.unit, selectedLot.wholesalePrice, productUnit)
       : 0;
+    const lotMinimum = selectedLot?.minimumPrice
+      ? priceFromStock(lotUnits, pending.unit, selectedLot.minimumPrice, productUnit)
+      : 0;
     const chosenPrice =
       selectedLot && !hasCustomUnitRate(pending, productUnit, priceMode)
-        ? priceMode === "wholesale"
-          ? lotWholesale || lotRetail || sellPrice
-          : lotRetail || sellPrice
+        ? priceMode === "minimum"
+          ? lotMinimum || sellPrice
+          : priceMode === "wholesale"
+            ? lotWholesale || lotRetail || sellPrice
+            : lotRetail || sellPrice
         : sellPrice;
     const minSell = tierMin || lot.minFloor;
     const sellU = productUnit.name || productUnit.symbol || pending.unit;
@@ -1399,6 +1416,7 @@ export function PosWorkspace() {
         lotCost: selectedLot?.purchasePrice,
         lotRetailPrice: selectedLot?.retailPrice,
         lotWholesalePrice: selectedLot?.wholesalePrice,
+        lotMinimumPrice: selectedLot?.minimumPrice,
         name: pending.name,
         urduName: pending.urduName?.trim() || undefined,
         sku: pending.productNo && pending.productNo > 0 ? String(pending.productNo) : pending.sku,
@@ -1593,7 +1611,7 @@ export function PosWorkspace() {
 
   function setLineMode(id: string, mode: PriceMode) {
     const walkIn = customers.find((c) => c.id === customerId)?.isWalking;
-    const nextMode = walkIn ? "retail" : mode;
+    const nextMode = walkIn && mode === "wholesale" ? "retail" : mode;
     if (walkIn && mode === "wholesale") showToast("Walk-in uses retail");
     setCart((prev) =>
       prev.map((item) => {
@@ -1646,20 +1664,24 @@ export function PosWorkspace() {
       if (next === "wholesale") {
         showToast(wholesaleCartToast(fallbackCount));
       } else {
-        showToast("All items retail");
+        showToast(next === "minimum" ? "All items minimum" : "All items retail");
       }
     }
   }
 
   function switchAllCart(mode?: PriceMode) {
+    const currentMode =
+      cart.length && cart.every((item) => item.priceMode === cart[0].priceMode)
+        ? cart[0].priceMode
+        : priceMode;
+    const next =
+      mode ??
+      (currentMode === "retail" ? "wholesale" : currentMode === "wholesale" ? "minimum" : "retail");
     if (!cart.length) {
-      const next = mode ?? (priceMode === "wholesale" ? "retail" : "wholesale");
       setPriceMode(next);
-      showToast(next === "wholesale" ? "Wholesale" : "Retail");
+      showToast(next === "minimum" ? "Minimum" : next === "wholesale" ? "Wholesale" : "Retail");
       return;
     }
-    const allW = cart.every((i) => i.priceMode === "wholesale");
-    const next = mode ?? (allW ? "retail" : "wholesale");
     applyPriceModeToCart(next);
   }
 
@@ -2204,11 +2226,9 @@ export function PosWorkspace() {
 
   const cartAllMode = !cart.length
     ? ""
-    : cart.every((i) => i.priceMode === "wholesale")
-      ? "wholesale"
-      : cart.every((i) => i.priceMode === "retail")
-        ? "retail"
-        : "mixed";
+    : cart.every((i) => i.priceMode === cart[0].priceMode)
+      ? cart[0].priceMode
+      : "mixed";
 
   const selectedSearchUnit = pending ? resolveSellUnit(pending, pendingProductUnitId) : undefined;
   const selectedSearchPrice = pending ? listPrice(pending, priceMode, selectedSearchUnit?.id) : 0;
@@ -2467,6 +2487,15 @@ export function PosWorkspace() {
                   >
                     All wholesale
                   </button>
+                  <button
+                    type="button"
+                    id="btnCartMinimum"
+                    aria-pressed={cartAllMode === "minimum"}
+                    className={cartAllMode === "minimum" ? "is-on" : ""}
+                    onClick={() => switchAllCart("minimum")}
+                  >
+                    All MIN
+                  </button>
                 </span>
               </span>
               <div className="cart-head-right [display:flex] [align-items:center] [gap:8px]">
@@ -2602,8 +2631,8 @@ export function PosWorkspace() {
                               type="button"
                               data-pm="retail"
                               title="Retail price"
-                              aria-pressed={item.priceMode !== "wholesale"}
-                              className={item.priceMode !== "wholesale" ? "is-active" : ""}
+                              aria-pressed={item.priceMode === "retail"}
+                              className={item.priceMode === "retail" ? "is-active" : ""}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setLineMode(item.id, "retail");
@@ -2630,6 +2659,19 @@ export function PosWorkspace() {
                               }}
                             >
                               Whole
+                            </button>
+                            <button
+                              type="button"
+                              data-pm="minimum"
+                              title="Minimum price"
+                              aria-pressed={item.priceMode === "minimum"}
+                              className={item.priceMode === "minimum" ? "is-active" : ""}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setLineMode(item.id, "minimum");
+                              }}
+                            >
+                              MIN
                             </button>
                           </span>
                         </td>
@@ -3610,9 +3652,11 @@ export function PosWorkspace() {
                       : 0;
                   const enough = available + 0.0001 >= needed;
                   const tierPrice =
-                    priceMode === "wholesale"
-                      ? lotRow.wholesalePrice || lotRow.retailPrice
-                      : lotRow.retailPrice;
+                    priceMode === "minimum"
+                      ? lotRow.minimumPrice
+                      : priceMode === "wholesale"
+                        ? lotRow.wholesalePrice || lotRow.retailPrice
+                        : lotRow.retailPrice;
                   const displayedPrice =
                     pending && selectedUnit && tierPrice
                       ? priceFromStock(sellUnitsFor(pending), pending.unit, tierPrice, selectedUnit)

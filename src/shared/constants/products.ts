@@ -183,7 +183,7 @@ export const PRODUCT_COPY = {
   addUnitAction: "Add unit",
   unitNameRequired: "Choose a unit name",
   unitNameDuplicate: "Each unit name must be unique",
-  unitFactorInvalid: "Enter a conversion greater than 1",
+  unitFactorInvalid: "Enter a positive conversion quantity",
   unitBaseRequired: "Choose one base unit",
   sessionRequired: "Sign in again to save products",
   branchesTitle: "Branch stock",

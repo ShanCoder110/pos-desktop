@@ -271,6 +271,23 @@ describe("edge cases", () => {
 });
 
 describe("cartLineTierPrices", () => {
+  it("applies each unit's stored minimum rate without scaling or retail fallback", () => {
+    expect(cartLineTierPrices(product, "u-piece", "minimum")).toEqual({
+      listPrice: 90,
+      minPrice: 90,
+      usedRetailFallback: false,
+    });
+    const customPack = {
+      ...product,
+      sellUnits: [piece, { ...pack, min: 1000, factorDirection: "multiply" as const }],
+    };
+    expect(posTierPrice(customPack, "u-pack", "minimum")).toBe(1000);
+    const converted = convertLineToUnit(customPack, 24, "minimum", "u-pack");
+    expect(converted?.qty).toBe(2);
+    expect(converted?.unitPrice).toBe(1000);
+    expect(converted?.minPrice).toBe(1000);
+  });
+
   it("returns pack wholesale without scaling piece price", () => {
     const w = cartLineTierPrices(product, "u-pack", "wholesale");
     expect(w.listPrice).toBe(1140);

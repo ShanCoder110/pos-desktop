@@ -271,7 +271,7 @@ export function synchronizeUnitCosts(
   }));
 }
 
-/** Edit one catalog rate without discarding independent prices on other units. */
+/** Selling rates are manual; cost follows the physical quantity for accounting. */
 export function editUnitRate(
   units: ProductSellUnit[],
   sourceId: string,
@@ -281,14 +281,40 @@ export function editUnitRate(
   const source = units.find((unit) => unit.id === sourceId);
   if (!source) return units;
   if (key === "cost") return synchronizeUnitCosts(units, sourceId, value);
-  return units.map((unit) => {
-    if (unit.id === sourceId)
-      return { ...unit, [key]: value, priceManual: { ...unit.priceManual, [key]: true } };
-    const inherited = derivePricesBetween(source, unit)[key];
-    if (Math.abs(unit[key] - inherited) > 0.011) return unit;
-    const nextSource = { ...source, [key]: value };
-    return { ...unit, [key]: derivePricesBetween(nextSource, unit)[key] };
-  });
+  return units.map((unit) =>
+    unit.id === sourceId
+      ? { ...unit, [key]: value, priceManual: { ...unit.priceManual, [key]: true } }
+      : unit,
+  );
+}
+
+/** A display-only reference from the nearest larger unit with a selling rate. */
+export function unitRateReference(
+  units: ProductSellUnit[],
+  targetId: string,
+  key: "min" | "wholesale" | "price",
+) {
+  const target = units.find((unit) => unit.id === targetId);
+  if (!target || !(target.contains > 0)) return undefined;
+  const targetQuantity = inventoryPerSellUnit(target);
+  if (!(targetQuantity > 0)) return undefined;
+  let source: ProductSellUnit | undefined;
+  for (const candidate of units) {
+    if (!(candidate.contains > 0) || !(candidate[key] > 0)) continue;
+    const candidateQuantity = inventoryPerSellUnit(candidate);
+    if (
+      candidateQuantity > targetQuantity &&
+      (!source || candidateQuantity < inventoryPerSellUnit(source))
+    )
+      source = candidate;
+  }
+  if (!source) return undefined;
+  const value = source[key] * (targetQuantity / inventoryPerSellUnit(source));
+  return {
+    source,
+    value,
+    belowReference: target[key] > 0 && target[key] < value - 1e-9,
+  };
 }
 
 /** Stock / POS unit symbols that are sold by length (meter, gaz, foot). */
@@ -691,7 +717,10 @@ export function setStockRelativeContains(
           ...unit,
           contains,
           factorDirection: direction,
-          kind: direction === "divide" ? ("smaller" as const) : ("bigger" as const),
+          kind:
+            (direction === "divide" ? 1 / contains : contains) < 1
+              ? ("smaller" as const)
+              : ("bigger" as const),
         }
       : unit,
   );
@@ -699,7 +728,136 @@ export function setStockRelativeContains(
   const row = updated.find((unit) => unit.id === rowId);
   if (!stock || !row || stock.id === row.id) return updated;
   return updated.map((unit) =>
-    unit.id === rowId ? withManual(unit, derivePricesBetween(stock, row)) : unit,
+    unit.id === rowId ? { ...unit, cost: derivePricesBetween(stock, row).cost } : unit,
+  );
+}
+
+/** Explicit equation against the fixed stock reference, without changing stored factors. */
+export function unitConversionEquation(
+  units: ProductSellUnit[],
+  rowId: string,
+  direction?: "multiply" | "divide",
+) {
+  const stock = canonicalUnit(units);
+  const row = units.find((unit) => unit.id === rowId);
+  if (!stock || !row || stock.id === row.id) return undefined;
+  const storedDirection = row.factorDirection ?? "multiply";
+  const equationDirection = direction ?? storedDirection;
+  const quantity =
+    row.contains > 0
+      ? equationDirection === storedDirection
+        ? row.contains
+        : 1 / row.contains
+      : 0;
+  return {
+    from: equationDirection === "divide" ? stock : row,
+    to: equationDirection === "divide" ? row : stock,
+    quantity,
+    direction: equationDirection,
+  };
+}
+
+/** Smallest configured sell unit; all editor conversions normalize through this unit. */
+export function smallestConversionUnit(
+  units: ProductSellUnit[],
+  excludeId?: string,
+): ProductSellUnit | undefined {
+  let smallest: ProductSellUnit | undefined;
+  for (const unit of units) {
+    if (unit.id === excludeId || !(unit.contains > 0)) continue;
+    const quantity = inventoryPerSellUnit(unit);
+    if (!(quantity > 0) || !Number.isFinite(quantity)) continue;
+    if (!smallest || quantity < inventoryPerSellUnit(smallest)) smallest = unit;
+  }
+  return smallest;
+}
+
+/** References are limited to named units already added to this product. */
+export function conversionReferenceUnits(units: ProductSellUnit[], fromId: string) {
+  const from = units.find((unit) => unit.id === fromId);
+  if (!from) return [];
+  return units
+    .filter((unit) => {
+      if (!(unit.name.trim() || unit.symbol?.trim()) || !(unit.contains > 0)) return false;
+      const quantity = inventoryPerSellUnit(unit);
+      return quantity > 0 && Number.isFinite(quantity);
+    })
+    .sort((left, right) => inventoryPerSellUnit(left) - inventoryPerSellUnit(right));
+}
+
+/** Every configured card supports an identity equation and any added reference. */
+export function unitConversionForCard(
+  units: ProductSellUnit[],
+  fromId: string,
+  referenceId?: string,
+) {
+  const from = units.find((unit) => unit.id === fromId);
+  if (!from) return undefined;
+  const references = conversionReferenceUnits(units, fromId);
+  const to = references.find((unit) => unit.id === referenceId) ?? references[0];
+  if (!to) return undefined;
+  const quantity =
+    from.id === to.id
+      ? 1
+      : from.contains > 0
+        ? roundStockQty(inventoryPerSellUnit(from) / inventoryPerSellUnit(to))
+        : 0;
+  return { from, to, quantity };
+}
+
+function withInventoryQuantity(unit: ProductSellUnit, quantity: number): ProductSellUnit {
+  const smaller = quantity < 1 - 1e-9;
+  return {
+    ...unit,
+    contains: roundStockQty(smaller ? 1 / quantity : quantity),
+    factorDirection: smaller ? "divide" : "multiply",
+    kind: smaller ? "smaller" : "bigger",
+  };
+}
+
+/**
+ * Set `1 from = quantity reference`, then normalize to the current inventory
+ * representation. If the stock unit itself changes size, keep every other
+ * unit's quantity in the smallest unit stable.
+ */
+export function setUnitConversionFromReference(
+  units: ProductSellUnit[],
+  fromId: string,
+  referenceId: string,
+  quantity: number,
+): ProductSellUnit[] {
+  if (!(quantity > 0) || !Number.isFinite(quantity)) return units;
+  const from = units.find((unit) => unit.id === fromId);
+  const reference = units.find((unit) => unit.id === referenceId);
+  const stock = canonicalUnit(units);
+  const smallest = smallestConversionUnit(units, fromId);
+  if (!from || !reference || !stock || !smallest || from.id === reference.id) return units;
+
+  let rewritten: ProductSellUnit[];
+  if (from.id === stock.id) {
+    const smallestQuantity = inventoryPerSellUnit(smallest);
+    const referenceInSmallest = inventoryPerSellUnit(reference) / smallestQuantity;
+    if (!(referenceInSmallest > 0) || !Number.isFinite(referenceInSmallest)) return units;
+    const nextSmallestQuantity = 1 / quantity / referenceInSmallest;
+    rewritten = units.map((unit) => {
+      if (unit.id === stock.id || !(unit.contains > 0)) return unit;
+      const unitInSmallest = inventoryPerSellUnit(unit) / smallestQuantity;
+      return withInventoryQuantity(unit, unitInSmallest * nextSmallestQuantity);
+    });
+  } else {
+    const nextQuantity = inventoryPerSellUnit(reference) * quantity;
+    if (!(nextQuantity > 0) || !Number.isFinite(nextQuantity)) return units;
+    rewritten = units.map((unit) =>
+      unit.id === from.id ? withInventoryQuantity(unit, nextQuantity) : unit,
+    );
+  }
+
+  const rewrittenStock = canonicalUnit(rewritten);
+  if (!rewrittenStock) return rewritten;
+  return rewritten.map((unit) =>
+    unit.id === rewrittenStock.id
+      ? unit
+      : withManual(unit, derivePricesBetween(rewrittenStock, unit)),
   );
 }
 
@@ -939,6 +1097,7 @@ export function validateSellUnits(units: ProductSellUnit[]): SellUnitsValidation
   if (defaults.length !== 1 && !preferredUnit(list)) return "unitBaseRequired";
   if (defaults.length > 1) return "unitBaseRequired";
   const stock = stockUnitForLabel(list) ?? canonicalUnit(list);
+  if (list.filter((unit) => unit.isBase).length !== 1) return "unitBaseRequired";
   const seen = new Set<string>();
   for (const unit of list) {
     const name = (unit.name || unitLabel(unit.symbol || "")).trim().toLowerCase();
@@ -946,7 +1105,8 @@ export function validateSellUnits(units: ProductSellUnit[]): SellUnitsValidation
     if (seen.has(name)) return "unitNameDuplicate";
     seen.add(name);
     // Non-stock units must have contains > 0 (0 and negatives are invalid).
-    if (stock && unit.id !== stock.id && !(unit.contains > 0)) return "unitFactorInvalid";
+    if (!Number.isFinite(unit.contains) || !(unit.contains > 0)) return "unitFactorInvalid";
+    if (unit.id === stock?.id && unit.contains !== 1) return "unitFactorInvalid";
   }
   return null;
 }

@@ -11,6 +11,7 @@ import {
   displayQtyFromStock,
   formatMixedQtyFromUnits,
   formatStockQty,
+  inventoryPerSellUnit,
   priceFromStock,
   pricePerStock,
   pricesFromStockPrice,
@@ -18,6 +19,7 @@ import {
   qtyUnits,
   stockFromDisplayQty,
   stockPriceFromMap,
+  smallestConversionUnit,
   unitKind,
   unitLabel,
 } from "@/pages/products/productQty";
@@ -166,6 +168,8 @@ export function LotUnitLines({
   onUnitPrice?: (unitId: string, key: UnitPriceKey, value: number) => void;
 }) {
   const ordered = qtyUnits(units);
+  const smallest = smallestConversionUnit(units);
+  const smallestName = smallest?.name || unitLabel(smallest?.symbol || stockSymbol);
   const [qtyEdit, setQtyEdit] = useState<{ id: string; field: QtyField } | null>(null);
   const [qtyDraft, setQtyDraft] = useState("");
 
@@ -209,13 +213,11 @@ export function LotUnitLines({
               {unit.name || unitLabel(unit.symbol || stockSymbol)}
             </strong>
             <span className="text-[10px] text-muted">
-              {unitKind(unit) === "base"
-                ? "Product unit"
-                : unitKind(unit) === "smaller" && unit.contains > 1
-                  ? `1 ${unitLabel(stockSymbol)} = ${formatStockQty(unit.contains)} ${unit.name || unitLabel(unit.symbol || "")}`
-                  : unit.contains > 1
-                    ? `1 ${unit.name || unitLabel(unit.symbol || "")} = ${formatStockQty(unit.contains)} ${unitLabel(stockSymbol)}`
-                    : "Sell as"}
+              {smallest?.id === unit.id
+                ? `1 ${smallestName} = 1 ${smallestName}`
+                : smallest && unit.contains > 0
+                  ? `1 ${unit.name || unitLabel(unit.symbol || "")} = ${formatStockQty(inventoryPerSellUnit(unit) / inventoryPerSellUnit(smallest))} ${smallestName}`
+                  : "Sell as"}
             </span>
           </div>
           {showQuantity ? (

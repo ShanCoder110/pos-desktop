@@ -1018,6 +1018,12 @@ input[type="number"]::-webkit-outer-spin-button {
   border-color: var(--wholesale);
   color: #fff;
 }
+#btnCartMinimum.is-on,
+.mode-btn[data-pm="minimum"].is-active {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #fff;
+}
 .cart-clear svg {
   width: 12px;
   height: 12px;
@@ -1242,6 +1248,8 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .line-price {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 .line-price button {
   min-width: 26px;
@@ -3496,11 +3504,33 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .product-unit-conversion > :first-child {
-  flex: 0 0 105px;
+  flex: 1 1 auto;
 }
 .product-unit-conversion > :last-child {
   flex: 1 1 130px;
   min-width: 0;
+}
+
+.product-unit-equation {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(108px, 145px);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.product-conversion-reference {
+  min-width: 0;
+}
+
+.product-unit-equation-from {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sub);
 }
 
 .product-unit-actions {
@@ -3605,7 +3635,8 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .product-small-prices .field-hint {
-  display: none;
+  display: block;
+  line-height: 1.35;
 }
 
 .product-small-prices .field-error {
@@ -4205,6 +4236,14 @@ html[data-theme="dark"] .pos-workspace .line-units button.is-active {
 html[data-theme="dark"] .pos-workspace .line-price button[data-pm="wholesale"].is-active {
   background: var(--wholesale);
   border-color: var(--wholesale);
+  color: #fff;
+}
+.pos-workspace .line-price button[data-pm="minimum"].is-active,
+html[data-theme="dark"] .pos-workspace .line-price button[data-pm="minimum"].is-active,
+.pos-workspace .mode-btn[data-pm="minimum"].is-active,
+html[data-theme="dark"] .pos-workspace .mode-btn[data-pm="minimum"].is-active {
+  background: var(--gold);
+  border-color: var(--gold);
   color: #fff;
 }
 

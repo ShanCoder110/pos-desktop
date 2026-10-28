@@ -35,6 +35,12 @@ import {
   suggestedExtraUnit,
   synchronizeUnitCosts,
   unitHierarchySummary,
+  unitConversionEquation,
+  conversionReferenceUnits,
+  setUnitConversionFromReference,
+  smallestConversionUnit,
+  unitConversionForCard,
+  unitRateReference,
   validateOpeningStock,
   validateSellUnits,
 } from "@/pages/products/productQty";
@@ -82,6 +88,71 @@ const gaz = unit({
   price: 495000,
 });
 
+describe("explicit stock-reference equations", () => {
+  it("orders arbitrary names by entered quantities and leaves the POS default separate", () => {
+    const units = [
+      unit({ id: "each", symbol: "custom-a", name: "Each", isBase: true, isDefault: true }),
+      unit({
+        id: "bundle",
+        symbol: "custom-b",
+        name: "Bundle",
+        contains: 10,
+        factorDirection: "multiply",
+      }),
+      unit({
+        id: "case",
+        symbol: "custom-c",
+        name: "Case",
+        contains: 30,
+        factorDirection: "multiply",
+      }),
+    ];
+    const equation = unitConversionEquation(units, "case")!;
+    expect(equation.from.id).toBe("case");
+    expect(equation.to.id).toBe("each");
+    expect(equation.quantity).toBe(30);
+    const withDefault = setPreferredUnit(units, "bundle");
+    expect(qtyUnits(withDefault).map((row) => row.id)).toEqual(["case", "bundle", "each"]);
+    expect(canonicalUnit(withDefault)?.id).toBe("each");
+    expect(unitConversionEquation(withDefault, "each")).toBeUndefined();
+  });
+
+  it("shows an existing Roll reference as 1 Roll = 90 Gaz without rebasing stock", () => {
+    const units = [roll, { ...gaz, factorDirection: "divide" as const }];
+    const before = structuredClone(units);
+    const equation = unitConversionEquation(units, "gaz")!;
+    expect(equation.from.id).toBe("roll");
+    expect(equation.to.id).toBe("gaz");
+    expect(equation.quantity).toBe(90);
+    const reversed = unitConversionEquation(units, "gaz", "multiply")!;
+    expect(reversed.from.id).toBe("gaz");
+    expect(reversed.quantity).toBeCloseTo(1 / 90);
+    expect(units).toEqual(before);
+  });
+
+  it("accepts fractional and 1:1 equations while keeping selling prices manual", () => {
+    const meter = unit({ id: "meter", symbol: "m", isBase: true, isDefault: true, cost: 100 });
+    const foot = unit({ id: "foot", symbol: "ft", contains: 0, price: 50 });
+    const units = setStockRelativeContains([meter, foot], "foot", 0.3048, "multiply");
+    expect(validateSellUnits(units)).toBeNull();
+    expect(inventoryPerSellUnit(units[1])).toBe(0.3048);
+    expect(units[1].kind).toBe("smaller");
+    expect(units[1].cost).toBe(30.48);
+    expect(units[1].price).toBe(50);
+    const equal = setStockRelativeContains(units, "foot", 1, "multiply");
+    expect(validateSellUnits(equal)).toBeNull();
+    expect(equal[1].price).toBe(50);
+  });
+
+  it("rejects invalid factors and ambiguous stock references", () => {
+    for (const contains of [0, -1, Infinity, NaN]) {
+      expect(validateSellUnits([roll, { ...gaz, contains }])).toBe("unitFactorInvalid");
+    }
+    expect(validateSellUnits([{ ...roll, isBase: false }, gaz])).toBe("unitBaseRequired");
+    expect(validateSellUnits([roll, { ...gaz, isBase: true }])).toBe("unitBaseRequired");
+  });
+});
+
 describe("gaz in 1 roll prices", () => {
   it("keeps saved custom unit prices when a different unit is edited", () => {
     const units = [
@@ -94,14 +165,103 @@ describe("gaz in 1 roll prices", () => {
     expect(normalizeSellUnits(changed).find((row) => row.id === "gaz")?.price).toBe(15);
   });
 
-  it("updates prices inherited by another unit", () => {
+  it("leaves even proportional smaller selling rates unchanged when Roll increases", () => {
     const units = [
       roll,
       { ...gaz, contains: 90, factorDirection: "divide" as const, price: 61.11 },
     ];
     const changed = editUnitRate(units, "roll", "price", 6300);
-    expect(changed.find((row) => row.id === "gaz")?.price).toBe(70);
+    expect(changed.find((row) => row.id === "gaz")?.price).toBe(61.11);
   });
+
+  it.each(["min", "wholesale", "price"] as const)(
+    "editing Piece %s never changes Pack, even when the old rates were proportional",
+    (key) => {
+      const units = [
+        unit({ id: "pack", symbol: "pk", isBase: true, [key]: 120 }),
+        unit({ id: "piece", symbol: "pc", contains: 12, factorDirection: "divide", [key]: 10 }),
+      ];
+      const changed = editUnitRate(units, "piece", key, 15);
+      expect(changed.find((row) => row.id === "piece")?.[key]).toBe(15);
+      expect(changed.find((row) => row.id === "pack")?.[key]).toBe(120);
+    },
+  );
+
+  it("retains the manual Gaz rate through reopening and a smaller Roll increase", () => {
+    const units = [
+      { ...roll, price: 120 },
+      { ...gaz, factorDirection: "divide" as const, price: 1.33 },
+    ];
+    const edited = editUnitRate(units, "gaz", "price", 1.5);
+    expect(edited.find((row) => row.id === "roll")?.price).toBe(120);
+    // API rows do not retain the form's priceManual flags.
+    const reopened = normalizeSellUnits(edited.map(({ priceManual: _manual, ...row }) => row));
+    const increased = editUnitRate(reopened, "roll", "price", 130);
+    expect(increased.find((row) => row.id === "gaz")?.price).toBe(1.5);
+    const decreased = editUnitRate(increased, "roll", "price", 90);
+    expect(decreased.find((row) => row.id === "gaz")?.price).toBe(1.5);
+  });
+
+  it.each([1.5, 2])("keeps manual Gaz price %s when Roll increases to 300", (price) => {
+    const changed = editUnitRate(
+      [
+        { ...roll, price: 120 },
+        { ...gaz, price, factorDirection: "divide" },
+      ],
+      "roll",
+      "price",
+      300,
+    );
+    expect(changed.find((row) => row.id === "gaz")?.price).toBe(price);
+    expect(unitRateReference(changed, "gaz", "price")?.value).toBeCloseTo(300 / 90);
+    expect(unitRateReference(changed, "gaz", "price")?.belowReference).toBe(true);
+  });
+
+  it("keeps a higher manual Gaz rate when Roll increases", () => {
+    const changed = editUnitRate(
+      [
+        { ...roll, price: 120 },
+        { ...gaz, price: 4, factorDirection: "divide" },
+      ],
+      "roll",
+      "price",
+      300,
+    );
+    expect(changed.find((row) => row.id === "gaz")?.price).toBe(4);
+    expect(unitRateReference(changed, "gaz", "price")?.belowReference).toBe(false);
+  });
+
+  it("uses conversion quantities across Box, Pack and Piece", () => {
+    const units = [
+      unit({ id: "piece", symbol: "pc", isBase: true, price: 2 }),
+      unit({ id: "pack", symbol: "pk", contains: 10, factorDirection: "multiply", price: 20 }),
+      unit({ id: "box", symbol: "box", contains: 30, factorDirection: "multiply", price: 50 }),
+    ];
+    const changed = editUnitRate(units, "pack", "price", 35);
+    expect(changed.find((row) => row.id === "piece")?.price).toBe(2);
+    expect(changed.find((row) => row.id === "box")?.price).toBe(50);
+    expect(changed.find((row) => row.id === "piece")?.wholesale).toBe(0);
+    expect(unitRateReference(changed, "piece", "price")?.source.id).toBe("pack");
+    expect(unitRateReference(changed, "piece", "price")?.value).toBe(3.5);
+    expect(unitRateReference(changed, "box", "price")).toBeUndefined();
+  });
+
+  it("calculates a reference without filling or replacing manual smaller prices", () => {
+    const units = [
+      { ...roll, price: 120 },
+      { ...gaz, contains: 0, price: 0, factorDirection: "divide" as const },
+    ];
+    expect(unitRateReference(units, "gaz", "price")).toBeUndefined();
+    const configured = setStockRelativeContains(units, "gaz", 90, "divide");
+    expect(configured.find((row) => row.id === "gaz")?.price).toBe(0);
+    expect(unitRateReference(configured, "gaz", "price")?.belowReference).toBe(false);
+    expect(unitRateReference(configured, "gaz", "price")?.value).toBeCloseTo(120 / 90);
+    const edited = editUnitRate(configured, "gaz", "price", 2);
+    const resized = setStockRelativeContains(edited, "gaz", 100, "divide");
+    expect(resized.find((row) => row.id === "gaz")?.price).toBe(2);
+    expect(unitRateReference(resized, "gaz", "price")?.value).toBeCloseTo(1.2);
+  });
+
   it("prices one gaz as the roll price divided by 90", () => {
     const prices = derivePricesBetween(roll, gaz);
     expect(prices.cost).toBe(55.56);
@@ -349,6 +509,93 @@ describe("gaz in 1 roll prices", () => {
         promoted.find((row) => row.id === "piece")!,
       ),
     ).toBe("1 Pack = 12 Piece");
+    expect(unitConversionForCard(promoted, "pack")).toMatchObject({
+      from: { id: "pack" },
+      to: { id: "piece" },
+      quantity: 12,
+    });
+    expect(unitConversionForCard(promoted, "piece")).toMatchObject({
+      from: { id: "piece" },
+      to: { id: "piece" },
+      quantity: 1,
+    });
+    expect(unitConversionForCard(promoted, "piece", "pack")).toMatchObject({
+      to: { id: "pack" },
+      quantity: 0.0833,
+    });
+  });
+
+  it("normalizes Box entry through Piece and preserves it when Pack size changes", () => {
+    const pack = unit({
+      id: "pack",
+      symbol: "pk",
+      name: "Pack",
+      contains: 1,
+      factorDirection: "multiply",
+      isBase: true,
+      isDefault: true,
+      cost: 120,
+      min: 140,
+      wholesale: 160,
+      price: 200,
+    });
+    const piece = unit({
+      id: "piece",
+      symbol: "pc",
+      name: "Piece",
+      contains: 12,
+      factorDirection: "divide",
+      isBase: false,
+      isDefault: false,
+      cost: 10,
+    });
+    const box = unit({
+      id: "box",
+      symbol: "box",
+      name: "Box",
+      contains: 0,
+      factorDirection: "multiply",
+      isBase: false,
+      isDefault: false,
+    });
+
+    expect(smallestConversionUnit([pack, piece, box])?.id).toBe("piece");
+    expect(conversionReferenceUnits([pack, piece, box], "box").map((row) => row.id)).toEqual([
+      "piece",
+      "pack",
+    ]);
+    expect(unitConversionForCard([pack, piece, box], "box")).toMatchObject({
+      to: { id: "piece" },
+      quantity: 0,
+    });
+
+    const configured = setUnitConversionFromReference([pack, piece, box], "box", "piece", 120);
+    expect(configured.find((row) => row.id === "box")).toMatchObject({
+      contains: 10,
+      factorDirection: "multiply",
+      cost: 1200,
+    });
+    expect(unitConversionForCard(configured, "box")).toMatchObject({
+      to: { id: "piece" },
+      quantity: 120,
+    });
+    expect(unitConversionForCard(configured, "box", "pack")).toMatchObject({
+      to: { id: "pack" },
+      quantity: 10,
+    });
+    expect(unitHierarchySummary(configured)).toBe("1 Box = 10 Pack = 120 Piece");
+
+    const resizedPack = setUnitConversionFromReference(configured, "pack", "piece", 10);
+    expect(resizedPack.find((row) => row.id === "piece")).toMatchObject({
+      contains: 10,
+      factorDirection: "divide",
+    });
+    expect(resizedPack.find((row) => row.id === "box")).toMatchObject({
+      contains: 12,
+      factorDirection: "multiply",
+    });
+    expect(unitConversionForCard(resizedPack, "box")).toMatchObject({ quantity: 120 });
+    expect(unitHierarchySummary(resizedPack)).toBe("1 Box = 12 Pack = 120 Piece");
   });
 
   it("infers a missing legacy Piece direction beneath Pack", () => {

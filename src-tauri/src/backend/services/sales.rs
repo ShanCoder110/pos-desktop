@@ -4029,5 +4029,41 @@ mod tests {
         assert_eq!(headers.data[0].total, sale.total);
         assert!(headers.data[0].items.is_empty());
         assert!(headers.data[0].payments.is_empty());
+
+        // The MIN button must survive save, reload and invoice editing as its
+        // own tier, while keeping the actual price entered for the invoice.
+        let mut minimum_request = CompleteSaleRequest {
+            client_request_id: "minimum-mode-save".into(),
+            customer_id: None,
+            items: vec![SaleItemInput {
+                product_lot_id: None,
+                product_id: product.id.clone(),
+                product_unit_id: unit_id,
+                quantity: Decimal::ONE,
+                unit_price: Decimal::new(8, 0),
+                price_mode: "MINIMUM".into(),
+                sold_below_minimum: false,
+                authorized_by: None,
+                discount: Decimal::ZERO,
+                tax: Decimal::ZERO,
+            }],
+            payments: vec![],
+            discount: Decimal::ZERO,
+            tax: Decimal::ZERO,
+            notes: None,
+        };
+        let minimum_sale = SalesService::complete(&database, &context, minimum_request.clone())
+            .await
+            .expect("save minimum sale");
+        let minimum_id = Uuid::parse_str(&minimum_sale.id).unwrap();
+        let reloaded = SalesService::get(&database, minimum_id).await.unwrap();
+        assert_eq!(reloaded.items[0].price_mode, "MINIMUM");
+        assert_eq!(reloaded.items[0].unit_price, 8.0);
+        minimum_request.items[0].quantity = Decimal::new(2, 0);
+        let revised = SalesService::revise(&database, &context, minimum_id, minimum_request)
+            .await
+            .expect("revise minimum sale");
+        assert_eq!(revised.items[0].price_mode, "MINIMUM");
+        assert_eq!(revised.total, 16.0);
     }
 }

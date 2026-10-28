@@ -16,13 +16,16 @@ import { editLotUnitPrice, seedLotUnits, type LotUnitPriceKey } from "@/pages/lo
 import { LotUnitLines } from "@/pages/products/LotFields";
 import {
   baseUnit,
-  biggerUnit,
-  containsLabel,
+  conversionReferenceUnits,
   emptyPrices,
   extraKind,
   formatStockQty,
+  inventoryPerSellUnit,
   productSellUnits,
   roundStockQty,
+  setUnitConversionFromReference,
+  smallestConversionUnit,
+  unitConversionForCard,
   unitLabel,
 } from "@/pages/products/productQty";
 import { ensureSession } from "@/services/auth";
@@ -158,6 +161,7 @@ export function LotForm({
   const [draftUnit, setDraftUnit] = useState(false);
   const [newUnitSymbol, setNewUnitSymbol] = useState("");
   const [newUnitContains, setNewUnitContains] = useState("");
+  const [newUnitReferenceId, setNewUnitReferenceId] = useState("");
   const [newUnitPrices, setNewUnitPrices] = useState(emptyDraftPrices);
   const [pricedUnits, setPricedUnits] = useState<ProductSellUnit[]>([]);
   const pricedLotId = useRef(lot.id);
@@ -166,6 +170,31 @@ export function LotForm({
   const catalogSig = catalogUnits.map((unit) => unit.id).join("|");
   const units = pricedUnits.length ? pricedUnits : catalogUnits;
   const stockSymbol = product?.unit ?? "pc";
+  const newUnitDraft: ProductSellUnit = {
+    id: "draft",
+    name: unitLabel(newUnitSymbol),
+    symbol: newUnitSymbol,
+    kind: extraKind(newUnitSymbol),
+    contains: 0,
+    ...emptyPrices(),
+    barcode: "",
+    priceManual: {},
+  };
+  const unitsWithDraft = [...units, newUnitDraft];
+  const newUnitReferences = conversionReferenceUnits(unitsWithDraft, newUnitDraft.id);
+  const newUnitConversion = unitConversionForCard(
+    unitsWithDraft,
+    newUnitDraft.id,
+    newUnitReferenceId,
+  );
+  const newUnitSmallest = smallestConversionUnit(units);
+  const newUnitSmallestEquivalent =
+    newUnitConversion && newUnitSmallest && Number(newUnitContains) > 0
+      ? roundStockQty(
+          Number(newUnitContains) *
+            (inventoryPerSellUnit(newUnitConversion.to) / inventoryPerSellUnit(newUnitSmallest)),
+        )
+      : 0;
   const supplierSourceLot = useMemo(() => {
     if (!supplierFromLotId) return null;
     return lots.find((row) => row.id === supplierFromLotId) ?? null;
@@ -340,6 +369,7 @@ export function LotForm({
     setDraftUnit(false);
     setNewUnitSymbol("");
     setNewUnitContains("");
+    setNewUnitReferenceId("");
     setNewUnitPrices(emptyDraftPrices);
     if (!nextProduct) {
       setSupplierFromLotId(null);
@@ -391,18 +421,31 @@ export function LotForm({
     }
     setAddingUnit(true);
     try {
+      const referenceId = newUnitConversion?.to.id;
+      if (!referenceId) {
+        toaster.error("Select an added product unit for this conversion");
+        return;
+      }
+      const draftId = crypto.randomUUID();
+      const draft = { ...newUnitDraft, id: draftId };
+      const converted = setUnitConversionFromReference(
+        [...units, draft],
+        draftId,
+        referenceId,
+        contains,
+      ).find((unit) => unit.id === draftId);
+      if (!converted) return;
       await onAddProductUnit(product.id, {
-        id: crypto.randomUUID(),
+        ...converted,
         name: unitLabel(newUnitSymbol),
         symbol: newUnitSymbol,
-        kind: extraKind(newUnitSymbol),
-        contains,
         ...newUnitPrices,
         barcode: "",
         priceManual: { cost: true, min: true, wholesale: true, price: true },
       });
       setNewUnitSymbol("");
       setNewUnitContains("");
+      setNewUnitReferenceId("");
       setNewUnitPrices(emptyDraftPrices);
       setDraftUnit(false);
     } finally {
@@ -684,7 +727,7 @@ export function LotForm({
               <FormSection title="Units" icon={<Package size={14} />}>
                 <p className="m-0 text-[11px] text-muted">
                   Each unit has its own cost, min, wholesale, and retail — same as the product
-                  drawer. Quantity is shared across units.
+                  drawer. Quantity is shared across the units added to this product.
                 </p>
                 <div className={cn(error === "quantity" && "lot-quantity")}>
                   <LotUnitLines
@@ -730,24 +773,35 @@ export function LotForm({
                         />
                       </Field>
                       <Field
-                        label={containsLabel(baseUnit(units), biggerUnit(units), {
-                          id: "draft",
-                          name: unitLabel(newUnitSymbol),
-                          symbol: newUnitSymbol,
-                          kind: extraKind(newUnitSymbol),
-                          contains: Number(newUnitContains) || 0,
-                          ...emptyPrices(),
-                          barcode: "",
-                          priceManual: {},
-                        })}
+                        label={`1 ${unitLabel(newUnitSymbol) || "unit"} contains`}
+                        hint={
+                          newUnitSmallest &&
+                          newUnitConversion?.to.id !== newUnitSmallest.id &&
+                          newUnitSmallestEquivalent > 0
+                            ? `Equivalent: ${formatStockQty(newUnitSmallestEquivalent)} ${newUnitSmallest.name || unitLabel(newUnitSmallest.symbol || "")}`
+                            : undefined
+                        }
                       >
-                        <TextInput
-                          inputMode="decimal"
-                          maxLength={FIELD_LIMITS.qty}
-                          placeholder="12"
-                          value={newUnitContains}
-                          onChange={(event) => setNewUnitContains(event.target.value)}
-                        />
+                        <div className="grid grid-cols-[minmax(0,1fr)_minmax(90px,0.8fr)] gap-2">
+                          <TextInput
+                            inputMode="decimal"
+                            maxLength={FIELD_LIMITS.qty}
+                            placeholder="12"
+                            value={newUnitContains}
+                            onChange={(event) => setNewUnitContains(event.target.value)}
+                          />
+                          <SearchableSelect
+                            value={newUnitConversion?.to.id ?? ""}
+                            onChange={setNewUnitReferenceId}
+                            options={newUnitReferences.map((unit) => ({
+                              value: unit.id,
+                              label: unit.name || unitLabel(unit.symbol || ""),
+                            }))}
+                            placeholder="Unit"
+                            clearable={false}
+                            searchable={false}
+                          />
+                        </div>
                       </Field>
                     </div>
                     <div className="product-small-prices grid grid-cols-2 gap-2">
@@ -788,6 +842,7 @@ export function LotForm({
                           setDraftUnit(false);
                           setNewUnitSymbol("");
                           setNewUnitContains("");
+                          setNewUnitReferenceId("");
                           setNewUnitPrices(emptyDraftPrices);
                         }}
                       >

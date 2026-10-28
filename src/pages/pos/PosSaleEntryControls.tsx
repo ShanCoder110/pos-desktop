@@ -1,4 +1,5 @@
 import type { KeyboardEvent, RefObject } from "react";
+import type { PosPriceMode } from "@/utils/salePricing";
 import {
   UnitSegmentedControl,
   type UnitSegmentOption,
@@ -28,7 +29,7 @@ export function PosSaleEntryControls({
   unitFocused: boolean;
   units: UnitSegmentOption[];
   unitId: string;
-  priceMode: "retail" | "wholesale";
+  priceMode: PosPriceMode;
   quantity: string;
   quantityHint: { cls: string; lines: string[] } | null;
   quantityInputRef: RefObject<HTMLInputElement | null>;
@@ -36,7 +37,7 @@ export function PosSaleEntryControls({
   onUnit: (unitId: string) => void;
   onUnitRef: (unitId: string, element: HTMLButtonElement | null) => void;
   onUnitKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
-  onPriceMode: (mode: "retail" | "wholesale") => void;
+  onPriceMode: (mode: PosPriceMode) => void;
   onQuantity: (value: string) => void;
   onQuantityKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
   onAdd: () => void;
@@ -102,14 +103,17 @@ export function PosSaleEntryControls({
         role="group"
         aria-label="Default price for search and new lines"
       >
-        {(["retail", "wholesale"] as const).map((mode) => (
+        {(["retail", "wholesale", "minimum"] as const).map((mode) => (
           <button
             key={mode}
             type="button"
+            data-pm={mode}
+            aria-pressed={priceMode === mode}
+            title={mode === "minimum" ? "Minimum price" : `${mode} price`}
             className={`mode-btn inline-flex min-w-[72px] flex-col items-center justify-center rounded-[5px] border-0 bg-transparent px-2.5 text-[12px] font-semibold capitalize text-sub ${priceMode === mode ? "is-active" : ""}`}
             onClick={() => onPriceMode(mode)}
           >
-            {mode}
+            {mode === "minimum" ? "MIN" : mode}
           </button>
         ))}
       </div>

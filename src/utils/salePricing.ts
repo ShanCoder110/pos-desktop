@@ -129,13 +129,9 @@ export function unitTierPrice(unit: ProductSellUnit | undefined, tier: SalePrice
   return Number(unit.price) || 0;
 }
 
-export function posTierPrice(
-  product: Product,
-  unitId: string,
-  tier: "retail" | "wholesale",
-): number {
+export function posTierPrice(product: Product, unitId: string, tier: SalePriceTier): number {
   const unit = resolveSellUnit(product, unitId);
-  return unitTierPrice(unit, tier === "wholesale" ? "wholesale" : "retail");
+  return unitTierPrice(unit, tier);
 }
 
 export function creditTierPrice(unit: ProductSellUnit | undefined, tier: SalePriceTier): number {
@@ -224,7 +220,7 @@ export function unitCostPerDisplay(unit: ProductSellUnit): number {
   return Number(unit.cost) || 0;
 }
 
-export type PosPriceMode = "retail" | "wholesale";
+export type PosPriceMode = SalePriceTier;
 
 /**
  * P2-8: selecting Walk-in/guest forces retail for the cart toggle.
@@ -238,7 +234,7 @@ export function priceModeForCustomerSwitch(
 }
 
 /**
- * List/min prices for a cart line's unit row at retail or wholesale (not base×factor).
+ * List/min prices for a cart line's selected unit and selling tier.
  * Wholesale with unset/0 unit wholesale falls back to that unit's retail price.
  */
 export function cartLineTierPrices(
@@ -248,6 +244,7 @@ export function cartLineTierPrices(
 ): { listPrice: number; minPrice: number; usedRetailFallback: boolean } {
   const unit = resolveSellUnit(product, productUnitId);
   const minPrice = unitTierPrice(unit, "minimum");
+  if (mode === "minimum") return { listPrice: minPrice, minPrice, usedRetailFallback: false };
   if (mode !== "wholesale") {
     return { listPrice: unitTierPrice(unit, "retail"), minPrice, usedRetailFallback: false };
   }

@@ -50,36 +50,37 @@ import { updateLot } from "@/services/lots";
 import { getProduct } from "@/services/products";
 import { listAllBranches } from "@/services/org";
 import {
-  applyDerivedPrices,
   biggerUnit,
   canonicalUnit,
   conversionFactor,
-  deriveAll,
   editUnitRate,
   formatMixedQty,
   formatStockQty,
-  inventoryPerSellUnit,
   isLinearStockUnit,
   normalizeSellUnits,
   preferredUnit,
   priceFromStock,
   productSellUnits,
   qtyUnits,
-  setInventoryBaseUnit,
-  setStockRelativeContains,
+  conversionReferenceUnits,
   sellUnitOptionValue,
   sellUnitOptions,
   setPreferredUnit,
+  setUnitConversionFromReference,
   suggestedExtraUnit,
   unitInStock,
   unitHierarchySummary,
+  unitConversionForCard,
   unitLabel,
+  unitRateReference,
   validateOpeningStock,
   validateSellUnits,
 } from "@/pages/products/productQty";
 import { createMasterRecord, listMasterRecords } from "@/services/masters";
 
 type PriceKey = "cost" | "min" | "wholesale" | "price";
+
+const referenceRateFormat = new Intl.NumberFormat("en-PK", { maximumFractionDigits: 4 });
 
 function numVal(raw: string) {
   const n = Number(raw);
@@ -199,6 +200,7 @@ export function ProductForm({
   const [showValidation, setShowValidation] = useState(false);
   const [flash, setFlash] = useState(false);
   const [containsDrafts, setContainsDrafts] = useState<Record<string, string>>({});
+  const [conversionReferences, setConversionReferences] = useState<Record<string, string>>({});
   const [keepAdding, setKeepAdding] = useState(
     () => sessionStorage.getItem(STORAGE_KEYS.keepAddingProducts) === "1",
   );
@@ -340,7 +342,10 @@ export function ProductForm({
   const sellUnits = qtyUnits(defaultSellUnits(product));
   const unitSummary = unitHierarchySummary(sellUnits);
   const unitLayoutKey = sellUnits
-    .map((unit) => `${unit.id}:${unit.kind}:${unit.contains}:${unit.isBase ? 1 : 0}`)
+    .map(
+      (unit) =>
+        `${unit.id}:${unit.symbol}:${unit.kind}:${unit.contains}:${unit.factorDirection}:${unit.isBase ? 1 : 0}`,
+    )
     .join("|");
   const base = preferredUnit(sellUnits) ?? sellUnits[0];
   const inventory = canonicalUnit(sellUnits) ?? base;
@@ -387,6 +392,7 @@ export function ProductForm({
     setError(null);
     setShowValidation(false);
     setContainsDrafts({});
+    setConversionReferences({});
     const mine = lots.filter((l) => l.productId === product.id);
     if (mine.length) {
       setLotDraft(mine);
@@ -491,8 +497,13 @@ export function ProductForm({
       const factor = card.querySelector<HTMLInputElement>(
         '.product-small-top input[inputmode="decimal"]',
       );
+      const ownedFactor = unitsPaneRef.current?.querySelector<HTMLInputElement>(
+        `[data-conversion-unit-id="${CSS.escape(id)}"]`,
+      );
       // New rows are blank — pick unit first; then type conversion.
-      const target = combo?.value ? (factor ?? combo) : (combo ?? factor);
+      const target = combo?.value
+        ? (factor ?? ownedFactor ?? combo)
+        : (combo ?? factor ?? ownedFactor);
       target?.focus();
       target?.select();
     });
@@ -659,7 +670,7 @@ export function ProductForm({
               }
             : unit,
         );
-        patch({ sellUnits: deriveAll(updated) });
+        patch({ sellUnits: updated });
       }
       toaster.success("Unit added");
     } catch (error) {
@@ -680,10 +691,9 @@ export function ProductForm({
 
   function addExtraUnit() {
     const unit = suggestedExtraUnit(sellUnits);
-    const seeded = applyDerivedPrices([...sellUnits, unit], unit);
     pendingFocusUnitId.current = unit.id;
     changedUnitId.current = unit.id;
-    setUnits([...sellUnits, seeded]);
+    setUnits([...sellUnits, unit]);
   }
 
   function setDefaultSaleUnit(unitId: string) {
@@ -691,75 +701,8 @@ export function ProductForm({
     setUnits(setPreferredUnit(sellUnits, unitId));
   }
 
-  function applyPromotedUnits(next: ProductSellUnit[]) {
-    const nextPreferred = preferredUnit(next) ?? canonicalUnit(next) ?? next[0];
-    if (!nextPreferred) return;
-    const nextInventory = canonicalUnit(next) ?? nextPreferred;
-    const previousInventory = canonicalUnit(sellUnits);
-    const current = productRef.current;
-    const previousInNext = next.find((unit) => unit.id === previousInventory?.id);
-    const candidateFactor =
-      previousInventory?.id !== nextInventory.id && previousInNext
-        ? 1 / inventoryPerSellUnit(previousInNext)
-        : 1;
-    const factor = Number.isFinite(candidateFactor) && candidateFactor > 0 ? candidateFactor : 1;
-    const rebaseQty = (value: number) => Math.round((value / factor) * 1e6) / 1e6;
-    const rebaseMoney = (value: number) => Math.round(value * factor * 100) / 100;
-    if (factor > 0 && factor !== 1) {
-      setLotDraft((rows) =>
-        rows.map((lot) => ({
-          ...lot,
-          originalQuantity: rebaseQty(lot.originalQuantity),
-          remainingQuantity: rebaseQty(lot.remainingQuantity),
-          damagedQuantity: rebaseQty(lot.damagedQuantity),
-          soldQuantity: lot.soldQuantity === undefined ? undefined : rebaseQty(lot.soldQuantity),
-          shrunkQuantity:
-            lot.shrunkQuantity === undefined ? undefined : rebaseQty(lot.shrunkQuantity),
-          purchasePrice: rebaseMoney(lot.purchasePrice),
-          minimumPrice: rebaseMoney(lot.minimumPrice),
-          wholesalePrice: rebaseMoney(lot.wholesalePrice),
-          retailPrice: rebaseMoney(lot.retailPrice),
-          branchAllocations: lot.branchAllocations?.map((row) => ({
-            ...row,
-            quantity: rebaseQty(row.quantity),
-          })),
-        })),
-      );
-      setLotOpened((rows) =>
-        Object.fromEntries(
-          Object.entries(rows).map(([id, row]) => [
-            id,
-            {
-              remaining: rebaseQty(row.remaining),
-              damaged: rebaseQty(row.damaged),
-              purchasePrice: rebaseMoney(row.purchasePrice),
-            },
-          ]),
-        ),
-      );
-    }
-
-    onChange({
-      ...current,
-      name: current.name,
-      sellUnits: next,
-      unit: nextInventory.symbol || current.unit,
-      isLinear: isLinearStockUnit(nextInventory.symbol),
-      stock: rebaseQty(current.stock),
-      damaged: rebaseQty(current.damaged),
-      minimumStock: rebaseQty(current.minimumStock ?? 0),
-      branchStock: current.branchStock?.map((row) => ({
-        ...row,
-        quantity: rebaseQty(row.quantity),
-      })),
-      cost: nextInventory.cost,
-      min: nextInventory.min,
-      wholesale: nextInventory.wholesale,
-      retail: nextInventory.price,
-    });
-  }
-
   function setInventoryUnit(v: string, displayName = unitLabel(v)) {
+    if (!isNew) return;
     const current = productRef.current;
     const existing = sellUnits.find(
       (unit) => (unit.symbol || "").trim().toLowerCase() === v.trim().toLowerCase(),
@@ -768,15 +711,7 @@ export function ProductForm({
     let next: ProductSellUnit[];
     if (existing) {
       if (existing.id === currentInventory?.id) return;
-      if (!(existing.contains > 0)) {
-        toaster.warn("Enter this unit's conversion before using it for stock.");
-        return;
-      }
-      if (inventoryPerSellUnit(existing) >= 1) {
-        toaster.warn("Stock must use the smallest unit. Choose a smaller unit.");
-        return;
-      }
-      applyPromotedUnits(setInventoryBaseUnit(sellUnits, existing.id));
+      toaster.warn("This unit is already added.");
       return;
     } else {
       next = sellUnits.map((unit) =>
@@ -826,25 +761,21 @@ export function ProductForm({
 
   function editContains(row: ProductSellUnit, raw: string) {
     setContainsDrafts((current) => ({ ...current, [row.id]: raw }));
-    const value = Number(raw);
-    if (raw.trim() && Number.isFinite(value) && value > 1) {
-      changedUnitId.current = row.id;
-      setUnits(
-        setStockRelativeContains(sellUnits, row.id, value, row.factorDirection ?? "multiply"),
-      );
-    }
   }
 
   function finishContains(row: ProductSellUnit) {
     const raw = containsDrafts[row.id];
     if (raw === undefined) return;
     const value = Number(raw);
-    if (!raw.trim() || !Number.isFinite(value) || value <= 1) {
+    if (!raw.trim() || !Number.isFinite(value) || value <= 0) {
       setError("unitFactorInvalid");
       return;
     }
+    const referenceId = unitConversionForCard(sellUnits, row.id, conversionReferences[row.id])?.to
+      .id;
+    if (!referenceId) return;
     changedUnitId.current = row.id;
-    setUnits(setStockRelativeContains(sellUnits, row.id, value, row.factorDirection ?? "multiply"));
+    setUnits(setUnitConversionFromReference(sellUnits, row.id, referenceId, value));
     setContainsDrafts((current) => {
       const next = { ...current };
       delete next[row.id];
@@ -947,14 +878,11 @@ export function ProductForm({
       return;
     }
     const inventoryId = canonicalUnit(sellUnits)?.id;
-    // Drop blank secondary rows (e.g. unused Gaz) so Roll-only products can save.
-    const unitsToSave = sellUnits.filter((unit) => unit.id === inventoryId || unit.contains > 0);
-    const unitsError = validateSellUnits(unitsToSave);
-    const invalidDraft = unitsToSave.find((unit) => {
+    const invalidDraft = sellUnits.find((unit) => {
       const raw = containsDrafts[unit.id];
       if (raw === undefined) return false;
       const value = Number(raw);
-      return !raw.trim() || !Number.isFinite(value) || value <= 1;
+      return !raw.trim() || !Number.isFinite(value) || value <= 0;
     });
     if (invalidDraft) {
       setError("unitFactorInvalid");
@@ -963,6 +891,24 @@ export function ProductForm({
       toaster.error(PRODUCT_COPY.unitFactorInvalid);
       return;
     }
+    let resolvedUnits = sellUnits;
+    for (const [unitId, raw] of Object.entries(containsDrafts)) {
+      const referenceId = unitConversionForCard(resolvedUnits, unitId, conversionReferences[unitId])
+        ?.to.id;
+      if (!referenceId) continue;
+      resolvedUnits = setUnitConversionFromReference(
+        resolvedUnits,
+        unitId,
+        referenceId,
+        Number(raw),
+      );
+    }
+    // Ignore untouched empty rows, but require conversions for named units.
+    const unitsToSave = resolvedUnits.filter(
+      (unit) =>
+        unit.id === inventoryId || unit.contains > 0 || unit.name.trim() || unit.symbol?.trim(),
+    );
+    const unitsError = validateSellUnits(unitsToSave);
     if (unitsError) {
       setError(unitsError);
       setSection("units");
@@ -1607,23 +1553,20 @@ export function ProductForm({
           className="product-form-pane [flex:1] [min-height:0] [min-width:0] [overflow:auto] [display:flex] [flex-direction:column] [gap:10px] [padding:12px_16px_10px]"
         >
           <p className="product-note [margin:0] [font-size:12px] [line-height:1.4] [color:var(--muted)]">
-            Stock: <strong>{inventory?.name || unitLabel(stockSymbol)}</strong>
+            Stock unit: <strong>{inventory?.name || unitLabel(stockSymbol)}</strong>
             {unitSummary ? <span> · {unitSummary}</span> : null}
           </p>
           <div className="product-small-list [display:grid] [gap:10px]">
             {sellUnits.map((row) => {
               const isPreferred = preferredUnit(sellUnits)?.id === row.id;
               const isCanonical = canonicalUnit(sellUnits)?.id === row.id;
-              const containsDraft = containsDrafts[row.id];
-              const draftContainsValue = Number(containsDraft ?? "");
-              const invalidContainsDraft =
-                containsDraft !== undefined &&
-                (!containsDraft.trim() ||
-                  !Number.isFinite(draftContainsValue) ||
-                  draftContainsValue <= 1);
-              const direction = row.factorDirection ?? "multiply";
+              const references = conversionReferenceUnits(sellUnits, row.id);
+              const conversion = unitConversionForCard(
+                sellUnits,
+                row.id,
+                conversionReferences[row.id],
+              );
               const rowName = row.name || unitLabel(row.symbol || "") || "unit";
-              const stockName = inventory?.name || unitLabel(stockSymbol);
               return (
                 <div
                   key={row.id}
@@ -1663,85 +1606,85 @@ export function ProductForm({
                           onChange({
                             ...productRef.current,
                             name: productRef.current.name,
-                            sellUnits: deriveAll(patched),
+                            sellUnits: patched,
                           });
                         }}
                         placeholder="Pack, Meter, Gaz…"
                         searchPlaceholder="Type to search"
                         options={sellUnitOptions(row, sellUnits, unitRows)}
                         clearable={false}
-                        disabled={creatingUnit}
+                        disabled={creatingUnit || (!isNew && isCanonical)}
                         onCreate={(label) => void addUnit(label, row.id)}
                         createLabel="Add unit"
                       />
                     </Field>
-                    {!isCanonical ? (
+                    {conversion ? (
                       <div className="product-unit-conversion">
-                        <Field label="Size">
-                          <select
-                            className="field-select"
-                            aria-label={`${rowName} size relative to ${stockName}`}
-                            value={direction}
-                            onChange={(event) => {
-                              const nextDirection = event.target.value as "multiply" | "divide";
-                              const next = sellUnits.map((unit) =>
-                                unit.id === row.id
-                                  ? {
-                                      ...unit,
-                                      contains: 0,
-                                      factorDirection: nextDirection,
-                                      kind:
-                                        nextDirection === "divide"
-                                          ? ("smaller" as const)
-                                          : ("bigger" as const),
-                                    }
-                                  : unit,
-                              );
-                              setUnits(next);
-                              setContainsDrafts((current) => {
-                                const copy = { ...current };
-                                delete copy[row.id];
-                                return copy;
-                              });
-                            }}
-                          >
-                            <option value="multiply">Larger</option>
-                            <option value="divide">Smaller</option>
-                          </select>
-                        </Field>
                         <Field
-                          label={
-                            direction === "divide"
-                              ? `1 ${stockName} contains`
-                              : `1 ${rowName} contains`
-                          }
+                          label="Contains"
                           error={
-                            invalidContainsDraft && error === "unitFactorInvalid"
+                            containsDrafts[row.id] !== undefined &&
+                            (!containsDrafts[row.id].trim() ||
+                              !Number.isFinite(Number(containsDrafts[row.id])) ||
+                              Number(containsDrafts[row.id]) <= 0) &&
+                            error === "unitFactorInvalid"
                               ? PRODUCT_COPY.unitFactorInvalid
                               : undefined
                           }
                         >
-                          <TextInput
-                            inputMode="decimal"
-                            maxLength={FIELD_LIMITS.qty}
-                            placeholder="Qty"
-                            value={containsDraft ?? (row.contains > 0 ? String(row.contains) : "")}
-                            endIcon={
-                              row.name || row.symbol ? (
-                                <span className="product-unit-factor-suffix">
-                                  {direction === "divide" ? rowName : stockName}
-                                </span>
-                              ) : undefined
-                            }
-                            onChange={(e) => editContains(row, e.target.value)}
-                            onBlur={() => finishContains(row)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") event.currentTarget.blur();
-                            }}
-                          />
+                          <div className="product-unit-equation">
+                            <span className="product-unit-equation-from">1 {rowName} =</span>
+                            <TextInput
+                              data-conversion-unit-id={row.id}
+                              aria-label={`Quantity for 1 ${rowName} in ${conversion.to.name || unitLabel(conversion.to.symbol || "")}`}
+                              inputMode="decimal"
+                              maxLength={FIELD_LIMITS.qty}
+                              placeholder="Qty"
+                              readOnly={conversion.from.id === conversion.to.id}
+                              value={
+                                containsDrafts[row.id] ??
+                                (conversion.quantity > 0
+                                  ? String(Number(conversion.quantity.toFixed(6)))
+                                  : "")
+                              }
+                              onChange={(event) => editContains(row, event.target.value)}
+                              onBlur={() => finishContains(row)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") event.currentTarget.blur();
+                              }}
+                            />
+                            <SearchableSelect
+                              className="product-conversion-reference"
+                              name={`conversion-reference-${row.id}`}
+                              value={conversion.to.id}
+                              onChange={(referenceId) => {
+                                setConversionReferences((current) => ({
+                                  ...current,
+                                  [row.id]: referenceId,
+                                }));
+                                setContainsDrafts((current) => {
+                                  const next = { ...current };
+                                  delete next[row.id];
+                                  return next;
+                                });
+                              }}
+                              options={references.map((unit) => ({
+                                value: unit.id,
+                                label: unit.name || unitLabel(unit.symbol || ""),
+                              }))}
+                              clearable={false}
+                              searchable={false}
+                            />
+                          </div>
                         </Field>
                       </div>
-                    ) : null}
+                    ) : (
+                      <div className="product-unit-conversion">
+                        <div className="product-unit-inventory-pill">
+                          Choose a unit to set its conversion
+                        </div>
+                      </div>
+                    )}
                     <div className="product-unit-actions">
                       <Button
                         type="button"
@@ -1758,21 +1701,6 @@ export function ProductForm({
                       >
                         {isPreferred ? "POS default" : "Set POS default"}
                       </Button>
-                      {!isCanonical && direction === "divide" && row.contains > 0 ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            setInventoryUnit(
-                              row.symbol || "",
-                              row.name || unitLabel(row.symbol || ""),
-                            )
-                          }
-                        >
-                          Use for stock
-                        </Button>
-                      ) : null}
                       {!isCanonical ? (
                         <Button
                           size="icon"
@@ -1812,6 +1740,8 @@ export function ProductForm({
                       ] as const
                     ).map(([key, label]) => {
                       const value = unitPrice(row, key);
+                      const reference =
+                        key === "cost" ? undefined : unitRateReference(sellUnits, row.id, key);
                       const priceError =
                         showValidation || error === "unitPrices"
                           ? unitPriceMissingError(value)
@@ -1823,11 +1753,19 @@ export function ProductForm({
                           className={cn(
                             "product-price-field",
                             key === "price" ? "is-retail" : `is-${key}`,
+                            reference?.belowReference &&
+                              "has-unit-price-warning [&_.field-hint]:text-danger [&_.field-hint]:font-semibold",
                           )}
                           error={priceError}
+                          hint={
+                            reference
+                              ? `Calculated: Rs. ${referenceRateFormat.format(reference.value)} from ${reference.source.name || unitLabel(reference.source.symbol || "")}${reference.belowReference ? " · Below calculated rate" : ""}`
+                              : undefined
+                          }
                         >
                           <MoneyInput
-                            placeholder="0.00"
+                            aria-label={`${rowName} ${label}`}
+                            placeholder={key === "cost" ? "0.00" : "Enter price"}
                             value={numStr(value)}
                             onChange={(e) => setUnitPrice(row, key, numVal(e.target.value))}
                           />
