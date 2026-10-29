@@ -9112,6 +9112,21 @@ html[data-theme="dark"] .ui-drawer {
   outline-offset: 2px;
 }
 
+/* Styled fields own their focus ring. Composite inputs draw it on the
+   rounded wrapper, not a second rectangle around the editable text area. */
+.ui-drawer
+  :is(
+    .field-input,
+    .field-select,
+    .field-textarea,
+    .ui-combo-input,
+    .product-search-field > input,
+    .ui-search > input,
+    .unit-qty-input-field
+  ):focus-visible {
+  outline: none;
+}
+
 .ui-drawer .field {
   min-width: 0;
 }

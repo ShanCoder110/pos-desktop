@@ -103,7 +103,8 @@ export function ProductSearch({
     >
       <div
         className={cn(
-          "product-search-field flex w-full items-center gap-2 rounded-lg border bg-paper px-3 transition-[border-color,box-shadow]",
+          "product-search-field flex w-full items-center gap-2 rounded-lg border bg-paper px-3 transition-[border-color,box-shadow] focus-within:border-accent",
+          !invalid && "focus-within:shadow-[0_0_0_3px_var(--accent-ring)]",
           compact ? "h-8" : "h-11",
           open ? "border-accent shadow-[0_0_0_3px_var(--accent-ring)]" : "border-line",
           invalid && "!border-danger shadow-[0_0_0_3px_rgba(220,38,38,0.12)]",
