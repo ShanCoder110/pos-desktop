@@ -7,6 +7,41 @@ import type { InvoiceItemRow } from "@/shared/domain/types";
 import { receiptLinesFromInvoice } from "@/utils/posReceipt";
 
 describe("saved invoice receipt", () => {
+  it.each(["EN", "UR"] as const)(
+    "hides unit names by default on %s receipts and allows opting in",
+    (language) => {
+      const render = (showUnitOnInvoice = defaultSettings.showUnitOnInvoice) =>
+        renderToStaticMarkup(
+          createElement(InvoiceThermalReceipt, {
+            settings: { ...defaultSettings, receiptLanguage: language, showUnitOnInvoice },
+            customer: { id: "walk-in", name: "Walk-in", phone: "", balance: 0, isWalking: true },
+            lines: [
+              {
+                id: "1",
+                productId: "p1",
+                name: "Cable",
+                qty: 2.5,
+                unit: "Piece",
+                price: 100,
+                minFloor: 0,
+                lotsNote: "",
+              },
+            ],
+            total: 250,
+            paid: 250,
+            balanceBefore: 0,
+            balanceAfter: 0,
+          }),
+        );
+      expect(defaultSettings.showUnitOnInvoice).toBe(false);
+      expect(render()).toContain('class="receipt-col-qty">2.5</td>');
+      expect(render(true)).toContain(
+        `class="receipt-col-qty">2.5 ${language === "UR" ? "عدد" : "pcs"}</td>`,
+      );
+      expect(render()).toContain('class="receipt-col-total receipt-bold">250</td>');
+    },
+  );
+
   it("prints the persisted edited unit price and matching totals", () => {
     const item: InvoiceItemRow = {
       id: "line-1",

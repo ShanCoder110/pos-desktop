@@ -36,6 +36,7 @@ export const routes = {
   settings: "/settings",
   settingsReceipt: "/settings/receipt",
   settingsProducts: "/settings/products",
+  settingsPos: "/settings/pos",
   settingsLocalization: "/settings/localization",
   settingsPrinter: "/settings/printer",
   settingsDevices: "/settings/devices",

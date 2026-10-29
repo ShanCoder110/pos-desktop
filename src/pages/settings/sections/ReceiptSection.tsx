@@ -43,6 +43,7 @@ const KEYS = [
   "receiptPromoBold",
   "showCashierName",
   "showItemDiscount",
+  "showUnitOnInvoice",
   "itemsTableBordered",
   "receiptShopName",
 ] as const;
@@ -447,6 +448,11 @@ export function ReceiptSection() {
               checked={draft.showItemDiscount}
               onChange={(v) => patch({ showItemDiscount: v })}
               label="Show discount"
+            />
+            <Toggle
+              checked={draft.showUnitOnInvoice}
+              onChange={(v) => patch({ showUnitOnInvoice: v })}
+              label="Show unit names with quantity"
             />
           </div>
         </div>

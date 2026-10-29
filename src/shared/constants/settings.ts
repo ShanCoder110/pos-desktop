@@ -13,6 +13,13 @@ export type SettingsNavItem = {
 
 export const SETTINGS_NAV: SettingsNavItem[] = [
   {
+    id: "pos",
+    to: routes.settingsPos,
+    label: "POS",
+    hint: "Invoice behavior after printing",
+    icon: Monitor,
+  },
+  {
     id: "profile",
     to: routes.settings,
     end: true,

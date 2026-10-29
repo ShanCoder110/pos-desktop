@@ -197,12 +197,8 @@ export function normalizeSellUnits(units: ProductSellUnit[]): ProductSellUnit[] 
   });
   const repairedStock = normalized.find((unit) => unit.id === inventoryId);
   if (!repairedStock) return normalized;
-  const correctlyCosted =
-    repairedStock.cost > 0
-      ? synchronizeUnitCosts(normalized, repairedStock.id, repairedStock.cost)
-      : normalized;
-  if (!correctedDirection) return correctlyCosted;
-  return correctlyCosted.map((unit) =>
+  if (!correctedDirection) return normalized;
+  return normalized.map((unit) =>
     unit.id === repairedStock.id
       ? unit
       : withManual(unit, derivePricesBetween(repairedStock, unit)),
@@ -216,7 +212,7 @@ function withManual(
   const manual = row.priceManual ?? {};
   return {
     ...row,
-    cost: next.cost,
+    cost: manual.cost ? row.cost : next.cost,
     min: manual.min ? row.min : next.min,
     wholesale: manual.wholesale ? row.wholesale : next.wholesale,
     price: manual.price ? row.price : next.price,
@@ -271,7 +267,7 @@ export function synchronizeUnitCosts(
   }));
 }
 
-/** Selling rates are manual; cost follows the physical quantity for accounting. */
+/** Each entered rate belongs to its unit; conversions are display-only references. */
 export function editUnitRate(
   units: ProductSellUnit[],
   sourceId: string,
@@ -280,7 +276,6 @@ export function editUnitRate(
 ): ProductSellUnit[] {
   const source = units.find((unit) => unit.id === sourceId);
   if (!source) return units;
-  if (key === "cost") return synchronizeUnitCosts(units, sourceId, value);
   return units.map((unit) =>
     unit.id === sourceId
       ? { ...unit, [key]: value, priceManual: { ...unit.priceManual, [key]: true } }
@@ -288,11 +283,11 @@ export function editUnitRate(
   );
 }
 
-/** A display-only reference from the nearest larger unit with a selling rate. */
+/** Prefer a larger unit as the reference, falling back to the nearest smaller unit. */
 export function unitRateReference(
   units: ProductSellUnit[],
   targetId: string,
-  key: "min" | "wholesale" | "price",
+  key: "cost" | "min" | "wholesale" | "price",
 ) {
   const target = units.find((unit) => unit.id === targetId);
   if (!target || !(target.contains > 0)) return undefined;
@@ -308,12 +303,30 @@ export function unitRateReference(
     )
       source = candidate;
   }
+  if (!source) {
+    for (const candidate of units) {
+      const quantity = inventoryPerSellUnit(candidate);
+      if (
+        candidate.id !== target.id &&
+        candidate.contains > 0 &&
+        candidate[key] > 0 &&
+        quantity < targetQuantity &&
+        (!source || quantity > inventoryPerSellUnit(source))
+      )
+        source = candidate;
+    }
+  }
   if (!source) return undefined;
   const value = source[key] * (targetQuantity / inventoryPerSellUnit(source));
   return {
     source,
     value,
-    belowReference: target[key] > 0 && target[key] < value - 1e-9,
+    // A bulk unit may intentionally cost less than buying its smaller units
+    // separately. Upward references are informational, never a price warning.
+    belowReference:
+      inventoryPerSellUnit(source) > targetQuantity &&
+      target[key] > 0 &&
+      target[key] < value - 1e-9,
   };
 }
 

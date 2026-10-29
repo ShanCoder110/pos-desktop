@@ -22,6 +22,7 @@ import {
   smallestConversionUnit,
   unitKind,
   unitLabel,
+  unitRateReference,
 } from "@/pages/products/productQty";
 
 function numVal(raw: string) {
@@ -292,25 +293,33 @@ export function LotUnitLines({
           ) : null}
           {showPricing ? (
             <div className="product-small-prices grid grid-cols-2 gap-2">
-              {UNIT_PRICE_FIELDS.map((field) => (
-                <Field
-                  key={field.key}
-                  label={field.label}
-                  className={cn(
-                    "product-price-field",
-                    field.key === "price" ? "is-retail" : `is-${field.key}`,
-                  )}
-                >
-                  <MoneyInput
-                    aria-label={`${unit.name || unitLabel(unit.symbol || stockSymbol)} ${field.label}`}
-                    placeholder="0.00"
-                    value={numStr(unit[field.key])}
-                    onChange={(event) =>
-                      onUnitPrice?.(unit.id, field.key, numVal(event.target.value))
+              {UNIT_PRICE_FIELDS.map((field) => {
+                const reference = unitRateReference(units, unit.id, field.key);
+                return (
+                  <Field
+                    key={field.key}
+                    label={field.label}
+                    className={cn(
+                      "product-price-field",
+                      field.key === "price" ? "is-retail" : `is-${field.key}`,
+                    )}
+                    hint={
+                      reference
+                        ? `Calculated: Rs. ${reference.value.toLocaleString("en-PK", { maximumFractionDigits: 2 })} from ${reference.source.name || unitLabel(reference.source.symbol || "")}`
+                        : undefined
                     }
-                  />
-                </Field>
-              ))}
+                  >
+                    <MoneyInput
+                      aria-label={`${unit.name || unitLabel(unit.symbol || stockSymbol)} ${field.label}`}
+                      placeholder="0.00"
+                      value={numStr(unit[field.key])}
+                      onChange={(event) =>
+                        onUnitPrice?.(unit.id, field.key, numVal(event.target.value))
+                      }
+                    />
+                  </Field>
+                );
+              })}
             </div>
           ) : null}
         </div>

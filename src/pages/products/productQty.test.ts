@@ -154,6 +154,32 @@ describe("explicit stock-reference equations", () => {
 });
 
 describe("gaz in 1 roll prices", () => {
+  it.each(["cost", "min", "wholesale", "price"] as const)(
+    "does not warn on a bigger unit when the 1:1 Piece or Gaz %s is increased",
+    (key) => {
+      for (const [smallSymbol, bigSymbol, contains] of [
+        ["pc", "pk", 12],
+        ["gaz", "roll", 90],
+      ] as const) {
+        const units = [
+          unit({ id: "small", symbol: smallSymbol, contains: 1, isBase: true, [key]: 62 }),
+          unit({
+            id: "big",
+            symbol: bigSymbol,
+            contains,
+            factorDirection: "multiply",
+            [key]: 62 * contains,
+          }),
+        ];
+        const edited = editUnitRate(units, "small", key, 65);
+        const reference = unitRateReference(edited, "big", key);
+        expect(reference?.value).toBe(65 * contains);
+        expect(reference?.belowReference).toBe(false);
+        expect(edited.find((row) => row.id === "big")?.[key]).toBe(62 * contains);
+      }
+    },
+  );
+
   it("keeps saved custom unit prices when a different unit is edited", () => {
     const units = [
       { ...roll, price: 240, wholesale: 220 },
@@ -174,7 +200,7 @@ describe("gaz in 1 roll prices", () => {
     expect(changed.find((row) => row.id === "gaz")?.price).toBe(61.11);
   });
 
-  it.each(["min", "wholesale", "price"] as const)(
+  it.each(["cost", "min", "wholesale", "price"] as const)(
     "editing Piece %s never changes Pack, even when the old rates were proportional",
     (key) => {
       const units = [
@@ -184,6 +210,13 @@ describe("gaz in 1 roll prices", () => {
       const changed = editUnitRate(units, "piece", key, 15);
       expect(changed.find((row) => row.id === "piece")?.[key]).toBe(15);
       expect(changed.find((row) => row.id === "pack")?.[key]).toBe(120);
+      const reopened = normalizeSellUnits(changed.map(({ priceManual: _manual, ...row }) => row));
+      expect(reopened.find((row) => row.id === "piece")?.[key]).toBe(15);
+      expect(reopened.find((row) => row.id === "pack")?.[key]).toBe(120);
+      expect(unitRateReference(reopened, "pack", key)?.value).toBe(180);
+      const packEdited = editUnitRate(reopened, "pack", key, 240);
+      expect(packEdited.find((row) => row.id === "piece")?.[key]).toBe(15);
+      expect(unitRateReference(packEdited, "piece", key)?.value).toBe(20);
     },
   );
 
@@ -243,7 +276,7 @@ describe("gaz in 1 roll prices", () => {
     expect(changed.find((row) => row.id === "piece")?.wholesale).toBe(0);
     expect(unitRateReference(changed, "piece", "price")?.source.id).toBe("pack");
     expect(unitRateReference(changed, "piece", "price")?.value).toBe(3.5);
-    expect(unitRateReference(changed, "box", "price")).toBeUndefined();
+    expect(unitRateReference(changed, "box", "price")?.value).toBe(105);
   });
 
   it("calculates a reference without filling or replacing manual smaller prices", () => {
@@ -887,7 +920,7 @@ describe("inventory unit cost", () => {
     const priced = synchronizeUnitCosts([pack, piece], "pack", 194);
     expect(priced.map((row) => row.cost)).toEqual([194, 8.08]);
     const corrected = deriveAll([pack, { ...piece, cost: 194, priceManual: { cost: true } }]);
-    expect(corrected.map((row) => row.cost)).toEqual([194, 8.08]);
+    expect(corrected.map((row) => row.cost)).toEqual([194, 194]);
   });
 
   it("uses the recorded pack cost even when a piece reference cost is stale", () => {

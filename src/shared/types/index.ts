@@ -26,6 +26,7 @@ export interface ShopSettings {
   showBalanceOnSlip: boolean;
   printSize: PrintSize;
   autoPrint: boolean;
+  clearInvoiceAfterPrint: boolean;
   autoSku: boolean;
   minPriceRule: boolean;
   stockPick: StockPick;
@@ -65,6 +66,7 @@ export interface ShopSettings {
   receiptPromoBold: boolean;
   showCashierName: boolean;
   showItemDiscount: boolean;
+  showUnitOnInvoice: boolean;
   receiptLanguage: ReceiptLanguage;
   tagline: string;
   contactLine: string;

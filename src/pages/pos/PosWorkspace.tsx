@@ -34,6 +34,7 @@ import {
   type PosPriceMode,
 } from "@/utils/salePricing";
 import { PrintPreview } from "@/components/print/PrintPreview";
+import { finishPosPrint, preparePosReceipt } from "@/pages/pos/posPrintFlow";
 import { CmwrPriceTip } from "@/components/common/CmwrPriceTip";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { toaster } from "@/components/common/Toast";
@@ -90,6 +91,7 @@ import {
   getInvoice,
   reviseInvoice,
   createHold,
+  updateHold,
   deleteHold,
   listHolds,
   listInvoices,
@@ -164,6 +166,7 @@ const POS_AUTO_HELD_KEY = "dukan:pos:auto-held";
 type PosHeldBill = HeldBill & { payload: HeldPayload };
 
 type ReceiptSnapshot = {
+  billKey: string;
   lines: InvoiceLine[];
   total: number;
   discount: number;
@@ -542,6 +545,7 @@ export function PosWorkspace() {
   const [printing, setPrinting] = useState(false);
   const printingRef = useRef(false);
   const saleSavingRef = useRef(false);
+  const previewHoldIdRef = useRef<string | null>(null);
   const [printLanguage, setPrintLanguage] = useState<ReceiptLanguage | undefined>();
   const [printRequestId, setPrintRequestId] = useState(0);
   const [receiptInvoiceNo, setReceiptInvoiceNo] = useState("");
@@ -1704,6 +1708,7 @@ export function PosWorkspace() {
   }
 
   function newBill(silent = false) {
+    previewHoldIdRef.current = null;
     clearPosRecovery(recoveryIdRef.current);
     recoveryIdRef.current = crypto.randomUUID();
     setCart([]);
@@ -1739,6 +1744,7 @@ export function PosWorkspace() {
       return;
     }
     if (!window.confirm(`Remove all ${cart.length} item(s) from this bill?`)) return;
+    previewHoldIdRef.current = null;
     clearPosRecovery(recoveryIdRef.current);
     recoveryIdRef.current = crypto.randomUUID();
     setCart([]);
@@ -1771,14 +1777,22 @@ export function PosWorkspace() {
     setLoading((current) => ({ ...current, hold: true }));
     const action = (async () => {
       try {
-        const hold = await createHold({
+        const holdPayload = {
           label: `${displayCustomer.name} · ${cart.length} items`,
           customerId: customerId || null,
           payload,
-        });
+        };
+        const existingId =
+          previewHoldIdRef.current ??
+          holds.find((row) => row.payload.recoveryId === recoveryIdRef.current)?.id;
+        const hold =
+          existingId && !existingId.startsWith("recovered:")
+            ? await updateHold(existingId, holdPayload)
+            : await createHold(holdPayload);
+        previewHoldIdRef.current = hold.id;
         setHolds((prev) => [
           heldBillFromPayload(hold.id, hold.label, hold.customerId ?? "", hold.heldAt, payload),
-          ...prev,
+          ...prev.filter((row) => row.id !== hold.id),
         ]);
         clearPosRecovery(recoveryIdRef.current);
         return true;
@@ -1868,6 +1882,19 @@ export function PosWorkspace() {
     setPrinting(busy);
   }
 
+  function currentPrintBillKey() {
+    return JSON.stringify([
+      recoveryIdRef.current,
+      customerId,
+      t.total,
+      appliedPaid,
+      note,
+      cart
+        .map((item) => [item.productId, item.productUnitId, item.qty, item.unitPrice])
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    ]);
+  }
+
   function makeReceiptSnapshot(
     invoiceNumber?: string,
     language?: ReceiptLanguage,
@@ -1881,6 +1908,7 @@ export function PosWorkspace() {
       ]),
     );
     return {
+      billKey: currentPrintBillKey(),
       lines: savedInvoice
         ? receiptLinesFromInvoice(savedInvoice, urduNames)
         : cart.map((item) => ({
@@ -1930,17 +1958,21 @@ export function PosWorkspace() {
 
   async function printReceipt(language: ReceiptLanguage, printNow = true) {
     if (printingRef.current || saleSavingRef.current) return;
-    if (cart.length) {
-      const savedReceipt = await completeSale();
-      if (savedReceipt) {
-        openReceipt(savedReceipt.invoiceNumber, printNow, language, savedReceipt);
-      }
-    } else if (lastCompletedReceipt) {
-      openReceipt(lastCompletedReceipt.invoiceNumber, printNow, language, lastCompletedReceipt);
-    } else showToast("Nothing to print");
+    if (holdInFlightRef.current && !(await holdInFlightRef.current)) return;
+    await preparePosReceipt({
+      hasItems: cart.length > 0,
+      editing: Boolean(editInvoiceId),
+      printNow,
+      saveDraft: saveCurrentAsHold,
+      previewDraft: () => openReceipt("", false, language),
+      saveInvoice: saveSaleForPrint,
+      showReceipt: (receipt) => openReceipt(receipt.invoiceNumber, printNow, language, receipt),
+      lastReceipt: lastCompletedReceipt,
+      nothingToPrint: () => showToast("Nothing to print"),
+    });
   }
 
-  async function completeSale(): Promise<ReceiptSnapshot | null> {
+  async function saveSaleForPrint(): Promise<ReceiptSnapshot | null> {
     if (saleSavingRef.current) return null;
     if (!cart.length) {
       showToast("Cart is empty");
@@ -2016,10 +2048,6 @@ export function PosWorkspace() {
       const invoice = editInvoiceId
         ? await reviseInvoice(editInvoiceId, salePayload)
         : await completeSaleRequest(salePayload);
-      if (editInvoiceId) {
-        setSearchParams({});
-        setEditInvoiceNumber("");
-      }
       setInvoices((prev) => [
         {
           id: invoice.id,
@@ -2075,12 +2103,23 @@ export function PosWorkspace() {
       showToast(
         wasEditing
           ? `Invoice ${invoice.invoiceNumber} updated`
-          : `Sale ${invoice.invoiceNumber} complete`,
+          : `Invoice ${invoice.invoiceNumber} saved`,
       );
-      newBill(true);
+      const heldId = previewHoldIdRef.current;
+      if (heldId) {
+        previewHoldIdRef.current = null;
+        void deleteHold(heldId)
+          .then(() => setHolds((rows) => rows.filter((row) => row.id !== heldId)))
+          .catch(() => toaster.warn("Invoice saved, but its held copy could not be removed."));
+      }
+      // Keep the same persisted invoice attached to this cart, so retrying a
+      // print (or choosing not to clear) revises it instead of making a sale twice.
+      clearPosRecovery(recoveryIdRef.current);
+      setReceiptInvoiceNo(invoice.invoiceNumber);
+      setSearchParams({ edit: invoice.id });
       return savedReceipt;
     } catch (error) {
-      const message = errorToastMessage(error, "Could not complete sale");
+      const message = errorToastMessage(error, "Could not save invoice");
       if (message) showToast(message);
       return null;
     } finally {
@@ -2148,7 +2187,7 @@ export function PosWorkspace() {
         });
       },
       F11: () => switchAllCart(),
-      F12: () => completeSale(),
+      F12: () => printReceipt(settings.receiptLanguage),
       Unit: () => focusUnitBar(),
     };
   });
@@ -3466,10 +3505,10 @@ export function PosWorkspace() {
             <button
               type="button"
               className="btn-sale [grid-column:1_/_-1] [height:48px] [border:0] [background:var(--sale)] [color:#fff] [border-radius:6px] [font-size:16px] [font-weight:700] [cursor:pointer] [transition:background_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:8px]"
-              disabled={!cart.length || !paymentOk || loading.sale || loading.hold}
-              onClick={() => void completeSale()}
+              disabled={!cart.length || !paymentOk || loading.sale || loading.hold || printing}
+              onClick={() => void printReceipt(settings.receiptLanguage)}
             >
-              {loading.sale ? "Saving sale…" : "Complete Sale · F12"}
+              {loading.sale ? "Saving sale…" : printing ? "Printing…" : "Save & print · F12"}
             </button>
           </div>
         </aside>
@@ -3535,6 +3574,8 @@ export function PosWorkspace() {
                         return recompute({ ...line, productUnitId: unit?.id ?? "" });
                       });
                       setCart(restored);
+                      previewHoldIdRef.current = null;
+                      recoveryIdRef.current = h.payload.recoveryId ?? crypto.randomUUID();
                       setCustomerId(h.payload.customerId);
                       setGuestName(h.payload.guestName);
                       setGuestPhone(h.payload.guestPhone);
@@ -3807,6 +3848,14 @@ export function PosWorkspace() {
           setReceiptSnap(null);
         }}
         onPrintingChange={setPrintBusy}
+        onPrinted={() => {
+          // A slow printer must never clear a new bill or edits made while it spooled.
+          if (receiptSnap?.billKey !== currentPrintBillKey()) return;
+          finishPosPrint(settings.clearInvoiceAfterPrint, () => {
+            setSearchParams({});
+            newBill(true);
+          });
+        }}
         onPrintDraft={() => void printReceipt(receiptSnap?.language ?? settings.receiptLanguage)}
         savingDraft={loading.sale}
         customer={receiptSnap?.customer ?? displayCustomer}

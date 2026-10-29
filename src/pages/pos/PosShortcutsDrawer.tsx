@@ -50,7 +50,12 @@ export function PosShortcutsDrawer({
       "Switch prices for every cart line",
       "F11",
     ),
-    functionAction("complete", "Complete sale", "Validate and save the invoice", "F12"),
+    functionAction(
+      "complete",
+      "Save & print",
+      "Save the invoice and send it to the printer",
+      "F12",
+    ),
     {
       id: "add-customer",
       label: "Add customer",

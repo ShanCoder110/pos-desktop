@@ -1755,8 +1755,7 @@ export function ProductForm({
                       ] as const
                     ).map(([key, label]) => {
                       const value = unitPrice(row, key);
-                      const reference =
-                        key === "cost" ? undefined : unitRateReference(sellUnits, row.id, key);
+                      const reference = unitRateReference(sellUnits, row.id, key);
                       const priceError =
                         showValidation || error === "unitPrices"
                           ? unitPriceMissingError(value)

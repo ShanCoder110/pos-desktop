@@ -26,6 +26,7 @@ import { buildReceiptPrintHtml, RECEIPT_THERMAL_CSS } from "@/utils/receiptTherm
 import { shouldSplitThermalBill, splitBillPages } from "@/utils/splitBillPages";
 import { isTauri } from "@tauri-apps/api/core";
 import { captureReceiptPages } from "@/utils/receiptCapture";
+import { confirmBrowserPrint } from "@/pages/pos/posPrintFlow";
 
 function thermalFailure(result: ThermalPrintResult) {
   if (result.ok) return null;
@@ -64,6 +65,7 @@ export function PrintPreview({
   directPrint = false,
   onPrintingChange,
   onPrintDraft,
+  onPrinted,
   savingDraft = false,
   /** POS Urdu/EN print button — overrides Settings → receipt language for this slip only. */
   languageOverride,
@@ -89,6 +91,8 @@ export function PrintPreview({
   onPrintingChange?: (printing: boolean) => void;
   /** Save a POS draft before printing; a draft receipt is not an invoice. */
   onPrintDraft?: () => void;
+  /** Only called after desktop printer acceptance or explicit browser print confirmation. */
+  onPrinted?: () => void;
   savingDraft?: boolean;
 }) {
   const { settings: savedSettings, setSettings } = useSettings();
@@ -101,6 +105,8 @@ export function PrintPreview({
   const handledPrintRequestRef = useRef("");
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const onPrintedRef = useRef(onPrinted);
+  onPrintedRef.current = onPrinted;
   const onPrintingChangeRef = useRef(onPrintingChange);
   onPrintingChangeRef.current = onPrintingChange;
   const [printing, setPrinting] = useState(false);
@@ -185,6 +191,12 @@ export function PrintPreview({
       // Browser / Vite: use the system print dialog. Desktop: silent ESC/POS.
       if (!isTauri()) {
         await printDialog(node);
+        // afterprint also fires on Cancel; never use it alone to clear a POS bill.
+        confirmBrowserPrint(onPrintedRef.current, () =>
+          window.confirm(
+            "Did the receipt print successfully? Choose Cancel to keep the invoice in POS.",
+          ),
+        );
         printerOverrideRef.current = null;
         if (directPrint) onCloseRef.current();
         return true;
@@ -211,6 +223,7 @@ export function PrintPreview({
         return true;
       }
       toaster.success("Receipt sent to printer.");
+      onPrintedRef.current?.();
       printerOverrideRef.current = null;
       if (directPrint) onCloseRef.current();
       return true;

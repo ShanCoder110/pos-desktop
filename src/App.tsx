@@ -74,6 +74,9 @@ const PrinterSection = lazy(() =>
 const ProductsSection = lazy(() =>
   import("@/pages/settings/sections/ProductsSection").then((m) => ({ default: m.ProductsSection })),
 );
+const PosSection = lazy(() =>
+  import("@/pages/settings/sections/PosSection").then((m) => ({ default: m.PosSection })),
+);
 const ProfileSection = lazy(() =>
   import("@/pages/settings/sections/ProfileSection").then((m) => ({ default: m.ProfileSection })),
 );
@@ -218,6 +221,7 @@ export default function App() {
                     <Route index element={<ProfileSection />} />
                     <Route path="receipt" element={<ReceiptSection />} />
                     <Route path="products" element={<ProductsSection />} />
+                    <Route path="pos" element={<PosSection />} />
                     <Route path="localization" element={<LocalizationSection />} />
                     <Route path="printer" element={<PrinterSection />} />
                     <Route path="devices" element={<DevicesSection />} />

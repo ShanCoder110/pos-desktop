@@ -403,7 +403,9 @@ export function InvoiceThermalReceipt({
                       {displayName}
                     </div>
                   </td>
-                  <td className="receipt-col-qty">{formatQty(line.qty, line.unit, isUrdu)}</td>
+                  <td className="receipt-col-qty">
+                    {formatQty(line.qty, settings.showUnitOnInvoice ? line.unit : "", isUrdu)}
+                  </td>
                   <td className="receipt-col-price">{formatRs(line.price)}</td>
                   <td className="receipt-col-total receipt-bold">
                     {formatRs(line.qty * line.price)}
