@@ -62,6 +62,76 @@ function unit(
   };
 }
 
+describe("any added unit can be a conversion reference", () => {
+  it.each([
+    ["Roll", "roll", "Piece", "pc", 100],
+    ["Pack", "pk", "Gaz", "gaz", 12],
+    ["Meter", "m", "Box", "box", 0.5],
+  ] as const)(
+    "supports 1 %s in an added %s reference regardless of names",
+    (name, symbol, referenceName, referenceSymbol, quantity) => {
+      const reference = unit({
+        id: "reference",
+        name: referenceName,
+        symbol: referenceSymbol,
+        isBase: true,
+        isDefault: true,
+        factorDirection: "multiply",
+      });
+      const added = unit({
+        id: "added",
+        name,
+        symbol,
+        contains: 0,
+        isBase: false,
+        isDefault: false,
+      });
+      expect(conversionReferenceUnits([reference, added], added.id).map((row) => row.id)).toEqual([
+        reference.id,
+      ]);
+      const configured = setUnitConversionFromReference(
+        [reference, added],
+        added.id,
+        reference.id,
+        quantity,
+      );
+      const reopened = normalizeSellUnits(configured);
+      expect(unitConversionForCard(reopened, added.id, reference.id)?.quantity).toBe(quantity);
+      expect(unitConversionForCard(reopened, reference.id, added.id)?.quantity).toBeCloseTo(
+        1 / quantity,
+        4,
+      );
+      expect(unitConversionForCard(reopened, reference.id, reference.id)?.quantity).toBe(1);
+      expect(conversionReferenceUnits(reopened, reference.id).map((row) => row.id)).toContain(
+        added.id,
+      );
+    },
+  );
+
+  it("allows every configured added unit, but excludes blank or unconfigured rows", () => {
+    const rows = [
+      unit({ id: "piece", name: "Piece", symbol: "pc", isBase: true, factorDirection: "multiply" }),
+      unit({
+        id: "roll",
+        name: "Roll",
+        symbol: "roll",
+        contains: 100,
+        factorDirection: "multiply",
+      }),
+      unit({ id: "box", name: "Box", symbol: "box", contains: 5, factorDirection: "multiply" }),
+      unit({ id: "blank", name: "", symbol: "" }),
+      unit({ id: "pending", name: "Gaz", symbol: "gaz", contains: 0 }),
+    ];
+    for (const id of ["piece", "roll", "box"]) {
+      expect(conversionReferenceUnits(rows, id).map((row) => row.id)).toEqual([
+        "piece",
+        "box",
+        "roll",
+      ]);
+    }
+  });
+});
+
 const roll = unit({
   id: "roll",
   symbol: "roll",

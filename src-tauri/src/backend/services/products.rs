@@ -504,7 +504,20 @@ impl ProductService {
         if let Some(sell_units) = request.sell_units {
             if let Some(new_stock) = sell_units.iter().find(|unit| unit.is_base) {
                 let new_unit_id = parse_uuid(&new_stock.unit_id, "sellUnits.unitId")?;
-                if new_unit_id != previous_base_unit_id {
+                // Editing the existing stock card changes its label only. Even
+                // if the old unit is added as another card, do not rescale stock.
+                let relabels_stock = if new_unit_id != previous_base_unit_id {
+                    ProductRepository::list_units(&transaction, id)
+                        .await?
+                        .iter()
+                        .any(|old| {
+                            old.is_base
+                                && new_stock.id.as_deref() == Some(old.id.to_string().as_str())
+                        })
+                } else {
+                    false
+                };
+                if new_unit_id != previous_base_unit_id && !relabels_stock {
                     if let Some(old_as_new) = sell_units
                         .iter()
                         .find(|row| row.unit_id == previous_base_unit_id.to_string())

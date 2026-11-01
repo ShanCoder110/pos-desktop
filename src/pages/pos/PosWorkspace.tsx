@@ -34,7 +34,7 @@ import {
   type PosPriceMode,
 } from "@/utils/salePricing";
 import { PrintPreview } from "@/components/print/PrintPreview";
-import { finishPosPrint, preparePosReceipt } from "@/pages/pos/posPrintFlow";
+import { completePosInvoice, finishPosPrint, preparePosReceipt } from "@/pages/pos/posPrintFlow";
 import { CmwrPriceTip } from "@/components/common/CmwrPriceTip";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { toaster } from "@/components/common/Toast";
@@ -891,8 +891,8 @@ export function PosWorkspace() {
       const units = sellUnitsFor(product);
       const unitRow = units.find((u) => u.id === item.productUnitId) ?? sellUnitOf(product, "base");
       if (!unitRow?.id) continue;
-      const packN = stockPerUnit(unitRow);
-      const sellU = unitRow.name || unitRow.symbol || product.unit;
+      const packN = item.quantity > 0 ? item.baseQuantity / item.quantity : stockPerUnit(unitRow);
+      const sellU = item.unitName || unitRow.name || unitRow.symbol || product.unit;
       const tierMin = unitTierPrice(unitRow, "minimum");
       lines.push(
         recompute({
@@ -1965,14 +1965,23 @@ export function PosWorkspace() {
       printNow,
       saveDraft: saveCurrentAsHold,
       previewDraft: () => openReceipt("", false, language),
-      saveInvoice: saveSaleForPrint,
+      saveInvoice: saveCurrentInvoice,
       showReceipt: (receipt) => openReceipt(receipt.invoiceNumber, printNow, language, receipt),
       lastReceipt: lastCompletedReceipt,
       nothingToPrint: () => showToast("Nothing to print"),
     });
   }
 
-  async function saveSaleForPrint(): Promise<ReceiptSnapshot | null> {
+  async function completeInvoice() {
+    if (printingRef.current || saleSavingRef.current) return;
+    if (holdInFlightRef.current && !(await holdInFlightRef.current)) return;
+    await completePosInvoice(saveCurrentInvoice, () => {
+      setSearchParams({});
+      newBill(true);
+    });
+  }
+
+  async function saveCurrentInvoice(): Promise<ReceiptSnapshot | null> {
     if (saleSavingRef.current) return null;
     if (!cart.length) {
       showToast("Cart is empty");
@@ -2187,7 +2196,7 @@ export function PosWorkspace() {
         });
       },
       F11: () => switchAllCart(),
-      F12: () => printReceipt(settings.receiptLanguage),
+      F12: () => completeInvoice(),
       Unit: () => focusUnitBar(),
     };
   });
@@ -3506,9 +3515,9 @@ export function PosWorkspace() {
               type="button"
               className="btn-sale [grid-column:1_/_-1] [height:48px] [border:0] [background:var(--sale)] [color:#fff] [border-radius:6px] [font-size:16px] [font-weight:700] [cursor:pointer] [transition:background_.1s] [display:inline-flex] [align-items:center] [justify-content:center] [gap:8px]"
               disabled={!cart.length || !paymentOk || loading.sale || loading.hold || printing}
-              onClick={() => void printReceipt(settings.receiptLanguage)}
+              onClick={() => void completeInvoice()}
             >
-              {loading.sale ? "Saving sale…" : printing ? "Printing…" : "Save & print · F12"}
+              {loading.sale ? "Saving sale…" : "Complete · F12"}
             </button>
           </div>
         </aside>

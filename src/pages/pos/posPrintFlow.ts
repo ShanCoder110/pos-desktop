@@ -1,4 +1,4 @@
-/** Preview saves unfinished work. Only a print request prepares a final invoice. */
+/** Preview saves unfinished work; printing prepares a final invoice first. */
 export async function preparePosReceipt<T>(flow: {
   hasItems: boolean;
   editing: boolean;
@@ -28,4 +28,13 @@ export function confirmBrowserPrint(onPrinted: (() => void) | undefined, confirm
 
 export function finishPosPrint(clearAfterPrint: boolean, clearInvoice: () => void) {
   if (clearAfterPrint) clearInvoice();
+}
+
+/** Complete is save-only. Failed validation/saves must leave the bill intact. */
+export async function completePosInvoice<T>(
+  saveInvoice: () => Promise<T | null>,
+  clearInvoice: () => void,
+) {
+  const invoice = await saveInvoice();
+  if (invoice) clearInvoice();
 }

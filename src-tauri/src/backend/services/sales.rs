@@ -2939,6 +2939,51 @@ mod tests {
             30.0
         );
 
+        // Correct the stock unit label after selling on credit. This is a
+        // label-only edit: all current quantities and prices stay numeric peers.
+        let pack = MasterService::list(&database, MasterKind::Unit, Default::default())
+            .await
+            .expect("units")
+            .data
+            .into_iter()
+            .find(|u| u.symbol.as_deref() == Some("pk"))
+            .expect("pack");
+        let relabeled = ProductService::update(
+            &database,
+            &context,
+            Uuid::parse_str(&product.id).unwrap(),
+            serde_json::from_value(serde_json::json!({
+                "sellUnits": [{
+                    "id": unit_id,
+                    "unitId": pack.id,
+                    "name": "Pack",
+                    "contains": 1,
+                    "factorDirection": "multiply",
+                    "cost": 8, "min": 10, "wholesale": 12, "price": 15,
+                    "isBase": true, "isDefault": true
+                }, {
+                    "unitId": unit.id,
+                    "name": "Piece", "contains": 12,
+                    "factorDirection": "divide",
+                    "cost": 1, "min": 1, "wholesale": 1, "price": 2,
+                    "isBase": false, "isDefault": false
+                }]
+            }))
+            .expect("label update request"),
+        )
+        .await
+        .expect("correct stock unit label");
+        assert_eq!(relabeled.stock, 198.0);
+        assert_eq!(relabeled.cost, 8.0);
+        assert_eq!(relabeled.sell_units[0].name, "Pack");
+        assert_eq!(relabeled.sell_units[0].id, unit_id);
+        let historical = SalesService::get(&database, Uuid::parse_str(&sale.id).unwrap())
+            .await
+            .expect("historical invoice");
+        assert_eq!(historical.items[0].unit_name, "Piece");
+        assert_eq!(historical.items[0].displayed_quantity, 2.0);
+        assert_eq!(historical.total, 30.0);
+
         // Customer payment 5 → allocates onto this invoice (paid 5 / credit 25).
         CreditService::customer_payment(
             &database,
@@ -3052,6 +3097,7 @@ mod tests {
         )
         .await
         .expect("revise up");
+        assert_eq!(revised.items[0].unit_name, "Piece");
         assert_eq!(revised.total, 45.0);
         assert_eq!(
             revised.paid_amount, 5.0,

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { confirmBrowserPrint, finishPosPrint, preparePosReceipt } from "./posPrintFlow";
+import {
+  completePosInvoice,
+  confirmBrowserPrint,
+  finishPosPrint,
+  preparePosReceipt,
+} from "./posPrintFlow";
 
 function flow() {
   return {
@@ -16,6 +21,26 @@ function flow() {
 }
 
 describe("POS preview and print lifecycle", () => {
+  it("completes an invoice by saving then clearing, without opening a receipt", async () => {
+    const f = flow();
+    const clear = vi.fn();
+    await completePosInvoice(f.saveInvoice, clear);
+    expect(f.saveInvoice).toHaveBeenCalledOnce();
+    expect(clear).toHaveBeenCalledOnce();
+    expect(f.showReceipt).not.toHaveBeenCalled();
+    expect(f.previewDraft).not.toHaveBeenCalled();
+  });
+  it("keeps the invoice when Complete cannot save", async () => {
+    const clear = vi.fn();
+    await completePosInvoice(async () => null, clear);
+    expect(clear).not.toHaveBeenCalled();
+    await expect(
+      completePosInvoice(async () => {
+        throw new Error("offline");
+      }, clear),
+    ).rejects.toThrow("offline");
+    expect(clear).not.toHaveBeenCalled();
+  });
   it("clears only when the POS after-print setting is enabled", () => {
     const clear = vi.fn();
     finishPosPrint(false, clear);

@@ -35,6 +35,14 @@ struct ReturnCountRow {
     count: i64,
 }
 
+#[derive(Debug, FromQueryResult)]
+struct HistoricalUnitRow {
+    product_id: Uuid,
+    product_unit_id: Option<Uuid>,
+    unit_name: String,
+    conversion_to_base: Decimal,
+}
+
 pub async fn revise_invoice(
     transaction: &DatabaseTransaction,
     context: &RequestContext,
@@ -74,6 +82,16 @@ pub async fn revise_invoice(
     if revise_request_is_noop(transaction, &header, invoice_id, request).await? {
         return Ok(());
     }
+
+    // Product unit labels can be corrected after a sale. Preserve the sold
+    // unit and conversion when revising an existing line, including credit sales.
+    let historical_units = HistoricalUnitRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "SELECT product_id, product_unit_id, unit_name, conversion_to_base FROM invoice_items WHERE invoice_id = ? ORDER BY created_at, id",
+        [invoice_id.into()],
+    ))
+    .all(transaction)
+    .await?;
 
     let before_json = serde_json::json!({
         "subtotal": header.subtotal,
@@ -156,7 +174,7 @@ pub async fn revise_invoice(
     for item in &request.items {
         let product_id = parse_uuid(&item.product_id, "items.productId")?;
         let product_unit_id = parse_uuid(&item.product_unit_id, "items.productUnitId")?;
-        let row = ProductUnitRow::find_by_statement(Statement::from_sql_and_values(
+        let mut row = ProductUnitRow::find_by_statement(Statement::from_sql_and_values(
             DbBackend::Sqlite,
             "SELECT p.name AS product_name, p.sku, pu.display_name AS unit_display_name, pu.conversion_to_base, pu.factor_direction, pu.minimum_price FROM products p JOIN product_units pu ON pu.product_id = p.id WHERE p.id = ? AND pu.id = ? AND p.deleted_at IS NULL AND pu.deleted_at IS NULL LIMIT 1",
             [product_id.into(), product_unit_id.into()],
@@ -164,6 +182,14 @@ pub async fn revise_invoice(
         .one(transaction)
         .await?
         .ok_or(AppError::NotFound(crate::backend::constants::ERROR_PRODUCT_NOT_FOUND))?;
+
+        if let Some(saved) = historical_units.iter().find(|saved| {
+            saved.product_id == product_id && saved.product_unit_id == Some(product_unit_id)
+        }) {
+            row.unit_display_name = saved.unit_name.clone();
+            row.conversion_to_base = saved.conversion_to_base;
+            row.factor_direction = crate::backend::qty::FACTOR_MULTIPLY.into();
+        }
 
         let displayed = quantity(item.quantity);
         let base_quantity = to_base_qty(displayed, row.conversion_to_base, &row.factor_direction);

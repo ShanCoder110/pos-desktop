@@ -52,8 +52,8 @@ export function PosShortcutsDrawer({
     ),
     functionAction(
       "complete",
-      "Save & print",
-      "Save the invoice and send it to the printer",
+      "Complete",
+      "Save the invoice without printing and start a new bill",
       "F12",
     ),
     {

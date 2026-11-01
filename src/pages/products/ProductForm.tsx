@@ -702,7 +702,6 @@ export function ProductForm({
   }
 
   function setInventoryUnit(v: string, displayName = unitLabel(v)) {
-    if (!isNew) return;
     const current = productRef.current;
     const existing = sellUnits.find(
       (unit) => (unit.symbol || "").trim().toLowerCase() === v.trim().toLowerCase(),
@@ -1628,7 +1627,7 @@ export function ProductForm({
                         searchPlaceholder="Type to search"
                         options={sellUnitOptions(row, sellUnits, unitRows)}
                         clearable={false}
-                        disabled={creatingUnit || (!isNew && isCanonical)}
+                        disabled={creatingUnit}
                         onCreate={(label) => void addUnit(label, row.id)}
                         createLabel="Add unit"
                       />
