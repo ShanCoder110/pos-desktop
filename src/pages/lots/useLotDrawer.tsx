@@ -360,7 +360,11 @@ export function useLotDrawer() {
   async function refreshAffectedProduct(productId: string) {
     try {
       const updated = await getProduct(productId);
-      setProducts((current) => current.map((row) => (row.id === updated.id ? updated : row)));
+      setProducts((current) =>
+        current.some((row) => row.id === updated.id)
+          ? current.map((row) => (row.id === updated.id ? updated : row))
+          : [...current, updated],
+      );
     } catch (error) {
       toaster.error(shortError(error, "Lot saved, but product totals could not refresh"));
     }
@@ -411,6 +415,7 @@ export function useLotDrawer() {
           }
         }
         setLots((current) => [created, ...current]);
+        await refreshAffectedProduct(lot.productId);
         // The visible table refetches its current page; do not crawl both catalogs.
         bumpListsEpoch();
         toaster.success(
@@ -420,7 +425,6 @@ export function useLotDrawer() {
         );
         savingRef.current = false;
         closeLotDrawer();
-        void refreshAffectedProduct(lot.productId);
       } catch (error) {
         toaster.error(error instanceof Error ? error.message : "Could not receive lot");
       } finally {
@@ -471,11 +475,11 @@ export function useLotDrawer() {
         }
       }
       setLots((current) => current.map((row) => (row.id === updatedLot.id ? updatedLot : row)));
+      await refreshAffectedProduct(next.productId);
       bumpListsEpoch();
       toaster.success("Lot updated");
       savingRef.current = false;
       closeLotDrawer();
-      void refreshAffectedProduct(next.productId);
     } catch (error) {
       toaster.error(shortError(error, "Could not update lot"));
     } finally {

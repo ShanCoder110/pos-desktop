@@ -1,5 +1,16 @@
 export type PosDiscountMode = "rs" | "pct";
 
+export function posLineDiscount(
+  line: { priceMode: string; listPrice: number; minPrice: number; unitPrice: number; qty: number },
+  wholesaleBelowMinimumOnly: boolean,
+) {
+  const reference =
+    wholesaleBelowMinimumOnly && line.priceMode === "wholesale"
+      ? Math.min(line.listPrice, line.minPrice)
+      : line.listPrice;
+  return +(Math.max(0, reference - line.unitPrice) * line.qty).toFixed(2);
+}
+
 export function convertBillDiscount(
   nextMode: PosDiscountMode,
   afterLineTotal: number,

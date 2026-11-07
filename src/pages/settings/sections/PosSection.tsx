@@ -2,18 +2,28 @@ import { Toggle } from "@/components/common";
 import { SettingsSection } from "@/pages/settings/SettingsSection";
 import { useSettingsForm } from "@/shared/settings";
 
-const KEYS = ["clearInvoiceAfterPrint"] as const;
+const KEYS = ["clearInvoiceAfterPrint", "wholesaleDiscountBelowMinimumOnly"] as const;
 
 export function PosSection() {
   const { draft, patch, dirty, save, reset } = useSettingsForm(KEYS);
   return (
     <SettingsSection
       title="POS"
-      hint="Choose what stays on the counter after printing"
+      hint="Choose how POS handles pricing and printing"
       dirty={dirty}
       onSave={save}
       onReset={reset}
     >
+      <Toggle
+        checked={draft.wholesaleDiscountBelowMinimumOnly}
+        onChange={(value) => patch({ wholesaleDiscountBelowMinimumOnly: value })}
+        label="Count wholesale discounts only below minimum price"
+      />
+      <p className="settings-note">
+        On: reducing a wholesale price from Rs 100 to Rs 95 with a Rs 90 minimum is a price change,
+        with no discount. Only the amount below minimum counts as a discount. Off: count the full
+        reduction from wholesale price. Bill discounts stay separate.
+      </p>
       <Toggle
         checked={draft.clearInvoiceAfterPrint}
         onChange={(value) => patch({ clearInvoiceAfterPrint: value })}

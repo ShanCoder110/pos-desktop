@@ -19,12 +19,34 @@ export function productBelongsToSupplier(
   return lots.some((lot) => lot.productId === product.id && lot.supplierId === supplierId);
 }
 
+const supplierCounts = new WeakMap<Product[], WeakMap<ProductLotRow[], Map<string, number>>>();
+
 export function supplierProductCount(
   supplierId: string,
   products: Product[],
   lots: ProductLotRow[],
 ) {
-  return products.filter((product) => productBelongsToSupplier(product, supplierId, lots)).length;
+  let byLots = supplierCounts.get(products);
+  if (!byLots) {
+    byLots = new WeakMap();
+    supplierCounts.set(products, byLots);
+  }
+  let counts = byLots.get(lots);
+  if (!counts) {
+    const productIds = new Set(products.map((product) => product.id));
+    const links = new Map<string, Set<string>>();
+    const add = (supplier: string | undefined, productId: string) => {
+      if (!supplier || !productIds.has(productId)) return;
+      const ids = links.get(supplier) ?? new Set<string>();
+      ids.add(productId);
+      links.set(supplier, ids);
+    };
+    products.forEach((product) => add(product.supplierId, product.id));
+    lots.forEach((lot) => add(lot.supplierId, lot.productId));
+    counts = new Map([...links].map(([supplier, ids]) => [supplier, ids.size]));
+    byLots.set(lots, counts);
+  }
+  return counts.get(supplierId) ?? 0;
 }
 
 export function mergeHubSuppliers(

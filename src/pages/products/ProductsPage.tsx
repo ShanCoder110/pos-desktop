@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLotDrawer } from "@/pages/lots/useLotDrawer";
+import { mergeProductSearchRows } from "@/pages/products/productSearchRows";
 import { QuickReorderPopover } from "@/components/reorders/QuickReorderPopover";
 import {
   AlertTriangle,
@@ -407,6 +408,8 @@ export function ProductsPage() {
     loading,
     refreshHub,
     refreshLots,
+    listsEpoch,
+    bumpListsEpoch,
   } = useProductsHub();
   const categoryOptions = categories.map((c) => c.name);
   const supplierOptions = suppliers.map((s) => s.name);
@@ -517,7 +520,7 @@ export function ProductsPage() {
         if ((error as { name?: string })?.name !== "AbortError") setRemoteRows([]);
       });
     return () => controller.abort();
-  }, [debouncedGlobalQuery]);
+  }, [debouncedGlobalQuery, listsEpoch]);
 
   useEffect(() => {
     setPage(1);
@@ -586,9 +589,7 @@ export function ProductsPage() {
 
   const searchRows = useMemo(() => {
     if (!q.trim() || !remoteRows.length) return rows;
-    const merged = new Map(rows.map((product) => [product.id, product]));
-    remoteRows.forEach((product) => merged.set(product.id, product));
-    return [...merged.values()];
+    return mergeProductSearchRows(rows, remoteRows);
   }, [q, remoteRows, rows]);
 
   const filtered = useMemo(() => {
@@ -848,6 +849,7 @@ export function ProductsPage() {
         navigate(productsHref());
       }
       if (createsOpeningLot) void refreshLots();
+      bumpListsEpoch();
       return true;
     } catch (error) {
       const message = shortError(error, PRODUCT_COPY.saveFailed);

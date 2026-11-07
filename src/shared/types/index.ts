@@ -27,6 +27,7 @@ export interface ShopSettings {
   printSize: PrintSize;
   autoPrint: boolean;
   clearInvoiceAfterPrint: boolean;
+  wholesaleDiscountBelowMinimumOnly: boolean;
   autoSku: boolean;
   minPriceRule: boolean;
   stockPick: StockPick;

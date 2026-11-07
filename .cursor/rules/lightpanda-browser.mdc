@@ -1,0 +1,31 @@
+---
+description: Use Lightpanda for browser automation instead of other browsers
+alwaysApply: true
+---
+
+# Lightpanda browser
+
+When browser automation, UI verification, or CDP access is needed, use **Lightpanda** (not Chrome/Playwright defaults).
+
+## Install (already on this machine)
+
+- Binary: `/Users/m2pro/.local/bin/lightpanda`
+- PATH: `$HOME/.local/bin` (already in `~/.zshrc` / `~/.zprofile`)
+- Channel: nightly (`lightpanda-aarch64-macos`)
+
+## Start before browser work
+
+```bash
+lightpanda serve --host 127.0.0.1 --port 9222
+```
+
+CDP endpoint: `http://127.0.0.1:9222`
+
+If Lightpanda is not already listening on `127.0.0.1:9222`, start it in the background, then connect.
+
+## Agent behavior
+
+1. Prefer the **lightpanda** MCP server (`lightpanda mcp`) for headless browse/fetch checks.
+2. For raw CDP, run `lightpanda serve --host 127.0.0.1 --port 9222` and use that endpoint.
+3. Keep Cursor IDE browser MCP only when a visible in-IDE tab is required.
+4. Do not reinstall Lightpanda unless the binary is missing — update with the same nightly URL if needed.

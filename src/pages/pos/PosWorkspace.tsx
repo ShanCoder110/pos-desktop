@@ -45,6 +45,7 @@ import { PosBillsMenu, PosFunctionBar, PosLoadingOverlay } from "@/pages/pos/Pos
 import { PosShortcutsDrawer } from "@/pages/pos/PosShortcutsDrawer";
 import {
   convertBillDiscount,
+  posLineDiscount,
   paymentStatusLabel,
   wholesaleCartToast,
 } from "@/pages/pos/posBilling";
@@ -487,7 +488,15 @@ export function PosWorkspace() {
   const [pendingProductUnitId, setPendingProductUnitId] = useState("");
   const [qtyInput, setQtyInput] = useState("1");
   const [priceMode, setPriceMode] = useState<PriceMode>("retail");
-  const [cart, setCart] = useState<CartLine[]>([]);
+  const [cartState, setCart] = useState<CartLine[]>([]);
+  const cart = useMemo(
+    () =>
+      cartState.map((line) => ({
+        ...line,
+        lineDisc: posLineDiscount(line, settings.wholesaleDiscountBelowMinimumOnly ?? true),
+      })),
+    [cartState, settings.wholesaleDiscountBelowMinimumOnly],
+  );
   const [editInvoiceNumber, setEditInvoiceNumber] = useState("");
   const [editCreditOpen, setEditCreditOpen] = useState(0);
   /** Later customer-payment allocations on the invoice being edited (not sale tenders). */
@@ -1068,7 +1077,7 @@ export function PosWorkspace() {
   const cartOverStock = cart.some((item) => cartStock(item.productId, item.id) < -0.0001);
 
   function totals() {
-    const gross = cart.reduce((s, i) => s + i.listPrice * i.qty, 0);
+    const gross = cart.reduce((s, i) => s + i.amount + i.lineDisc, 0);
     const lineDisc = cart.reduce((s, i) => s + i.lineDisc, 0);
     const afterLine = Math.max(0, gross - lineDisc);
     let billDisc =

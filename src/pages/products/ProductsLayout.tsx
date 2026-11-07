@@ -713,7 +713,9 @@ export function ProductsLayout() {
       const quiet = options?.quiet ?? false;
       if (guard && !guard.isActive()) return;
       // quiet: refresh table data in place (no KPI/table skeleton flash).
-      if (!quiet) setLoading((current) => ({ ...current, hub: true }));
+      if (!quiet && !(options?.reuseLoaded && loaded.current.catalog)) {
+        setLoading((current) => ({ ...current, hub: true }));
+      }
       try {
         // Products are required for the catalog. Side queries soft-fail only on
         // 403 (e.g. GET /stock/movements?movementType=ADJUSTMENT for cashiers).
@@ -727,10 +729,14 @@ export function ProductsLayout() {
         // for their tables and drawers. The catalog snapshot supplies these
         // together instead of leaving blank product cells or raw IDs.
         const needCatalog =
-          (section === "catalog" || section === "transfers" || section === "reorders") &&
+          (section === "catalog" ||
+            section === "suppliers" ||
+            section === "transfers" ||
+            section === "reorders") &&
           (!options?.reuseLoaded || !loaded.current.catalog);
         const needProducts =
           section !== "catalog" &&
+          section !== "suppliers" &&
           section !== "transfers" &&
           section !== "reorders" &&
           (!options?.reuseLoaded || !loaded.current.products);
@@ -747,7 +753,7 @@ export function ProductsLayout() {
         ] = await Promise.all([
           needCatalog ? listProductCatalog(signal) : Promise.resolve(null),
           needProducts ? listAllProducts(signal) : Promise.resolve(null),
-          !reuseCatalogData && (section === "lots" || section === "suppliers" || section === "low")
+          !reuseCatalogData && (section === "lots" || section === "low")
             ? hubSideQuery(listAllLots({}, signal), [])
             : Promise.resolve(null),
           !reuseCatalogData && (section === "categories" || section === "low")
@@ -768,7 +774,7 @@ export function ProductsLayout() {
                 [],
               )
             : Promise.resolve(null),
-          !reuseCatalogData && (section === "lots" || section === "suppliers" || section === "low")
+          !reuseCatalogData && (section === "lots" || section === "low")
             ? hubSideQuery(
                 listMasterRecords("suppliers", { perPage: MAX_PAGE_SIZE }, signal).then((r) =>
                   r.data.map(({ id, name, isActive, cityId, cityName }) => ({

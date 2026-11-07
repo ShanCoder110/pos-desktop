@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
+import { defaultSettings } from "@/shared/settings";
 import {
   convertBillDiscount,
+  posLineDiscount,
   paymentStatusLabel,
   wholesaleCartToast,
 } from "@/pages/pos/posBilling";
 
 describe("POS billing helpers", () => {
+  it("defaults to excluding wholesale reductions above the minimum", () => {
+    expect(defaultSettings.wholesaleDiscountBelowMinimumOnly).toBe(true);
+    const line = { priceMode: "wholesale", listPrice: 100, minPrice: 90, unitPrice: 95, qty: 2 };
+    expect(posLineDiscount(line, true)).toBe(0);
+    expect(posLineDiscount({ ...line, unitPrice: 90 }, true)).toBe(0);
+    expect(posLineDiscount({ ...line, unitPrice: 85 }, true)).toBe(10);
+    expect(posLineDiscount(line, false)).toBe(10);
+    expect(posLineDiscount({ ...line, priceMode: "retail" }, true)).toBe(10);
+    expect(posLineDiscount({ ...line, unitPrice: 105 }, true)).toBe(0);
+  });
   it("preserves the actual discount when switching Rs to percent and back", () => {
     const percent = convertBillDiscount("pct", 1_000, 125, 0);
     expect(percent.percent).toBe(12.5);

@@ -13,6 +13,7 @@ export const defaultSettings: ShopSettings = {
   printSize: "thermal",
   autoPrint: false,
   clearInvoiceAfterPrint: true,
+  wholesaleDiscountBelowMinimumOnly: true,
   autoSku: false,
   minPriceRule: true,
   stockPick: "oldest",
