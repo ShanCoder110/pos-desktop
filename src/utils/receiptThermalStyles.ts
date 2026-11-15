@@ -135,19 +135,19 @@ export const RECEIPT_THERMAL_CSS = `
 
 .receipt-divider {
   border: none;
-  border-top: 1px dashed #000;
+  border-top: 2pt dashed #000;
   margin: 4px 0;
 }
 
 .receipt-divider-solid {
   border: none;
-  border-top: 1px solid #000;
+  border-top: 2pt solid #000;
   margin: 4px 0;
 }
 
 .receipt-divider-thick {
   border: none;
-  border-top: 2px solid #000;
+  border-top: 2pt solid #000;
   margin: 5px 0;
 }
 
@@ -418,13 +418,13 @@ export const RECEIPT_THERMAL_CSS = `
   font-weight: 700;
   font-size: 1.15em;
   color: #000;
-  border-top: 2px solid #000;
+  border-top: 2pt solid #000;
   padding: 5px 0 2px;
   margin: 6px 0 2px;
 }
 
 .receipt-remaining-row {
-  border-top: 1px solid #000;
+  border-top: 2pt solid #000;
   padding-top: 5px;
   margin-top: 6px;
 }
@@ -575,8 +575,8 @@ export function buildReceiptPrintHtml(opts: {
 .receipt-inner--urdu-rtl .receipt-items-table th { font-weight: 700 !important; }
 .receipt-inner--urdu-rtl .receipt-grand-total-row { font-weight: 900 !important; font-size: var(--receipt-totals-size, 1.28em) !important; }
 .receipt-inner--urdu-rtl .receipt-payment-banner { font-weight: 800 !important; }
-.receipt-divider { border-top: 1px dashed #000 !important; }
-.receipt-divider-solid { border-top: 1px solid #000 !important; }
+.receipt-divider { border-top: 2pt dashed #000 !important; }
+.receipt-divider-solid { border-top: 2pt solid #000 !important; }
 `
       : "",
     "</style></head><body>",

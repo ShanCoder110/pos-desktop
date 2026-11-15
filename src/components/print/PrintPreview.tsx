@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { MessageCircle, Printer, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Field, Modal, SelectInput, TextInput } from "@/components/common";
@@ -111,6 +112,13 @@ export function PrintPreview({
     [receiptLanguage, baseSettings],
   );
   const slipRef = useRef<HTMLDivElement>(null);
+  const previewScrollRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (open && !directPrint && previewScrollRef.current) {
+      previewScrollRef.current.scrollTop = 0;
+      previewScrollRef.current.scrollLeft = 0;
+    }
+  }, [open, directPrint]);
   const handledPrintRequestRef = useRef("");
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -322,20 +330,25 @@ export function PrintPreview({
     return true;
   }, [beginSend, desktop, openPrinterSetup, setBusy, settings.printerSetupDone]);
 
-  function confirmPrinterSetup() {
+  async function confirmPrinterSetup() {
     const name = setupName.trim();
     if (!name) {
       toaster.error("Select a printer first.");
       return;
     }
     if (sendingRef.current) return;
-    setSettings({
-      ...savedSettings,
-      printerName: name,
-      printerPaperWidth: setupPaper,
-      printSize: printSizeFromPaper(setupPaper),
-      printerSetupDone: true,
-    });
+    try {
+      await setSettings({
+        ...savedSettings,
+        printerName: name,
+        printerPaperWidth: setupPaper,
+        printSize: printSizeFromPaper(setupPaper),
+        printerSetupDone: true,
+      });
+    } catch {
+      toaster.error("Printer settings could not be saved to the database.");
+      return;
+    }
     toaster.success("Printer saved.");
     printerOverrideRef.current = { name, paper: setupPaper };
     setSetupOpen(false);
@@ -527,14 +540,24 @@ export function PrintPreview({
     void openWhatsAppReceipt(customer.phone, receiptText);
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-hidden bg-slate-900/50 p-4 sm:p-8">
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Print preview"
+      className="invoice-print-overlay"
+    >
       <style>{`${jameelNooriFontFaceCss()}${RECEIPT_THERMAL_CSS}`}</style>
-      <div className="flex h-full min-h-0 max-w-full items-start gap-4">
-        <div className="h-full min-w-0 overflow-auto" aria-label="Receipt preview">
-          {slip}
+      <div className="invoice-print-layout">
+        <div
+          ref={previewScrollRef}
+          className="invoice-print-scroll"
+          tabIndex={0}
+          aria-label="Receipt preview"
+        >
+          <div className="invoice-print-paper-gutter">{slip}</div>
         </div>
-        <div className="flex w-52 shrink-0 flex-col gap-2 self-start rounded-lg bg-white p-3">
+        <div className="invoice-print-controls flex flex-col gap-2 rounded-lg bg-white p-3">
           <div className="flex items-center justify-between">
             <p className="text-[13px] font-semibold">{isUrdu ? "پرنٹ" : "Print"}</p>
             <Button size="icon" variant="ghost" onClick={onClose} aria-label="Close">
@@ -586,6 +609,7 @@ export function PrintPreview({
         </div>
       </div>
       {printerSetup}
-    </div>
+    </div>,
+    document.body,
   );
 }

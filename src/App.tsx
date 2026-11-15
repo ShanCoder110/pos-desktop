@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useState } from "react";
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { RequireAuth } from "@/components/common/auth/RequireAuth";
 import { AppUpdateAgent } from "@/components/common/AppUpdateAgent";
@@ -103,29 +103,13 @@ const TrashPage = lazy(() =>
 );
 import { productsHref } from "@/shared/constants/products";
 import { routes } from "@/shared/constants/routes";
-import { defaultSettings, SettingsContext } from "@/shared/settings";
-import type { ShopSettings } from "@/shared/types";
+import { DatabaseSettingsProvider } from "@/shared/DatabaseSettingsProvider";
 
 export default function App() {
-  const [settings, setSettingsState] = useState<ShopSettings>(() => {
-    try {
-      const saved = window.localStorage.getItem("dukan:shop-settings");
-      return saved
-        ? { ...defaultSettings, ...(JSON.parse(saved) as Partial<ShopSettings>) }
-        : defaultSettings;
-    } catch {
-      return defaultSettings;
-    }
-  });
-  const setSettings = useCallback((next: ShopSettings) => {
-    setSettingsState(next);
-    window.localStorage.setItem("dukan:shop-settings", JSON.stringify(next));
-  }, []);
-
   return (
-    <SettingsContext.Provider value={{ settings, setSettings }}>
-      <AppUpdateAgent />
-      <SessionProvider>
+    <SessionProvider>
+      <DatabaseSettingsProvider>
+        <AppUpdateAgent />
         <BrowserRouter>
           <Suspense
             fallback={
@@ -233,7 +217,7 @@ export default function App() {
             </Routes>
           </Suspense>
         </BrowserRouter>
-      </SessionProvider>
-    </SettingsContext.Provider>
+      </DatabaseSettingsProvider>
+    </SessionProvider>
   );
 }

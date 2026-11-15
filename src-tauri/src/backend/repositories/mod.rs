@@ -1,4 +1,6 @@
+mod app_settings;
 mod auth;
+pub use app_settings::AppSettingsRepository;
 mod credit;
 mod finance;
 mod ledger;

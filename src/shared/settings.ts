@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { RECEIPT_BRANDING } from "@/shared/constants/receiptBranding";
 import type { PaperWidth, PrintSize, ShopSettings } from "@/shared/types";
+import { toaster } from "@/components/common/Toast";
 
 export const defaultSettings: ShopSettings = {
   shopName: "Madina Electric",
@@ -90,10 +91,10 @@ function pick<K extends keyof ShopSettings>(settings: ShopSettings, keys: readon
 
 export const SettingsContext = createContext<{
   settings: ShopSettings;
-  setSettings: (next: ShopSettings) => void;
+  setSettings: (next: ShopSettings) => Promise<void>;
 }>({
   settings: defaultSettings,
-  setSettings: () => undefined,
+  setSettings: async () => undefined,
 });
 
 export function useSettings() {
@@ -119,16 +120,22 @@ export function useSettingsForm<K extends keyof ShopSettings>(keys: readonly K[]
     setDraft(live);
   }
 
-  function save(extra?: Partial<ShopSettings>) {
+  async function save(extra?: Partial<ShopSettings>) {
     const paper =
       (draft as { printerPaperWidth?: PaperWidth }).printerPaperWidth ??
       (draft as { paperWidth?: PaperWidth }).paperWidth;
-    setSettings({
-      ...settings,
-      ...draft,
-      ...extra,
-      ...(paper ? { printSize: printSizeFromPaper(paper) } : {}),
-    });
+    try {
+      await setSettings({
+        ...settings,
+        ...draft,
+        ...extra,
+        ...(paper ? { printSize: printSizeFromPaper(paper) } : {}),
+      });
+    } catch {
+      toaster.error(
+        "Settings could not be saved to the database. Check the connection and try again.",
+      );
+    }
   }
 
   return { draft, patch, dirty, save, reset };

@@ -391,6 +391,10 @@ async fn serve(database: DatabaseConnection) -> Result<(), AppError> {
             get(handlers::get_receipt_settings).put(handlers::update_receipt_settings),
         )
         .route(
+            "/settings/app",
+            get(handlers::get_app_settings).put(handlers::update_app_settings),
+        )
+        .route(
             SETTINGS_PROFILE_ROUTE,
             get(handlers::get_profile_settings).put(handlers::update_profile_settings),
         )

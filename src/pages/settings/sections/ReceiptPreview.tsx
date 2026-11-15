@@ -76,18 +76,25 @@ export function ReceiptPreview({ settings }: { settings: ShopSettings }) {
       <p className="settings-note">
         Uses the current preview settings. No sale or stock change is saved.
       </p>
-      <div className="receipt-settings-preview-frame" style={{ width: widthPx }}>
-        <InvoiceThermalReceipt
-          settings={settings}
-          customer={SAMPLE_CUSTOMER}
-          lines={SAMPLE_LINES}
-          total={total}
-          discount={discount}
-          paid={0}
-          balanceBefore={2500}
-          balanceAfter={2500 + total}
-          invoiceNumber={`${settings.invoicePrefix || "INV"}-0001`}
-        />
+      <div
+        className="receipt-settings-preview-scroll"
+        tabIndex={0}
+        role="region"
+        aria-label="Invoice live preview — scroll to see full receipt"
+      >
+        <div className="receipt-settings-preview-frame" style={{ width: widthPx }}>
+          <InvoiceThermalReceipt
+            settings={settings}
+            customer={SAMPLE_CUSTOMER}
+            lines={SAMPLE_LINES}
+            total={total}
+            discount={discount}
+            paid={0}
+            balanceBefore={2500}
+            balanceAfter={2500 + total}
+            invoiceNumber={`${settings.invoicePrefix || "INV"}-0001`}
+          />
+        </div>
       </div>
       {testOpen ? (
         <PrintPreview
