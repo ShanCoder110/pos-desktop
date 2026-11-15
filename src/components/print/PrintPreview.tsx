@@ -4,7 +4,13 @@ import { Button } from "@/components/ui/Button";
 import { Field, Modal, SelectInput, TextInput } from "@/components/common";
 import { InvoiceThermalReceipt } from "@/components/print/InvoiceThermalReceipt";
 import { printSizeFromPaper, useSettings } from "@/shared/settings";
-import type { Customer, InvoiceLine, PaperWidth, ReceiptLanguage } from "@/shared/types";
+import type {
+  Customer,
+  InvoiceLine,
+  PaperWidth,
+  ReceiptLanguage,
+  ShopSettings,
+} from "@/shared/types";
 import {
   buildReceiptText,
   printReceiptHtml,
@@ -69,6 +75,7 @@ export function PrintPreview({
   savingDraft = false,
   /** POS Urdu/EN print button — overrides Settings → receipt language for this slip only. */
   languageOverride,
+  settingsOverride,
 }: {
   open: boolean;
   onClose: () => void;
@@ -87,6 +94,7 @@ export function PrintPreview({
   printRequestId?: number;
   directPrint?: boolean;
   languageOverride?: ReceiptLanguage;
+  settingsOverride?: ShopSettings;
   /** True while a slip is being sent, so the cashier print controls stay disabled. */
   onPrintingChange?: (printing: boolean) => void;
   /** Save a POS draft before printing; a draft receipt is not an invoice. */
@@ -96,10 +104,11 @@ export function PrintPreview({
   savingDraft?: boolean;
 }) {
   const { settings: savedSettings, setSettings } = useSettings();
-  const receiptLanguage = resolveReceiptLanguage(languageOverride, savedSettings.receiptLanguage);
+  const baseSettings = settingsOverride ?? savedSettings;
+  const receiptLanguage = resolveReceiptLanguage(languageOverride, baseSettings.receiptLanguage);
   const settings = useMemo(
-    () => ({ ...savedSettings, receiptLanguage }),
-    [receiptLanguage, savedSettings],
+    () => ({ ...baseSettings, receiptLanguage }),
+    [receiptLanguage, baseSettings],
   );
   const slipRef = useRef<HTMLDivElement>(null);
   const handledPrintRequestRef = useRef("");

@@ -52,6 +52,11 @@ export interface ShopSettings {
   receiptLogoScale: number;
   receiptHeaderLayout: ReceiptHeaderLayout;
   receiptTextSize: ReceiptTextSize;
+  receiptSmallPt: number;
+  receiptMediumPt: number;
+  receiptLargePt: number;
+  receiptSideMarginMm: number;
+  receiptBorderPx: number;
   receiptPaymentStatusSize: ReceiptTextSize;
   receiptShopNameSize: ReceiptTextSize;
   receiptShopNameBold: boolean;

@@ -229,6 +229,21 @@ export function InvoiceThermalReceipt({
             fontFamily: isUrdu
               ? JAMEEL_NOORI_FONT_FAMILY
               : receiptFontFamilyCss(settings.receiptFontFamily),
+            fontSize: `${Math.min(
+              20,
+              Math.max(
+                8,
+                Number(
+                  settings.receiptTextSize === "small"
+                    ? (settings.receiptSmallPt ?? 10)
+                    : settings.receiptTextSize === "large"
+                      ? (settings.receiptLargePt ?? 13.5)
+                      : (settings.receiptMediumPt ?? 11.5),
+                ) || 11.5,
+              ),
+            )}pt`,
+            paddingInline: `${Math.min(6, Math.max(0, settings.receiptSideMarginMm ?? 1))}mm`,
+            "--receipt-border-width": `${Math.min(4, Math.max(1, settings.receiptBorderPx ?? 2))}px`,
             "--receipt-logo-scale": settings.receiptLogoScale / 100,
             "--receipt-latin-font": receiptFontFamilyCss(settings.receiptFontFamily),
           } as CSSProperties

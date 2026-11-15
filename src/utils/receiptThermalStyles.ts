@@ -6,11 +6,10 @@ export const RECEIPT_THERMAL_CSS = `
   width: 100%;
   max-width: 100%;
   margin: 0;
-  /* Side inset stays — the printable width is narrower than the roll.
-     Top and bottom stay within 2 mm; the cutter feed is added after the image. */
-  padding: 1mm 10px 1mm 8px;
+  /* Custom side margins are applied by the receipt; cutter feed follows the image. */
+  padding: 1mm;
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 600;
   box-sizing: border-box;
   color: #000;
   background: #fff;
@@ -56,7 +55,7 @@ export const RECEIPT_THERMAL_CSS = `
 
 .receipt-tagline {
   font-size: 1em;
-  font-weight: 400;
+  font-weight: 600;
   letter-spacing: 0.04em;
   color: #000;
   margin: 0;
@@ -125,7 +124,7 @@ export const RECEIPT_THERMAL_CSS = `
 
 .receipt-shop-info {
   font-size: 1em;
-  font-weight: 400;
+  font-weight: 600;
   color: #000;
   margin: 1px 0;
 }
@@ -189,7 +188,7 @@ export const RECEIPT_THERMAL_CSS = `
   display: flex;
   justify-content: space-between;
   font-size: 1em;
-  font-weight: 400;
+  font-weight: 600;
   color: #000;
   margin: 1px 0;
 }
@@ -377,11 +376,11 @@ export const RECEIPT_THERMAL_CSS = `
 
 .receipt-items-table--bordered th,
 .receipt-items-table--bordered td {
-  border: 1.5px solid #000;
+  border: var(--receipt-border-width, 2px) solid #000;
 }
 
 .receipt-items-table--bordered {
-  border: 1.5px solid #000;
+  border: var(--receipt-border-width, 2px) solid #000;
 }
 
 .receipt-items-table--plain th,
@@ -402,7 +401,7 @@ export const RECEIPT_THERMAL_CSS = `
   display: flex;
   justify-content: space-between;
   font-size: 1em;
-  font-weight: 400;
+  font-weight: 600;
   color: #000;
   margin: 1px 0;
 }
@@ -442,7 +441,7 @@ export const RECEIPT_THERMAL_CSS = `
 .receipt-footer {
   text-align: center;
   font-size: 1em;
-  font-weight: 400;
+  font-weight: 600;
   color: #000;
   margin-top: 6px;
   padding-bottom: 2px;
@@ -501,9 +500,9 @@ export const RECEIPT_THERMAL_CSS = `
   color: #000;
 }
 
-.receipt-footer-note--small { font-size: 0.9em; }
-.receipt-footer-note--medium { font-size: 1em; }
-.receipt-footer-note--large { font-size: 1.2em; }
+.receipt-footer-note--small { font-size: 1em; }
+.receipt-footer-note--medium { font-size: 1.1em; }
+.receipt-footer-note--large { font-size: 1.25em; }
 .receipt-footer-note--bold { font-weight: 700; }
 .receipt-footer-note--normal { font-weight: 400; }
 
@@ -513,8 +512,8 @@ export const RECEIPT_THERMAL_CSS = `
 }
 
 .receipt-footer-credit {
-  font-size: 0.7em;
-  font-weight: 600;
+  font-size: 0.95em;
+  font-weight: 700;
   margin: 0 0 1px;
   color: #000;
   letter-spacing: 0.01em;
@@ -548,9 +547,6 @@ export function buildReceiptPrintHtml(opts: {
     /* Keep Urdu sizing identical to preview when the printer stylesheet compresses type. */
     opts.urdu
       ? `
-.receipt-inner--urdu-rtl.receipt-size--small { font-size: 14px !important; }
-.receipt-inner--urdu-rtl.receipt-size--medium { font-size: 14px !important; }
-.receipt-inner--urdu-rtl.receipt-size--large { font-size: 18px !important; }
 .receipt-inner--urdu-rtl .receipt-meta-row > span:first-child,
 .receipt-inner--urdu-rtl .receipt-items-table th { font-weight: 700 !important; }
 .receipt-inner--urdu-rtl .receipt-grand-total-row { font-weight: 800 !important; font-size: 1.28em !important; }

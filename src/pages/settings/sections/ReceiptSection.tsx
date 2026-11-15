@@ -29,6 +29,11 @@ const KEYS = [
   "receiptLogoScale",
   "receiptHeaderLayout",
   "receiptTextSize",
+  "receiptSmallPt",
+  "receiptMediumPt",
+  "receiptLargePt",
+  "receiptSideMarginMm",
+  "receiptBorderPx",
   "receiptShopNameSize",
   "receiptShopNameBold",
   "receiptTaglineAlign",
@@ -327,6 +332,45 @@ export function ReceiptSection() {
                 onChange={(receiptTextSize) => patch({ receiptTextSize })}
               />
             </ControlRow>
+            {(
+              [
+                ["receiptSmallPt", "Small font", 8, 20, 0.5, "pt"],
+                ["receiptMediumPt", "Medium font", 8, 20, 0.5, "pt"],
+                ["receiptLargePt", "Large font", 8, 20, 0.5, "pt"],
+                ["receiptSideMarginMm", "Side margins", 0, 6, 0.5, "mm"],
+                ["receiptBorderPx", "Table border thickness", 1, 4, 0.5, "px"],
+              ] as const
+            ).map(([key, label, min, max, step, unit]) => (
+              <Field key={key} label={`${label} (${unit})`}>
+                <div className="flex items-center gap-3">
+                  <input
+                    className="receipt-range"
+                    type="range"
+                    aria-label={label}
+                    min={min}
+                    max={max}
+                    step={step}
+                    value={draft[key]}
+                    onChange={(event) => patch({ [key]: Number(event.target.value) })}
+                  />
+                  <TextInput
+                    type="number"
+                    aria-label={`${label} value`}
+                    min={min}
+                    max={max}
+                    step={step}
+                    className="w-24"
+                    value={draft[key]}
+                    onChange={(event) => {
+                      if (event.target.value === "") return;
+                      const value = Number(event.target.value);
+                      if (Number.isFinite(value))
+                        patch({ [key]: Math.min(max, Math.max(min, value)) });
+                    }}
+                  />
+                </div>
+              </Field>
+            ))}
             <ControlRow label="Items table style">
               <div className="receipt-option-group" role="group" aria-label="Items table style">
                 <button

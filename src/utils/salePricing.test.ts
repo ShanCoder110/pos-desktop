@@ -157,8 +157,9 @@ describe("posBalanceToLedger", () => {
 });
 
 describe("priceModeForCustomerSwitch", () => {
-  it("resets to retail when switching to walk-in / guest", () => {
-    expect(priceModeForCustomerSwitch(true, "wholesale")).toBe("retail");
+  it("keeps wholesale and minimum when switching to walk-in / guest", () => {
+    expect(priceModeForCustomerSwitch(true, "wholesale")).toBe("wholesale");
+    expect(priceModeForCustomerSwitch(true, "minimum")).toBe("minimum");
     expect(priceModeForCustomerSwitch(true, "retail")).toBe("retail");
   });
 

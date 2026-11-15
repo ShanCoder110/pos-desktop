@@ -61,6 +61,7 @@ const SAMPLE_CUSTOMER: Customer = {
 };
 
 export function ReceiptPreview({ settings }: { settings: ShopSettings }) {
+  const [testOpen, setTestOpen] = useState(false);
   const paper = settings.printerPaperWidth ?? settings.paperWidth;
   const thermal = settings.printSize === "thermal";
   const widthPx = thermal ? thermalWidthPx(paper) : 320;
@@ -71,6 +72,10 @@ export function ReceiptPreview({ settings }: { settings: ShopSettings }) {
     <div className="receipt-settings-preview">
       <style>{`${jameelNooriFontFaceCss()}${RECEIPT_THERMAL_CSS}`}</style>
       <p className="receipt-settings-preview-label">Live preview</p>
+      <Button onClick={() => setTestOpen(true)}>Test print invoice</Button>
+      <p className="settings-note">
+        Uses the current preview settings. No sale or stock change is saved.
+      </p>
       <div className="receipt-settings-preview-frame" style={{ width: widthPx }}>
         <InvoiceThermalReceipt
           settings={settings}
@@ -84,6 +89,24 @@ export function ReceiptPreview({ settings }: { settings: ShopSettings }) {
           invoiceNumber={`${settings.invoicePrefix || "INV"}-0001`}
         />
       </div>
+      {testOpen ? (
+        <PrintPreview
+          open
+          onClose={() => setTestOpen(false)}
+          settingsOverride={settings}
+          customer={SAMPLE_CUSTOMER}
+          lines={SAMPLE_LINES}
+          total={total}
+          discount={discount}
+          paid={0}
+          balanceBefore={2500}
+          balanceAfter={2500 + total}
+          invoiceNumber="TEST-PRINT"
+        />
+      ) : null}
     </div>
   );
 }
+import { useState } from "react";
+import { Button } from "@/components/common";
+import { PrintPreview } from "@/components/print/PrintPreview";

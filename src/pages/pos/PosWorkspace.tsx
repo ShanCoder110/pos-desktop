@@ -1623,9 +1623,7 @@ export function PosWorkspace() {
   }
 
   function setLineMode(id: string, mode: PriceMode) {
-    const walkIn = customers.find((c) => c.id === customerId)?.isWalking;
-    const nextMode = walkIn && mode === "wholesale" ? "retail" : mode;
-    if (walkIn && mode === "wholesale") showToast("Walk-in uses retail");
+    const nextMode = mode;
     setCart((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
@@ -1698,7 +1696,7 @@ export function PosWorkspace() {
     applyPriceModeToCart(next);
   }
 
-  /** Customer picker: walk-in forces retail on all lines + toggle; named keeps mode. */
+  /** Customer selection preserves the cashier's pricing tier. */
   function selectPosCustomer(c: Customer) {
     setCustomerId(c.id);
     setReturnChange(c.isWalking);
@@ -1710,7 +1708,7 @@ export function PosWorkspace() {
       setGuestPhone("");
     }
     const nextMode = priceModeForCustomerSwitch(c.isWalking, priceMode);
-    if (nextMode !== priceMode || (c.isWalking && cart.some((i) => i.priceMode !== "retail"))) {
+    if (nextMode !== priceMode) {
       applyPriceModeToCart(nextMode, { toast: false });
     }
     focusSearch(false);

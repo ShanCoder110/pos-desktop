@@ -9,6 +9,32 @@ import { posLineDiscount } from "@/pages/pos/posBilling";
 
 describe("saved invoice receipt", () => {
   it.each(["EN", "UR"] as const)(
+    "uses custom point sizes and print geometry for %s",
+    (language) => {
+      const html = renderToStaticMarkup(
+        createElement(InvoiceThermalReceipt, {
+          settings: {
+            ...defaultSettings,
+            receiptLanguage: language,
+            receiptTextSize: "medium",
+            receiptMediumPt: 12.5,
+            receiptSideMarginMm: 0.5,
+            receiptBorderPx: 3,
+          },
+          customer: { id: "test", name: "Test", phone: "", balance: 0, isWalking: true },
+          lines: [],
+          total: 0,
+          paid: 0,
+          balanceBefore: 0,
+          balanceAfter: 0,
+        }),
+      );
+      expect(html).toContain("font-size:12.5pt");
+      expect(html).toContain("padding-inline:0.5mm");
+      expect(html).toContain("--receipt-border-width:3px");
+    },
+  );
+  it.each(["EN", "UR"] as const)(
     "does not print an above-minimum wholesale reduction as discount in %s preview or saved receipt",
     (language) => {
       const discount = posLineDiscount(
