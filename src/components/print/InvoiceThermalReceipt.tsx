@@ -243,7 +243,11 @@ export function InvoiceThermalReceipt({
               ),
             )}pt`,
             paddingInline: `${Math.min(6, Math.max(0, settings.receiptSideMarginMm ?? 1))}mm`,
+            paddingTop: `${Math.min(25, Math.max(0, settings.receiptTopMarginMm ?? 0))}mm`,
+            paddingBottom: `${Math.min(25, Math.max(0, settings.receiptBottomMarginMm ?? 3))}mm`,
             "--receipt-border-width": `${Math.min(4, Math.max(1, settings.receiptBorderPx ?? 2))}px`,
+            "--receipt-header-size": `${Math.min(24, Math.max(8, settings.receiptHeaderTextPt ?? 11.5))}pt`,
+            "--receipt-totals-size": `${Math.min(24, Math.max(8, settings.receiptTotalsPt ?? 13.5))}pt`,
             "--receipt-logo-scale": settings.receiptLogoScale / 100,
             "--receipt-latin-font": receiptFontFamilyCss(settings.receiptFontFamily),
           } as CSSProperties

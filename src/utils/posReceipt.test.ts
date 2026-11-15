@@ -20,6 +20,8 @@ describe("saved invoice receipt", () => {
             receiptMediumPt: 12.5,
             receiptSideMarginMm: 0.5,
             receiptBorderPx: 3,
+            receiptHeaderTextPt: 14,
+            receiptTotalsPt: 16,
           },
           customer: { id: "test", name: "Test", phone: "", balance: 0, isWalking: true },
           lines: [],
@@ -32,6 +34,8 @@ describe("saved invoice receipt", () => {
       expect(html).toContain("font-size:12.5pt");
       expect(html).toContain("padding-inline:0.5mm");
       expect(html).toContain("--receipt-border-width:3px");
+      expect(html).toContain("--receipt-header-size:14pt");
+      expect(html).toContain("--receipt-totals-size:16pt");
     },
   );
   it.each(["EN", "UR"] as const)(

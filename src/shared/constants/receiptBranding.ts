@@ -5,7 +5,7 @@ export const RECEIPT_BRANDING = {
   promoUrdu:
     "ہمارے ہاں سولر پینل، ایل ای ڈیز، ایل سی ڈیز، ڈش انٹینا، موبائل ایکسیسریز، اسپیکرز، سولر انورٹرز اور دیگر الیکٹرانک سامان ہول سیل ریٹ پر دستیاب ہے۔",
   notValidForCourt: "Not Valid For Court",
-  softwareCredit: "Software made by Shan Abbas : 0300-1753807",
+  softwareCredit: "StackClix ph: 03361753807",
   duplicateBillLabel: "DUPLICATE BILL",
 } as const;
 

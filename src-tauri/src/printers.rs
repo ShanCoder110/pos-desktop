@@ -2,7 +2,7 @@
 
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageReader};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Command;
@@ -156,6 +156,29 @@ fn finish_receipt(out: &mut Vec<u8>) {
     out.extend_from_slice(RECEIPT_END);
 }
 
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptSpacing {
+    pub top_mm: f64,
+    pub bottom_mm: f64,
+}
+
+impl Default for ReceiptSpacing {
+    fn default() -> Self {
+        Self {
+            top_mm: 0.0,
+            bottom_mm: 3.0,
+        }
+    }
+}
+
+fn spacing_dots(mm: f64) -> Result<u8, String> {
+    if !mm.is_finite() || !(0.0..=25.0).contains(&mm) {
+        return Err("Receipt spacing must be between 0 and 25 mm".into());
+    }
+    Ok((mm * 203.0 / 25.4).round() as u8)
+}
+
 fn pixel_is_ink(pixel: &image::Rgba<u8>) -> bool {
     let alpha = pixel[3] as u16;
     let lum = (pixel[0] as u16 * 3 + pixel[1] as u16 * 6 + pixel[2] as u16) / 10;
@@ -190,6 +213,16 @@ fn trim_vertical_whitespace(image: DynamicImage) -> DynamicImage {
 
 /// ESC @ + GS v 0 raster (chunked) + feed to cutter and full cut.
 fn png_to_escpos(png: &[u8], width_dots: u32) -> Result<Vec<u8>, String> {
+    png_to_escpos_with_spacing(png, width_dots, ReceiptSpacing::default())
+}
+
+fn png_to_escpos_with_spacing(
+    png: &[u8],
+    width_dots: u32,
+    spacing: ReceiptSpacing,
+) -> Result<Vec<u8>, String> {
+    let top = spacing_dots(spacing.top_mm)?;
+    let bottom = spacing_dots(spacing.bottom_mm)?;
     let reader = ImageReader::new(Cursor::new(png))
         .with_guessed_format()
         .map_err(|error| format!("Could not read receipt image: {error}"))?;
@@ -222,6 +255,10 @@ fn png_to_escpos(png: &[u8], width_dots: u32) -> Result<Vec<u8>, String> {
     }
 
     let mut out = vec![0x1B, 0x40];
+    // Trim captured whitespace first, then apply requested physical spacing once.
+    if top > 0 {
+        out.extend_from_slice(&[0x1D, 0x50, 203, 203, 0x1B, 0x4A, top]);
+    }
     let chunk_rows = 256u32;
     let mut y = 0u32;
     while y < target_h {
@@ -237,7 +274,7 @@ fn png_to_escpos(png: &[u8], width_dots: u32) -> Result<Vec<u8>, String> {
         out.extend_from_slice(&raster[start..end]);
         y += rows;
     }
-    finish_receipt(&mut out);
+    out.extend_from_slice(&[0x0A, 0x1D, 0x50, 203, 203, 0x1D, 0x56, 65, bottom]);
     Ok(out)
 }
 
@@ -266,6 +303,15 @@ fn receipt_batch_payload(
     width_dots: u32,
     copies: u8,
 ) -> Result<Vec<u8>, String> {
+    receipt_batch_payload_with_spacing(png_pages, width_dots, copies, ReceiptSpacing::default())
+}
+
+fn receipt_batch_payload_with_spacing(
+    png_pages: &[Vec<u8>],
+    width_dots: u32,
+    copies: u8,
+    spacing: ReceiptSpacing,
+) -> Result<Vec<u8>, String> {
     if png_pages.is_empty() || png_pages.len() > 32 {
         return Err("A print job needs between 1 and 32 pages".into());
     }
@@ -274,7 +320,7 @@ fn receipt_batch_payload(
     }
     let pages = png_pages
         .iter()
-        .map(|png| png_to_escpos(png, width_dots))
+        .map(|png| png_to_escpos_with_spacing(png, width_dots, spacing))
         .collect::<Result<Vec<_>, _>>()?;
     let capacity = pages.iter().map(Vec::len).sum::<usize>() * copies as usize;
     let mut payload = Vec::with_capacity(capacity);
@@ -368,11 +414,17 @@ pub async fn print_thermal_receipt(
     printer_name: String,
     png_base64: String,
     paper_width: String,
+    spacing: Option<ReceiptSpacing>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let name = require_printer_name(&printer_name)?;
         let bytes = base64_decode(png_base64.trim())?;
-        let payload = png_to_escpos(&bytes, dots_for_paper(&paper_width))?;
+        let payload = match spacing {
+            Some(spacing) => {
+                png_to_escpos_with_spacing(&bytes, dots_for_paper(&paper_width), spacing)?
+            }
+            None => png_to_escpos(&bytes, dots_for_paper(&paper_width))?,
+        };
         send_raw(name, &payload)
     })
     .await
@@ -387,6 +439,7 @@ pub async fn print_thermal_receipt_batch(
     png_base64_pages: Vec<String>,
     paper_width: String,
     copies: u8,
+    spacing: Option<ReceiptSpacing>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let name = require_printer_name(&printer_name)?;
@@ -394,7 +447,15 @@ pub async fn print_thermal_receipt_batch(
             .iter()
             .map(|page| base64_decode(page.trim()))
             .collect::<Result<Vec<_>, _>>()?;
-        let payload = receipt_batch_payload(&png_pages, dots_for_paper(&paper_width), copies)?;
+        let payload = match spacing {
+            Some(spacing) => receipt_batch_payload_with_spacing(
+                &png_pages,
+                dots_for_paper(&paper_width),
+                copies,
+                spacing,
+            )?,
+            None => receipt_batch_payload(&png_pages, dots_for_paper(&paper_width), copies)?,
+        };
         send_raw(name, &payload)
     })
     .await
@@ -464,6 +525,37 @@ mod tests {
     use super::{dots_for_paper, png_to_escpos, receipt_batch_payload, text_escpos, RECEIPT_END};
     use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
     use std::io::Cursor;
+
+    #[test]
+    fn adjustable_spacing_is_applied_after_trimming_and_before_cut() {
+        let image = RgbaImage::from_pixel(8, 8, Rgba([0, 0, 0, 255]));
+        let mut png = Vec::new();
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+            .unwrap();
+        let payload = super::png_to_escpos_with_spacing(
+            &png,
+            8,
+            super::ReceiptSpacing {
+                top_mm: 2.0,
+                bottom_mm: 0.0,
+            },
+        )
+        .unwrap();
+        assert!(payload.starts_with(&[0x1B, 0x40, 0x1D, 0x50, 203, 203, 0x1B, 0x4A, 16]));
+        assert!(payload.ends_with(&[0x1D, 0x56, 65, 0]));
+        for invalid in [f64::NAN, -1.0, 26.0] {
+            assert!(super::png_to_escpos_with_spacing(
+                &png,
+                8,
+                super::ReceiptSpacing {
+                    top_mm: invalid,
+                    bottom_mm: 3.0,
+                }
+            )
+            .is_err());
+        }
+    }
 
     #[test]
     fn raster_includes_gs_v_and_cut() {

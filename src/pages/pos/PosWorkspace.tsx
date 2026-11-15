@@ -46,6 +46,7 @@ import { PosShortcutsDrawer } from "@/pages/pos/PosShortcutsDrawer";
 import {
   convertBillDiscount,
   posLineDiscount,
+  priceForLineDiscount,
   paymentStatusLabel,
   wholesaleCartToast,
 } from "@/pages/pos/posBilling";
@@ -2856,9 +2857,12 @@ export function PosWorkspace() {
                             onClick={(e) => e.stopPropagation()}
                             onChange={(e) => {
                               const disc = Math.max(0, num(e.target.value));
-                              const per = item.qty ? disc / item.qty : 0;
                               patchCart(item.id, {
-                                unitPrice: +Math.max(0, item.listPrice - per).toFixed(2),
+                                unitPrice: priceForLineDiscount(
+                                  item,
+                                  disc,
+                                  settings.wholesaleDiscountBelowMinimumOnly ?? true,
+                                ),
                               });
                             }}
                           />

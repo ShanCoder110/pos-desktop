@@ -223,7 +223,10 @@ export function PrintPreview({
 
       const copies = Math.max(1, Math.min(9, Number(settings.copies) || 1));
       const pngPages = await captureReceiptPages(node, printPaper);
-      const result = await printThermalPngBatch(printerName, pngPages, printPaper, copies);
+      const result = await printThermalPngBatch(printerName, pngPages, printPaper, copies, {
+        topMm: settings.receiptTopMarginMm ?? 0,
+        bottomMm: settings.receiptBottomMarginMm ?? 3,
+      });
       const fail = thermalFailure(result);
       if (fail) {
         toaster.error(fail);
@@ -242,7 +245,16 @@ export function PrintPreview({
       if (directPrint) onCloseRef.current();
       return true;
     }
-  }, [directPrint, isUrdu, paper, printDialog, settings.copies, settings.printerName]);
+  }, [
+    directPrint,
+    isUrdu,
+    paper,
+    printDialog,
+    settings.copies,
+    settings.printerName,
+    settings.receiptTopMarginMm,
+    settings.receiptBottomMarginMm,
+  ]);
 
   const setBusy = useCallback((busy: boolean) => {
     printingLockRef.current = busy;

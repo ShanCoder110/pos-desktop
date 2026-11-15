@@ -3,11 +3,21 @@ import { defaultSettings } from "@/shared/settings";
 import {
   convertBillDiscount,
   posLineDiscount,
+  priceForLineDiscount,
   paymentStatusLabel,
   wholesaleCartToast,
 } from "@/pages/pos/posBilling";
 
 describe("POS billing helpers", () => {
+  it("uses the minimum floor consistently when entering a wholesale discount", () => {
+    const line = { priceMode: "wholesale", listPrice: 100, minPrice: 90, unitPrice: 95, qty: 2 };
+    expect(priceForLineDiscount(line, 0, true)).toBe(95);
+    const price = priceForLineDiscount(line, 10, true);
+    expect(price).toBe(85);
+    expect(posLineDiscount({ ...line, unitPrice: price }, true)).toBe(10);
+    expect(priceForLineDiscount({ ...line, unitPrice: 85 }, 0, true)).toBe(90);
+    expect(priceForLineDiscount(line, 10, false)).toBe(95);
+  });
   it("defaults to excluding wholesale reductions above the minimum", () => {
     expect(defaultSettings.wholesaleDiscountBelowMinimumOnly).toBe(true);
     const line = { priceMode: "wholesale", listPrice: 100, minPrice: 90, unitPrice: 95, qty: 2 };

@@ -10,6 +10,19 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke, isTauri }));
 import { printThermalPngBatch } from "./printers";
 
 describe("thermal receipt printing", () => {
+  it("passes adjustable paper spacing to Rust", async () => {
+    invoke.mockResolvedValue(undefined);
+    await printThermalPngBatch("Receipt Printer", [new Uint8Array([1])], "MM_80", 1, {
+      topMm: 2,
+      bottomMm: 0,
+    });
+    expect(invoke).toHaveBeenCalledWith(
+      "print_thermal_receipt_batch",
+      expect.objectContaining({
+        spacing: { topMm: 2, bottomMm: 0 },
+      }),
+    );
+  });
   beforeEach(() => {
     invoke.mockReset();
     isTauri.mockReturnValue(true);

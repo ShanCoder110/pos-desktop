@@ -7,7 +7,7 @@ export const RECEIPT_THERMAL_CSS = `
   max-width: 100%;
   margin: 0;
   /* Custom side margins are applied by the receipt; cutter feed follows the image. */
-  padding: 1mm;
+  padding: 0 1mm 0.5mm;
   font-size: 13px;
   font-weight: 600;
   box-sizing: border-box;
@@ -28,12 +28,12 @@ export const RECEIPT_THERMAL_CSS = `
 
 .receipt-header {
   text-align: center;
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 
 .receipt-logo {
   display: block;
-  margin: 0 auto 6px;
+  margin: 0 auto 2px;
   max-height: calc(22mm * var(--receipt-logo-scale, 1));
   max-width: 90%;
   object-fit: contain;
@@ -166,7 +166,7 @@ export const RECEIPT_THERMAL_CSS = `
 .receipt-payment-banner {
   margin: 2px 0 6px;
   padding: 2px 8px;
-  border: 1px solid #000;
+  border: max(2px, var(--receipt-border-width, 2px)) solid #000;
   text-align: center;
   font-weight: 800;
   line-height: 1.25;
@@ -174,7 +174,7 @@ export const RECEIPT_THERMAL_CSS = `
 
 .receipt-payment-banner--small { font-size: 0.9em; }
 .receipt-payment-banner--medium { font-size: 1.15em; padding-block: 3px; }
-.receipt-payment-banner--large { font-size: 1.45em; padding-block: 4px; border-width: 2px; }
+.receipt-payment-banner--large { font-size: 1.45em; padding-block: 4px; }
 
 .receipt-payment-banner.is-partial {
   border-style: dashed;
@@ -429,6 +429,30 @@ export const RECEIPT_THERMAL_CSS = `
   margin-top: 6px;
 }
 
+/* Thermal faces often map 700–900 to the same bold font. A small stroke
+   keeps the final amounts visibly heavier in browser and raster printing. */
+.receipt-inner .receipt-grand-total-row,
+.receipt-inner .receipt-grand-total-row > span,
+.receipt-inner .receipt-total-bill,
+.receipt-inner .receipt-total-bill > span,
+.receipt-inner .receipt-remaining-row,
+.receipt-inner .receipt-remaining-row > span {
+  font-weight: 900;
+  -webkit-text-stroke: 0.2px #000;
+}
+
+.receipt-inner .receipt-header,
+.receipt-inner .receipt-meta,
+.receipt-inner .receipt-payment-banner {
+  font-size: var(--receipt-header-size, 1em);
+}
+
+.receipt-inner .receipt-grand-total-row,
+.receipt-inner .receipt-total-bill,
+.receipt-inner .receipt-remaining-row {
+  font-size: var(--receipt-totals-size, 1.15em);
+}
+
 .receipt-footer-divider {
   margin-top: 8px;
 }
@@ -549,7 +573,7 @@ export function buildReceiptPrintHtml(opts: {
       ? `
 .receipt-inner--urdu-rtl .receipt-meta-row > span:first-child,
 .receipt-inner--urdu-rtl .receipt-items-table th { font-weight: 700 !important; }
-.receipt-inner--urdu-rtl .receipt-grand-total-row { font-weight: 800 !important; font-size: 1.28em !important; }
+.receipt-inner--urdu-rtl .receipt-grand-total-row { font-weight: 900 !important; font-size: var(--receipt-totals-size, 1.28em) !important; }
 .receipt-inner--urdu-rtl .receipt-payment-banner { font-weight: 800 !important; }
 .receipt-divider { border-top: 1px dashed #000 !important; }
 .receipt-divider-solid { border-top: 1px solid #000 !important; }

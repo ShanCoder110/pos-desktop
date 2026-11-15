@@ -32,7 +32,11 @@ const KEYS = [
   "receiptSmallPt",
   "receiptMediumPt",
   "receiptLargePt",
+  "receiptHeaderTextPt",
+  "receiptTotalsPt",
   "receiptSideMarginMm",
+  "receiptTopMarginMm",
+  "receiptBottomMarginMm",
   "receiptBorderPx",
   "receiptShopNameSize",
   "receiptShopNameBold",
@@ -337,7 +341,11 @@ export function ReceiptSection() {
                 ["receiptSmallPt", "Small font", 8, 20, 0.5, "pt"],
                 ["receiptMediumPt", "Medium font", 8, 20, 0.5, "pt"],
                 ["receiptLargePt", "Large font", 8, 20, 0.5, "pt"],
+                ["receiptHeaderTextPt", "Text above items", 8, 24, 0.5, "pt"],
+                ["receiptTotalsPt", "Main totals headings and amounts", 8, 24, 0.5, "pt"],
                 ["receiptSideMarginMm", "Side margins", 0, 6, 0.5, "mm"],
+                ["receiptTopMarginMm", "Top spacing", 0, 25, 0.5, "mm"],
+                ["receiptBottomMarginMm", "Bottom spacing before cut", 0, 25, 0.5, "mm"],
                 ["receiptBorderPx", "Table border thickness", 1, 4, 0.5, "px"],
               ] as const
             ).map(([key, label, min, max, step, unit]) => (
@@ -371,6 +379,17 @@ export function ReceiptSection() {
                 </div>
               </Field>
             ))}
+            <p className="settings-note">
+              Text above items adjusts the shop header, payment status, and invoice/customer
+              details. Main totals adjusts Grand Total, Total Bill, and Remaining Amount together.
+              Logo size and item-table text have their own controls.
+            </p>
+            <p className="settings-note">
+              Top spacing adds paper before the logo. Bottom spacing controls extra feed after the
+              footer before cutting in desktop thermal printing. Set either to 0 for the smallest
+              gap. Your printer’s physical printhead-to-cutter gap still applies. Use Test print
+              invoice to adjust for your printer.
+            </p>
             <ControlRow label="Items table style">
               <div className="receipt-option-group" role="group" aria-label="Items table style">
                 <button

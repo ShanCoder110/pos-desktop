@@ -11,6 +11,7 @@ import { shortError } from "@/utils/format";
 const KEYS = [
   "autoSku",
   "minPriceRule",
+  "wholesaleDiscountBelowMinimumOnly",
   "stockPick",
   "creditPriceMode",
   "fifoEnabled",
@@ -98,6 +99,16 @@ export function ProductsSection() {
         onChange={(v) => patch({ minPriceRule: v })}
         label="Block selling below minimum"
       />
+      <Toggle
+        checked={draft.wholesaleDiscountBelowMinimumOnly}
+        onChange={(value) => patch({ wholesaleDiscountBelowMinimumOnly: value })}
+        label="Count wholesale discounts only below minimum price"
+      />
+      <p className="settings-note">
+        With wholesale Rs 100 and minimum Rs 90, selling at Rs 95 or Rs 90 shows no discount in POS
+        or on the invoice. Only the reduction below minimum counts. This is the same setting shown
+        under POS and is on by default.
+      </p>
       <Field
         label="Which lot to sell"
         hint="Ask is only used when a product has more than one supplier lot"

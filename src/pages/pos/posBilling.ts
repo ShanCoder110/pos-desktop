@@ -1,13 +1,36 @@
 export type PosDiscountMode = "rs" | "pct";
 
-export function posLineDiscount(
-  line: { priceMode: string; listPrice: number; minPrice: number; unitPrice: number; qty: number },
+type DiscountLine = {
+  priceMode: string;
+  listPrice: number;
+  minPrice: number;
+  unitPrice: number;
+  qty: number;
+};
+
+function discountReference(line: DiscountLine, wholesaleBelowMinimumOnly: boolean) {
+  return wholesaleBelowMinimumOnly && line.priceMode === "wholesale"
+    ? Math.min(line.listPrice, line.minPrice)
+    : line.listPrice;
+}
+
+export function priceForLineDiscount(
+  line: DiscountLine,
+  discount: number,
   wholesaleBelowMinimumOnly: boolean,
 ) {
-  const reference =
-    wholesaleBelowMinimumOnly && line.priceMode === "wholesale"
-      ? Math.min(line.listPrice, line.minPrice)
-      : line.listPrice;
+  // Clearing an already-empty discount must preserve an agreed price above minimum.
+  if (discount <= 0 && posLineDiscount(line, wholesaleBelowMinimumOnly) === 0)
+    return line.unitPrice;
+  return +Math.max(
+    0,
+    discountReference(line, wholesaleBelowMinimumOnly) -
+      Math.max(0, discount) / Math.max(0.001, line.qty),
+  ).toFixed(2);
+}
+
+export function posLineDiscount(line: DiscountLine, wholesaleBelowMinimumOnly: boolean) {
+  const reference = discountReference(line, wholesaleBelowMinimumOnly);
   return +(Math.max(0, reference - line.unitPrice) * line.qty).toFixed(2);
 }
 

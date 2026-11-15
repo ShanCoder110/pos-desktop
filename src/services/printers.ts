@@ -58,10 +58,13 @@ export async function cutThermalPaper(printerName: string | undefined): Promise<
 }
 
 /** One slip page (PNG) as a silent ESC/POS raster + cut. Desktop app only. */
+export type ReceiptSpacing = { topMm: number; bottomMm: number };
+
 export async function printThermalPng(
   printerName: string | undefined,
   png: Uint8Array,
   paperWidth: string,
+  spacing?: ReceiptSpacing,
 ): Promise<ThermalPrintResult> {
   const name = printerName?.trim();
   if (!isTauri()) return { ok: false, reason: "not-desktop" };
@@ -71,6 +74,7 @@ export async function printThermalPng(
       printerName: name,
       pngBase64: bytesToBase64(png),
       paperWidth,
+      ...(spacing ? { spacing } : {}),
     });
     return { ok: true };
   } catch (error) {
@@ -84,6 +88,7 @@ export async function printThermalPngBatch(
   pngPages: Uint8Array[],
   paperWidth: string,
   copies: number,
+  spacing?: ReceiptSpacing,
 ): Promise<ThermalPrintResult> {
   const name = printerName?.trim();
   if (!isTauri()) return { ok: false, reason: "not-desktop" };
@@ -95,6 +100,7 @@ export async function printThermalPngBatch(
       pngBase64Pages: pngPages.map(bytesToBase64),
       paperWidth,
       copies,
+      ...(spacing ? { spacing } : {}),
     });
     return { ok: true };
   } catch (error) {
@@ -107,7 +113,7 @@ export async function printThermalPngBatch(
     if (missingBatchCommand) {
       for (let copy = 0; copy < copies; copy += 1) {
         for (const page of pngPages) {
-          const result = await printThermalPng(name, page, paperWidth);
+          const result = await printThermalPng(name, page, paperWidth, spacing);
           if (!result.ok) return result;
         }
       }
